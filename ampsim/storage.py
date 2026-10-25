@@ -7,6 +7,8 @@ from pathlib import Path
 APP_DIR = Path(os.environ.get("APPDATA", Path.home())) / "AmpSim"
 STATE_FILE = APP_DIR / "state.json"
 PRESET_DIR = APP_DIR / "presets"
+# cenas e presets para compartilhar: numa pasta fácil de achar (Documentos\AmpSim)
+SHARE_DIR = Path.home() / "Documents" / "AmpSim"
 
 
 def _read(path):

@@ -21,6 +21,10 @@ def _raise_priority():
 
         HIGH_PRIORITY_CLASS = 0x80
         k32 = ctypes.windll.kernel32
+        # HANDLE é ponteiro: sem restype o ctypes trunca o pseudo-handle (-1) e tudo falha calado
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        k32.SetPriorityClass.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+        k32.SetProcessInformation.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong)
         proc = k32.GetCurrentProcess()
         k32.SetPriorityClass(proc, HIGH_PRIORITY_CLASS)
 

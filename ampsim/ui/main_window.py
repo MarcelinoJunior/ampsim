@@ -1,7 +1,7 @@
 """Janela principal."""
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
+    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
     QSizePolicy, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -10,8 +10,10 @@ from ..audio import devices as dev
 from ..audio.engine import TRACKS
 from ..dsp.params import Param
 from ..midi import winmm
+from ..sharing import sound_state
 from ..presets import DEFAULT_PRESET, FACTORY
 from .audio_dialog import AudioDialog
+from .file_menu import FileMenu
 from .keyboard import PcKeyboard
 from .panels import TrackPage
 from .widgets import Knob, Meter, PianoWidget
@@ -84,7 +86,14 @@ class MainWindow(QMainWindow):
         title = QLabel("AmpSim")
         title.setObjectName("apptitle")
         lay.addWidget(title)
-        lay.addSpacing(12)
+        lay.addSpacing(8)
+        file_btn = QPushButton("☰ Arquivo")
+        file_btn.setToolTip("Cenas e presets: salvar, abrir, importar e compartilhar")
+        file_btn.setFocusPolicy(Qt.NoFocus)
+        self.file_menu = FileMenu(self)
+        file_btn.setMenu(self.file_menu)
+        lay.addWidget(file_btn)
+        lay.addSpacing(8)
         self.power = QPushButton("▶ Ligar áudio")
         self.power.setCheckable(True)
         self.power.setFocusPolicy(Qt.NoFocus)
@@ -170,8 +179,9 @@ class MainWindow(QMainWindow):
         self.pages["pads"].keys_view.quick.show_key(note, on)
 
     def _tab_changed(self, index):
-        # na aba Pad/Piano o instrumento desenhado já tem teclado: esconde o piano de baixo
-        self.piano.setVisible(self.tabs.widget(index) is not self.pages["pads"])
+        # guitarra/baixo não precisam de teclado e a aba Pad/Piano já desenha o instrumento:
+        # o piano de baixo fica escondido e a tela sobra para os amps, o EQ e o RTA
+        self.piano.setVisible(False)
         lay = self.kbd_box.layout()
         lay.invalidate()
         lay.activate()
@@ -332,6 +342,38 @@ class MainWindow(QMainWindow):
         self._refresh_all()
         self._update_status()
         self._autostart = st.get("running", False)
+
+    # ------------------------------------------------------------------ cenas (menu Arquivo)
+    def scene_state(self):
+        """Tudo que é som: trilhas, synth, timbres/pads e master (sem placa de áudio nem mapeamento)."""
+        e = self.engine
+        return {"tracks": {name: e.tracks[name].get_state() for name in TRACKS},
+                "synth": e.synth.get_state(),
+                "instruments": sound_state(e.instruments.get_state()),
+                "master_db": self.master_knob.value()}
+
+    def apply_scene(self, st):
+        """`st` já limpo por sharing.sanitize_scene."""
+        e = self.engine
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            for name, ts in st.get("tracks", {}).items():
+                e.tracks[name].load_state(ts)
+            if st.get("synth"):
+                e.synth.load_state(st["synth"])
+            e.instruments.load_state(st.get("instruments"))
+        finally:
+            QApplication.restoreOverrideCursor()
+        if "master_db" in st:
+            self.master_knob.setValue(st["master_db"])
+            self._set_master(st["master_db"])
+        for page in self.pages.values():
+            page.refresh()
+        self.pages["pads"].keys_view.refresh()
+
+    def flash_status(self, text, ms=8000):
+        self.status.setText(text)
+        QTimer.singleShot(ms, self._update_status)
 
     def save_state(self):
         e = self.engine

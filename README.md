@@ -17,8 +17,13 @@ entrada de microfone USB mais barata) e um teclado controlador de entrada já re
 - 🎛️ **Funciona com qualquer teclado MIDI**: mapeie knobs, faders e botões em segundos,
   vendo na tela qual controle físico você está mexendo.
 
-Todos os timbres usados são **gratuitos e de licença livre**. A licença do código do
-AmpSim ainda será definida (veja o final deste arquivo).
+Todos os timbres usados são **gratuitos e de licença livre**, e o AmpSim é **software livre
+(GPL-3.0)**.
+
+> **Os timbres são exemplos.** Os nomes e desenhos de amplificadores e teclados (Marshall,
+> Fender, Yamaha, Roland…) são **homenagens** que indicam o *estilo* que inspirou a tela. **O som
+> não é cópia nem amostra dos equipamentos originais.** Os sons foram criados pelo próprio AmpSim
+> ou vêm de bancos gratuitos, e o AmpSim não tem relação com esses fabricantes.
 
 ![Pad/Piano com o controlador na tela](docs/img/pad-piano.png)
 
@@ -30,11 +35,12 @@ AmpSim ainda será definida (veja o final deste arquivo).
 2. [Primeiro uso: escolhendo a placa de som](#primeiro-uso-escolhendo-a-placa-de-som)
 3. [Guitarra e Baixo](#guitarra-e-baixo)
 4. [Pad/Piano](#padpiano)
-5. [Mapeando o seu controlador MIDI](#mapeando-o-seu-controlador-midi)
-6. [Latência: dicas para tocar sem atraso](#latência-dicas-para-tocar-sem-atraso)
-7. [Problemas comuns](#problemas-comuns)
-8. [Para quem quer mexer no código](#para-quem-quer-mexer-no-código)
-9. [Licenças, créditos e marcas](#licenças-créditos-e-marcas)
+5. [Compartilhar cenas e presets (menu Arquivo)](#compartilhar-cenas-e-presets-menu-arquivo)
+6. [Mapeando o seu controlador MIDI](#mapeando-o-seu-controlador-midi)
+7. [Latência: dicas para tocar sem atraso](#latência-dicas-para-tocar-sem-atraso)
+8. [Problemas comuns](#problemas-comuns)
+9. [Para quem quer mexer no código](#para-quem-quer-mexer-no-código)
+10. [Licenças, créditos e marcas](#licenças-créditos-e-marcas)
 
 ---
 
@@ -100,6 +106,12 @@ no fone — é só ligá-la no painel.
   Overdrive. **Depois do amp**: EQ, Chorus, Delay, Reverb.
 - **Calibrar ruído**: abafe as cordas e clique — o app mede o chiado da sua entrada e ajusta
   o gate sozinho (essencial em entradas de microfone USB simples).
+- **EQ gráfico e analisador (RTA)** embaixo dos pedais:
+  - arraste os pontos para mexer no Equalizador; duplo-clique zera a banda;
+  - veja o espectro da **saída** (só desta trilha) e, se quiser, o da **entrada** seca, para
+    comparar;
+  - **⇱ Janela** abre o analisador numa janela separada, e fechar a janela devolve o analisador
+    para a tela.
 - **Presets** de fábrica (★) e os seus (**Salvar…**).
 
 ## Pad/Piano
@@ -119,8 +131,19 @@ Escolha em **Instrumento na tela** o que aparece desenhado:
 
 - *Teclados 61/73 teclas*: Piano de Concerto, Piano + Pad (culto), Pad | Piano, Cordas | Piano,
   Órgão Gospel (rotação), Órgão Rock (drive + rotação rápida), Rhodes com Delay…
-- *Espaciais (worship)*: Pad Celestial (Shimmer), Céu Aberto, Coral Etéreo, Piano Ambient…
+- *Espaciais (worship)*: **Pad Quente Contínuo (nas teclas)**, que é o som do pad contínuo
+  tocado no teclado, Pad Celestial (Shimmer), Céu Aberto, Coral Etéreo, Piano Ambient…
 - *Baixo na mão esquerda*: Baixo | Piano, **Baixo Pulsante | Pad (BPM)**…
+
+**Um timbre, dois juntos ou teclado dividido**: em **Teclado**, escolha *Um timbre*, *Dois
+juntos (camadas)* ou *Dividido (esq. | dir.)*. No modo dividido aparecem os campos **Mão
+direita** e **Mão esquerda**. O desenho do teclado pinta a zona da mão esquerda e mostra o
+timbre de cada lado.
+
+O jeito mais rápido é **clicar com o botão direito numa tecla do desenho**. O menu deixa:
+- trocar o timbre daquela zona;
+- dividir o teclado naquela nota;
+- voltar para um timbre só.
 
 **Efeitos das teclas**: Reverb, Chorus, **Shimmer**, **Rotação** (Leslie lenta/rápida),
 **Drive**, **Delay** (tempo livre ou no BPM: 1/4, 1/8, 1/8 pontuada…), Ataque, Release, Brilho
@@ -133,9 +156,38 @@ clique *Tap* no ritmo.
 e prévia). Presets: Worship Moderno, Worship Sala Grande, Acústico, Cinemático, Balada Pop…
 
 **Pad contínuo (banco B)**: cada pad liga o "tapete" no tom (C, D, E…); trocar de tom faz
-transição suave; *Parar* encerra com fade.
+transição suave; *Parar* encerra com fade. Para abrir o **EQ do pad contínuo**, clique com o
+botão direito num pad B (ou no botão **EQ…** ao lado do timbre). Dá para:
+- cortar graves e agudos (24 dB/oitava), para tirar os harmônicos que embolam com o baixo ou
+  brigam com a voz;
+- ajustar graves, médios e agudos;
+- mudar a largura estéreo;
+- escolher quais notas o pad toca (com ou sem a oitava grave);
+- ajustar reverb, chorus, shimmer e os tempos de entrada e saída.
+
+Há atalhos prontos como *Sem embolar* e *Atrás da banda*.
 
 **Teclado do PC** também toca: `A W S E D F T G Y H U J K O L P Ç` (Z/X oitava, C/V força).
+
+## Compartilhar cenas e presets (menu Arquivo)
+
+No botão **☰ Arquivo**:
+
+| Opção | O que faz |
+|---|---|
+| **Salvar cena…** (Ctrl+S) | Guarda tudo o que é som num arquivo `.ampsim`: amps, pedais, timbres, pads, EQ do pad e master. Não guarda a sua placa de áudio nem o mapeamento do seu controlador. |
+| **Exportar preset** | Só uma parte: Guitarra, Baixo, Pad/Piano (amp e efeitos) ou os timbres do teclado |
+| **Abrir cena ou preset…** (Ctrl+O) | Abre um `.ampsim` recebido. Antes de aplicar, mostra o nome e o autor. |
+| **Copiar código para compartilhar** | Gera uma linha de texto (`AMPSIM1:…`) para colar no WhatsApp, num grupo, numa legenda ou num comentário |
+| **Colar código recebido…** | Aplica um código colado |
+
+Os arquivos ficam em **Documentos\AmpSim**, prontos para anexar.
+
+Tudo o que vem de fora é conferido antes de entrar:
+- só valores conhecidos e dentro da faixa;
+- nenhum caminho de arquivo de outro computador;
+- plugins VST3 só se já estiverem instalados no seu PC;
+- capturas NAM procuradas pelo nome nas suas pastas, com aviso se faltar alguma.
 
 ## Mapeando o seu controlador MIDI
 
@@ -189,8 +241,10 @@ e traduções.
 
 ## Licenças, créditos e marcas
 
-**Código do AmpSim:** licença ainda não definida. Como o projeto usa `pedalboard` e capturas
-GPL-3.0, a escolha natural é a **GPL-3.0**.
+**Código do AmpSim:** [GNU GPL-3.0](LICENSE). Você pode usar, estudar, copiar, modificar e
+distribuir o AmpSim, inclusive em igrejas, escolas e projetos sociais, desde que versões
+modificadas continuem com o código aberto sob a mesma licença. A lista completa de créditos e
+licenças de terceiros está em [CREDITS.md](CREDITS.md).
 
 Componentes de terceiros (baixados pelo instalador, fora do repositório):
 
@@ -210,5 +264,10 @@ Fender, Marshall, Mesa/Boogie, Vox, Ampeg, Orange, EVH, Soldano, Tech 21, M-VAVE
 Roland e demais nomes de equipamentos citados são marcas de seus respectivos titulares. O
 AmpSim **não é afiliado, patrocinado nem endossado** por nenhum deles. Os nomes servem apenas
 para identificar o estilo de timbre ou o equipamento capturado. As fachadas e os instrumentos
-desenhados são **homenagens** aos originais, feitas do zero, sem reproduzir logotipos ou fotos
-oficiais; marcas, logotipos e imagens pertencem aos titulares. Cada tela exibe esse aviso.
+desenhados são **homenagens** aos originais, desenhadas do zero no código, sem usar fotos ou
+arquivos oficiais. Marcas, logotipos e imagens pertencem aos titulares, e cada tela exibe esse
+aviso.
+
+**Os timbres são exemplos e não têm relação com o som dos originais.** Nenhum som do AmpSim foi
+gravado ou extraído desses equipamentos. Eles foram criados pelo programa (synth, bateria,
+reverbs) ou vêm de bancos gratuitos como o GeneralUser GS.

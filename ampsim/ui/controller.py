@@ -114,6 +114,8 @@ class ControllerWidget(QWidget):
         self.knob_values = [64] * 8
         self.pad_glow = [0.0] * PAD_COUNT
         self.active = set()
+        self.split_note = None              # teclado dividido: 1ª nota da mão direita
+        self.zone_names = ("", "")           # timbres (mão esquerda, mão direita)
         self.learn_target = None            # ("pads"|"pads_b"|"knobs"|"buttons", índice)
         self._mouse = None
         self._drag = None
@@ -254,6 +256,13 @@ class ControllerWidget(QWidget):
                 tip = f"Knob {i + 1}: {self.knob_labels[i]}\n(arraste para mudar · botão direito: função)"
             elif kind == "button":
                 tip = f"{BUTTONS[i]}: {self.button_labels[i]}\n(botão direito: função)"
+            elif kind == "key":
+                if self.split_note is not None:
+                    left = i < self.split_note
+                    tip = (f"{note_name(i)} · mão {'esquerda' if left else 'direita'}: "
+                           f"{self.zone_names[0 if left else 1]}\n(botão direito: trocar timbre ou dividir aqui)")
+                else:
+                    tip = f"{note_name(i)}\n(botão direito: trocar timbre ou dividir o teclado aqui)"
             elif kind == "pad":
                 tip = (f"Pad {i + 1} B: {self.pad_keys_b[i]}" if self.bank else
                        f"Pad {i + 1}: {self.pad_labels[i]}") + "\n(botão direito: trocar)"
@@ -527,6 +536,10 @@ class ControllerWidget(QWidget):
                 if note in self.active:
                     wg.setColorAt(0, QColor("#9db4ff"))
                     wg.setColorAt(1, QColor("#6f8ff5"))
+                elif self.split_note is not None and note < self.split_note:
+                    wg.setColorAt(0, QColor("#ead9b4"))        # zona da mão esquerda
+                    wg.setColorAt(0.12, QColor("#f7ead0"))
+                    wg.setColorAt(1, QColor("#e0cba0"))
                 else:
                     wg.setColorAt(0, QColor("#e9eaec"))
                     wg.setColorAt(0.12, QColor("#fbfbfb"))
@@ -555,6 +568,37 @@ class ControllerWidget(QWidget):
                 qp.drawRoundedRect(r, 2, 2)
                 qp.setPen(QPen(QColor(255, 255, 255, 40), 1))
                 qp.drawLine(QPointF(r.left() + 3, r.top() + 2), QPointF(r.left() + 3, r.bottom() - 8))
+        self._paint_zones(qp, keys)
+
+    def _paint_zones(self, qp, keys):
+        """Teclado dividido: linha na divisão e o nome do timbre de cada mão sobre as teclas."""
+        whites = [(n, r) for n, r, w in keys if w]
+        if self.split_note is None or not whites:
+            return
+        left = [r for n, r in whites if n < self.split_note]
+        right = [r for n, r in whites if n >= self.split_note]
+        h = whites[0][1].height()
+        if left and right:
+            x = right[0].left()
+            qp.setPen(QPen(QColor("#d9822b"), 3))
+            qp.drawLine(QPointF(x, left[0].top()), QPointF(x, left[0].top() + h))
+        qp.setFont(self._font(max(9.0, min(13.0, h * 0.075)), True))
+        fm = qp.fontMetrics()
+        for rects, text, color in ((left, "◀ " + self.zone_names[0], QColor(217, 130, 43, 225)),
+                                   (right, self.zone_names[1] + " ▶", QColor(60, 90, 170, 215))):
+            if not rects or len(text) < 4:
+                continue
+            zw = rects[-1].right() - rects[0].left()
+            w = min(zw - 6, fm.horizontalAdvance(text) + 16)
+            if w < 30:
+                continue
+            ph = max(16.0, h * 0.13)
+            pill = QRectF(rects[0].left() + (zw - w) / 2, rects[0].top() + h * 0.64, w, ph)
+            qp.setPen(Qt.NoPen)
+            qp.setBrush(color)
+            qp.drawRoundedRect(pill, ph / 2, ph / 2)
+            qp.setPen(QColor("#ffffff"))
+            qp.drawText(pill, Qt.AlignCenter, fm.elidedText(text, Qt.ElideRight, int(w - 8)))
 
 
     # ------------------------------------------------------------------ decoração dos modelos grandes

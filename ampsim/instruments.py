@@ -10,6 +10,7 @@ from collections import deque
 from dataclasses import dataclass
 
 from .dsp import layout as Ly
+from .dsp.padeq import DEFAULT_PAD_EQ, VOICINGS, clean_pad_eq
 from .dsp.worship import DRUM_TYPE_NAMES
 
 # ------------------------------------------------------------------ timbres das teclas
@@ -80,6 +81,12 @@ READY_GROUPS = (
                                            fx=dict(reverb=80, chorus=30, shimmer=20)),
     }),
     ("Espaciais (worship)", {
+        # o mesmo som do pad contínuo (banco B), tocado nas teclas: timbre + oitava abaixo,
+        # muito reverb/chorus, shimmer e ataque lento
+        "Pad Quente Contínuo (nas teclas)": dict(sound1="Pad Quente", sound2="Pad Quente", vol2=80, oct2=-1,
+                                                 fx=dict(reverb=120, chorus=60, shimmer=70, attack=45)),
+        "Pad Halo Contínuo (nas teclas)": dict(sound1="Pad Halo", sound2="Pad Halo", vol2=80, oct2=-1,
+                                               fx=dict(reverb=120, chorus=60, shimmer=70, attack=45)),
         "Pad Celestial (Shimmer)": dict(sound1="Pad Halo", sound2="Pad Vozes", vol2=80,
                                         fx=dict(reverb=110, chorus=40, shimmer=65)),
         "Céu Aberto": dict(sound1="Pad Atmosfera", sound2="Cordas Lentas", vol2=70,
@@ -256,7 +263,6 @@ CH_KEYS1, CH_KEYS2 = 0, 4                   # grupo 0
 CH_CPAD = (2, 6)                            # grupo 2 (duas para o crossfade entre tons)
 PAD_CHANNELS = (9, 1, 5, 13, 3, 7, 11, 15)  # grupos 1 e 3
 MELODIC_HOLD = 4.0                          # s até o note-off de pads melódicos
-FADE_IN, FADE_OUT = 2.5, 3.5                # s do pad contínuo
 
 
 def note_name(n):
@@ -271,7 +277,7 @@ class Instruments:
         self.sf = None
         self.error = None
         self.keys = dict(sound1="Pad Halo", sound2="Pad Vozes", mode2="layer", split=48,
-                         vol1=100, vol2=80, layer2_on=True)
+                         vol1=100, vol2=80, layer2_on=True, oct2=0)
         self.ready = "Pad Celestial (Shimmer)"
         self.pad_preset = DEFAULT_PAD_PRESET
         self.pad_sounds = list(PAD_PRESETS[DEFAULT_PAD_PRESET])
@@ -290,6 +296,7 @@ class Instruments:
         self.bpm = 100
         self._taps = []
         self.fx = dict(DEFAULT_FX)           # efeitos das teclas (drive, rotação, delay)
+        self.pad_eq = dict(DEFAULT_PAD_EQ)   # EQ e ambiente do pad contínuo (banco B)
         self.transpose = 0
         self.sustain = False
         self.free_map = {}                   # função -> ["cc"|"note", canal, número] (atalhos rápidos)
@@ -360,9 +367,12 @@ class Instruments:
         if self.sf:
             self.sf.cc(CH_KEYS1, 7, self.keys["vol1"])
             self.sf.cc(CH_KEYS2, 7, self.keys["vol2"])
-            for ch in (CH_KEYS1, CH_KEYS2) + CH_CPAD:
+            for ch in (CH_KEYS1, CH_KEYS2):
                 self.sf.cc(ch, 91, self.levels["reverb"])
                 self.sf.cc(ch, 93, self.levels["chorus"])
+            for ch in CH_CPAD:
+                self.sf.cc(ch, 91, int(self.pad_eq["reverb"]))
+                self.sf.cc(ch, 93, int(self.pad_eq["chorus"]))
             for ch in PAD_CHANNELS:
                 self.sf.cc(ch, 91, self.levels["drumverb"])
                 self.sf.cc(ch, 93, 0)
@@ -387,18 +397,35 @@ class Instruments:
 
     # ------------------------------------------------------------------ timbres
     def set_ready(self, name):
-        cfg = dict(sound2="", mode2="layer", split=48, vol1=100, vol2=70, layer2_on=True)
+        cfg = dict(sound2="", mode2="layer", split=48, vol1=100, vol2=70, layer2_on=True, oct2=0)
         cfg.update({k: v for k, v in READY[name].items() if k != "fx"})
         self.keys.update(cfg)
         fx = READY[name].get("fx", {})
         self.levels.update(reverb=fx.get("reverb", 45), chorus=fx.get("chorus", 15),
-                           shimmer=fx.get("shimmer", 0))
+                           shimmer=fx.get("shimmer", 0), attack=fx.get("attack", 0))
         self.fx = dict(DEFAULT_FX)
         self.fx.update({k: v for k, v in fx.items() if k in DEFAULT_FX})
         self.ready = name
         self.apply_all()
         self.apply_fx()
         self.on_change()
+
+    def set_pad_eq(self, **values):
+        """Muda EQ/ambiente do pad contínuo (dsp/padeq.py); voicing vale no próximo tom."""
+        self.pad_eq.update(values)
+        self.apply_pad_eq()
+        if self.sf and ("reverb" in values or "chorus" in values):
+            for ch in CH_CPAD:
+                self.sf.cc(ch, 91, int(self.pad_eq["reverb"]))
+                self.sf.cc(ch, 93, int(self.pad_eq["chorus"]))
+        if "voicing" in values and self.cont_key:
+            self.start_cont_pad(self.cont_key)
+        self.on_change()
+
+    def apply_pad_eq(self):
+        eq = getattr(self.engine, "pad_eq", None)
+        if eq is not None:
+            eq.configure(self.pad_eq)
 
     def apply_fx(self):
         kfx = getattr(self.engine, "keys_fx", None)
@@ -407,6 +434,8 @@ class Instruments:
 
     def set_sound(self, slot, name):
         self.keys["sound1" if slot == 1 else "sound2"] = name
+        if slot == 2:
+            self.keys["oct2"] = 0             # timbre 2 escolhido à mão volta para a oitava normal
         self.ready = ""
         self.apply_all()
         self.on_change()
@@ -480,7 +509,8 @@ class Instruments:
             self.key_off(note)
         vel = self._touch(vel)
         played = note + self.transpose
-        targets = [(s, ch, played) for s, ch in self._targets(played)]
+        o2 = 12 * self.keys.get("oct2", 0)
+        targets = [(s, ch, played + (o2 if ch == CH_KEYS2 else 0)) for s, ch in self._targets(played)]
         self._held[note] = targets
         synth_done = False
         for s, ch, n in targets:
@@ -554,7 +584,8 @@ class Instruments:
         if s is None or s.src != "sf2":
             return
         root = 48 + KEY_NAMES.index(key)
-        notes = [root - 12, root, root + 7, root + 12, root + 19]
+        pe = self.pad_eq
+        notes = [root + d for d in VOICINGS.get(pe["voicing"], VOICINGS["cheio"])]
         ch = CH_CPAD[self._cp_next % 2]
         self._cp_next += 1
         old = self._cp.get(ch)
@@ -566,8 +597,8 @@ class Instruments:
                 st[1] = 0.0
         self.sf.program(ch, s.bank, s.prog)
         self.sf.cc(ch, 11, 0)
-        self.sf.cc(ch, 91, 120)
-        self.sf.cc(ch, 93, 60)
+        self.sf.cc(ch, 91, int(pe["reverb"]))
+        self.sf.cc(ch, 93, int(pe["chorus"]))
         for n in notes:
             self.sf.noteon(ch, n, 90)
         self._cp[ch] = [0.0, 127.0, notes]
@@ -591,7 +622,7 @@ class Instruments:
             cur, target, notes = st
             if cur == target:
                 continue
-            rate = 127.0 * dt / (FADE_IN if target > cur else FADE_OUT)
+            rate = 127.0 * dt / (self.pad_eq["fade_in"] if target > cur else self.pad_eq["fade_out"])
             cur = min(target, cur + rate) if target > cur else max(target, cur - rate)
             st[0] = cur
             sf.cc(ch, 11, int(cur))
@@ -889,7 +920,8 @@ class Instruments:
                     cont_sound=self.cont_sound, levels=dict(self.levels),
                     mapping={k: list(v) for k, v in self.mapping.items()},
                     knob_funcs=list(self.knob_funcs), button_funcs=list(self.button_funcs),
-                    device=self.device, bpm=self.bpm, fx=dict(self.fx), free_map=dict(self.free_map))
+                    device=self.device, bpm=self.bpm, fx=dict(self.fx), free_map=dict(self.free_map),
+                    pad_eq=dict(self.pad_eq))
 
     def load_state(self, st):
         if not st:
@@ -911,6 +943,8 @@ class Instruments:
             self.device = st["device"]
         if isinstance(st.get("fx"), dict):
             self.fx.update({k: v for k, v in st["fx"].items() if k in DEFAULT_FX})
+        if isinstance(st.get("pad_eq"), dict):
+            self.pad_eq.update(clean_pad_eq(st["pad_eq"]))
         if isinstance(st.get("free_map"), dict):
             self.free_map = {k: v for k, v in st["free_map"].items()
                              if (k in KNOB_FUNCS or k in BUTTON_FUNCS) and isinstance(v, list) and len(v) == 3}
@@ -932,3 +966,4 @@ class Instruments:
                 setattr(self, attr, list(v))
         self.apply_all()
         self.apply_fx()
+        self.apply_pad_eq()

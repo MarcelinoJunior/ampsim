@@ -503,13 +503,18 @@ def process_track(src, ch, n, mix, D, BQ, Z, ST, H, OSU, OSD, IR, IRH, CHB, DLB,
 
 @njit(**JIT)
 def mix_soundfont(B, n, mix, synth_out, shim, kb, to_chain, keys_gain, drums_gain, pad_gain,
-                  keys_shim, pad_shim):
+                  keys_shim, pad_shim, EQB, EQZ, EQP):
     """Soma a saída do FluidSynth (4 grupos; ver audio/soundfont.py) e monta o envio do Shimmer.
 
     Teclas: para a trilha (to_chain, mono) ou direto em estéreo. Pads e pad contínuo: sempre
-    direto. Retorna o pico do que foi direto para a saída.
+    direto; o pad contínuo passa pelo EQ próprio (dsp/padeq.py: EQB/EQZ/EQP). Retorna o pico do
+    que foi direto para a saída.
     """
     peak = 0.0
+    eq_on = EQP[0] > 0.5
+    width = EQP[1]
+    eq_gain = EQP[2]
+    ns = EQB.shape[0] // 2
     for i in range(n):
         kl = (B[0, i] + B[8, i] + B[10, i]) * keys_gain
         kr = (B[1, i] + B[9, i] + B[11, i]) * keys_gain
@@ -517,6 +522,14 @@ def mix_soundfont(B, n, mix, synth_out, shim, kb, to_chain, keys_gain, drums_gai
         dr = (B[3, i] + B[13, i] + B[15, i] + B[7, i] + B[21, i] + B[23, i]) * drums_gain
         pl = (B[4, i] + B[16, i] + B[18, i]) * pad_gain
         pr = (B[5, i] + B[17, i] + B[19, i]) * pad_gain
+        if eq_on:
+            for j in range(ns):
+                pl = bq(pl, EQB, EQZ, j)
+                pr = bq(pr, EQB, EQZ, j + ns)
+            m = (pl + pr) * 0.5
+            sd = (pl - pr) * 0.5 * width
+            pl = (m + sd) * eq_gain
+            pr = (m - sd) * eq_gain
         send = (pl + pr) * 0.5 * pad_shim
         l = dl + pl
         r = dr + pr
@@ -534,6 +547,7 @@ def mix_soundfont(B, n, mix, synth_out, shim, kb, to_chain, keys_gain, drums_gai
         a = max(abs(l), abs(r))
         if a > peak:
             peak = a
+    flush_denormals(EQZ)
     return peak
 
 
@@ -868,7 +882,7 @@ def warmup(fs=48000.0):
     kb = np.zeros((n, 2))
     for chain in (True, False):
         mix_soundfont(np.zeros((24, n), dtype=np.float32), n, mix, so, sh, kb, chain, 1.0, 1.0, 1.0,
-                      0.5, 0.5)
+                      0.5, 0.5, np.zeros((14, 5)), np.zeros((14, 2)), np.array([1.0, 1.0, 1.0]))
     from .keysfx import warmup as warmup_keysfx
     from .worship import warmup as warmup_worship
 

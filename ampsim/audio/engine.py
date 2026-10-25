@@ -13,11 +13,13 @@ from ..dsp.kernels import (
 from ..dsp.synth import SynthDSP
 from ..dsp.track import TrackDSP
 from ..dsp.keysfx import KeysFX, add_stereo
+from ..dsp.padeq import PadEQ
 from ..dsp.worship import DrumSynth, ShimmerDSP, render_drums
 from ..instruments import Instruments
 
 TRACKS = ("guitar", "bass", "pads")
 INPUT_TRACKS = ("guitar", "bass")
+RTA_N = 8192                    # amostras guardadas para o analisador (ui/analyzer.py)
 
 
 class AudioEngine:
@@ -42,6 +44,13 @@ class AudioEngine:
         self._shim_send = np.zeros(Ly.MAX_BLOCK)
         self._drum_send = np.zeros(Ly.MAX_BLOCK)
         self._drum_ev = np.zeros((64, 2), dtype=np.int64)
+        # RTA da aba aberta: entrada seca e saída só desta trilha (anéis lidos pela UI)
+        self.rta_track = None
+        self.rta_in = np.zeros(RTA_N)
+        self.rta_out = np.zeros(RTA_N)
+        self.rta_pos_in = self.rta_pos_out = 0
+        self._rta_mix = np.zeros((Ly.MAX_BLOCK, 2))
+        self._rta_tmp = np.zeros(Ly.MAX_BLOCK)
         self._make_worship()
         self.instruments = Instruments(self)
         self.instruments.start(self.fs, Ly.MAX_BLOCK)
@@ -152,8 +161,10 @@ class AudioEngine:
         self.shimmer = ShimmerDSP(self.fs, room=0.93, damp=0.25)
         self.drumverb = ShimmerDSP(self.fs, room=0.84, damp=0.35)
         self.keys_fx = KeysFX(self.fs, Ly.MAX_BLOCK)
+        self.pad_eq = PadEQ(self.fs)
         if hasattr(self, "instruments"):
             self.instruments.apply_fx()
+            self.instruments.apply_pad_eq()
 
     # ------------------------------------------------------------------ callbacks (tempo real)
     def _drain_events(self):
@@ -177,7 +188,10 @@ class AudioEngine:
                 t = tracks[name]
                 ch = self.input_channel[name]
                 if t.D[Ly.T_ON] > 0.5 and ch < n_in:
-                    self._run_track(t, indata, ch, frames, mix)
+                    if name == self.rta_track:
+                        self._run_track_rta(t, indata, ch, frames, mix)
+                    else:
+                        self._run_track(t, indata, ch, frames, mix)
         s = self.synth
         render_synth(self._synth_out, frames, self._ev, self._drain_events(), s.SD, s.VS, s.SST,
                      self.fs)
@@ -190,8 +204,10 @@ class AudioEngine:
             sf.render(frames)
             to_chain = t.D[Ly.T_AMP] > 0.5 and t.D[Ly.T_ON] > 0.5
             kfx = self.keys_fx
+            eq = self.pad_eq
             pk = mix_soundfont(sf.buf, frames, mix, self._synth_out, shim, kfx.KB, to_chain,
-                               inst.keys_gain(), inst.drums_gain(), inst.pad_gain(), shimmer, 0.7)
+                               inst.keys_gain(), inst.drums_gain(), inst.pad_gain(), shimmer,
+                               inst.pad_eq["shimmer"] / 100.0, eq.BQ, eq.Z, eq.P)
             if not to_chain:
                 kfx.process(frames)
                 pk = max(pk, add_stereo(mix, kfx.KB, frames))
@@ -215,6 +231,18 @@ class AudioEngine:
             self._run_track(t, self._synth_out, 0, frames, mix)
         write_output(mix, frames, outdata, self.out_offset, self.master)
 
+    def _run_track_rta(self, t, indata, ch, frames, mix):
+        """Como _run_track, guardando entrada e saída da trilha para o analisador."""
+        tm = self._rta_mix
+        tm[:frames] = 0.0
+        self._run_track(t, indata, ch, frames, tm)
+        mix[:frames] += tm[:frames]
+        tmp = self._rta_tmp[:frames]
+        np.add(tm[:frames, 0], tm[:frames, 1], out=tmp)
+        tmp *= 0.5
+        self.rta_pos_out = _ring_write(self.rta_out, self.rta_pos_out, tmp)
+        self.rta_pos_in = _ring_write(self.rta_in, self.rta_pos_in, indata[:frames, ch])
+
     @staticmethod
     def _run_track(t, src, ch, frames, mix):
         if t.external_active():
@@ -237,3 +265,15 @@ class AudioEngine:
         if status:
             self.xruns += 1
         self._render(None, outdata, frames)
+
+
+def _ring_write(buf, pos, x):
+    n = len(x)
+    end = pos + n
+    if end <= len(buf):
+        buf[pos:end] = x
+    else:
+        k = len(buf) - pos
+        buf[pos:] = x[:k]
+        buf[:n - k] = x[k:]
+    return end % len(buf)

@@ -568,7 +568,14 @@ class TrackPage(QWidget):
                     self.pre_panels.append(panel)
                 row.addWidget(panel, sum(1 for p in EFFECT_BY_KEY[key].params if not p.is_choice))
             bl.addLayout(row)
-        bl.addStretch(1)
+        self.analyzer = None
+        if name != "pads":
+            from .analyzer import TrackAnalyzer
+
+            self.analyzer = TrackAnalyzer(self, accent)
+            bl.addWidget(self.analyzer, 1)
+        else:
+            bl.addStretch(1)
         scroll = QScrollArea()          # só aparece se a janela for pequena demais
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)

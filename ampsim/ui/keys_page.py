@@ -2,7 +2,7 @@
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QFont, QStandardItemModel
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSizePolicy, QSpinBox, QStackedWidget,
     QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -16,6 +16,14 @@ from .controller import MODELS, TRADEMARKS, ControllerWidget
 
 SPLIT_NOTES = list(range(36, 73))
 QUICK = "Atalhos rápidos (qualquer teclado)"
+KEY_MODES = ("Um timbre", "Dois juntos (camadas)", "Dividido (esq. | dir.)")
+
+
+def key_mode(k):
+    """"single" (um timbre), "layer" (dois juntos) ou "split" (mão esquerda | mão direita)."""
+    if not (k["sound2"] and k["layer2_on"]):
+        return "single"
+    return "split" if k["mode2"] == "split" else "layer"
 
 
 class InstrumentBridge(QObject):
@@ -130,6 +138,7 @@ class KeysView(QWidget):
         super().__init__()
         self.engine = engine
         self.inst = engine.instruments
+        self.accent = accent
         self.bridge = InstrumentBridge()
         self._updating = False
         root = QVBoxLayout(self)
@@ -227,26 +236,28 @@ class KeysView(QWidget):
         g = QGridLayout()
         g.setHorizontalSpacing(6)
         g.setVerticalSpacing(3)
-        g.addWidget(QLabel("Teclas:"), 0, 0)
+        g.addWidget(QLabel("Teclado:"), 0, 0)
+        self.mode2 = _combo(KEY_MODES)
+        self.mode2.setToolTip("Um timbre: o mesmo som em todas as teclas.\n"
+                              "Dois juntos: os dois timbres tocam juntos (ex.: piano + pad).\n"
+                              "Dividido: mão esquerda com um timbre e mão direita com outro.\n"
+                              "Dica: botão direito numa tecla do desenho também divide o teclado ali.")
+        self.mode2.activated.connect(self._mode_changed)
+        g.addWidget(self.mode2, 0, 1)
+        self.split = _combo([f"divisão em {note_name(n)}" for n in SPLIT_NOTES], width=118)
+        self.split.setToolTip("A mão direita começa nesta nota; a esquerda vai até a tecla anterior")
+        self.split.activated.connect(self._split_changed)
+        g.addWidget(self.split, 0, 2)
+        self.sound1_label = QLabel("Timbre:")
+        g.addWidget(self.sound1_label, 1, 0)
         self.sound1 = _sound_combo()
         self.sound1.activated.connect(lambda _: self._sound_changed(1, self.sound1))
-        g.addWidget(self.sound1, 0, 1, 1, 2)
-        self.layer_on = QCheckBox("Camada 2:")
-        self.layer_on.setFocusPolicy(Qt.NoFocus)
-        self.layer_on.toggled.connect(self._layer_toggled)
-        g.addWidget(self.layer_on, 1, 0)
+        g.addWidget(self.sound1, 1, 1, 1, 2)
+        self.sound2_label = QLabel("Timbre 2:")
+        g.addWidget(self.sound2_label, 2, 0)
         self.sound2 = _sound_combo()
         self.sound2.activated.connect(lambda _: self._sound_changed(2, self.sound2))
-        g.addWidget(self.sound2, 1, 1, 1, 2)
-        g.addWidget(QLabel("Modo:"), 2, 0)
-        self.mode2 = _combo(("Sobreposta", "Mão esquerda"))
-        self.mode2.setToolTip("Sobreposta: os dois timbres juntos em todas as teclas.\n"
-                              "Mão esquerda: camada 2 só abaixo da nota de divisão (ex.: baixo).")
-        self.mode2.activated.connect(self._mode_changed)
-        g.addWidget(self.mode2, 2, 1)
-        self.split = _combo([f"abaixo de {note_name(n)}" for n in SPLIT_NOTES], width=110)
-        self.split.activated.connect(self._split_changed)
-        g.addWidget(self.split, 2, 2)
+        g.addWidget(self.sound2, 2, 1, 1, 2)
         g.addWidget(QLabel("Pads (A):"), 3, 0)
         self.pad_preset = _combo(list(PAD_PRESETS) + ["(personalizado)"])
         self.pad_preset.setToolTip("Conjunto de sons dos 8 pads do banco A")
@@ -256,7 +267,12 @@ class KeysView(QWidget):
         self.cont_sound = _combo(CONT_PAD_SOUNDS)
         self.cont_sound.setToolTip("Timbre dos pads do banco B (pad contínuo no tom escolhido)")
         self.cont_sound.activated.connect(lambda _: self.inst.set_cont_sound(self.cont_sound.currentText()))
-        g.addWidget(self.cont_sound, 4, 1, 1, 2)
+        g.addWidget(self.cont_sound, 4, 1)
+        eq_btn = QPushButton("EQ…")
+        eq_btn.setToolTip("Equalizador e ambiente do pad contínuo (tirar graves/agudos, reverb, shimmer, fades)")
+        eq_btn.setFocusPolicy(Qt.NoFocus)
+        eq_btn.clicked.connect(self.open_pad_eq)
+        g.addWidget(eq_btn, 4, 2)
         g.setColumnStretch(1, 1)
         lay.addLayout(g)
         self.sound_status = QLabel("")
@@ -288,20 +304,22 @@ class KeysView(QWidget):
         if name:
             self.inst.set_sound(slot, name)
 
-    def _layer_toggled(self, on):
-        if self._updating:
-            return
-        self.inst.keys["layer2_on"] = on
-        if on and not self.inst.keys["sound2"]:
-            self.inst.keys["sound2"] = "Pad Quente"
+    def _mode_changed(self, i):
+        self._set_key_mode(("single", "layer", "split")[i])
+
+    def _set_key_mode(self, mode, split=None):
+        """Um timbre / dois juntos / dividido; `split` = primeira nota da mão direita."""
+        k = self.inst.keys
+        k["layer2_on"] = mode != "single"
+        if mode != "single":
+            k["mode2"] = mode
+            if not k["sound2"]:
+                k["sound2"] = "Baixo Finger" if mode == "split" else "Pad Quente"
+        if split is not None:
+            k["split"] = min(max(split, SPLIT_NOTES[0]), SPLIT_NOTES[-1])
         self.inst.ready = ""
         self.inst.apply_all()
-        self.refresh()
-
-    def _mode_changed(self, i):
-        self.inst.keys["mode2"] = "split" if i == 1 else "layer"
-        self.inst.ready = ""
-        self.inst.all_off()
+        self.inst.on_change()
         self.refresh()
 
     def _split_changed(self, i):
@@ -408,6 +426,7 @@ class KeysView(QWidget):
                 a.setChecked(self.inst.pad_keys[j] == key)
                 a.triggered.connect(lambda _, key=key: self.inst.set_pad_key(j, key))
             menu.addSeparator()
+            menu.addAction("Equalizador e ambiente do pad contínuo…", self.open_pad_eq)
             sub = menu.addMenu("Timbre do pad contínuo")
             for name in CONT_PAD_SOUNDS:
                 a = sub.addAction(name)
@@ -429,20 +448,55 @@ class KeysView(QWidget):
                 a.setChecked(self.inst.button_funcs[i] == func)
                 a.triggered.connect(lambda _, f=func: self._set_button_func(i, f))
         elif kind == "key":
-            menu.addSection("Timbre das teclas")
-            for group, items in READY_GROUPS:
-                sub = menu.addMenu(group)
-                for name in items:
-                    a = sub.addAction(name)
-                    a.triggered.connect(lambda _, n=name: self.inst.set_ready(n))
-            menu.addSeparator()
-            for cat in CATEGORIES:
-                sub = menu.addMenu(cat)
-                for s in SOUNDS:
-                    if s.cat == cat:
-                        a = sub.addAction(s.name)
-                        a.triggered.connect(lambda _, n=s.name: self.inst.set_sound(1, n))
+            self._key_menu(menu, i)
         menu.exec(pos)
+        self.refresh()
+
+    def _sound_menu(self, menu, slot, current):
+        for cat in CATEGORIES:
+            sub = menu.addMenu(cat)
+            for s in SOUNDS:
+                if s.cat == cat:
+                    a = sub.addAction(s.name)
+                    a.setCheckable(True)
+                    a.setChecked(s.name == current)
+                    a.triggered.connect(lambda _, n=s.name: self.inst.set_sound(slot, n))
+
+    def _key_menu(self, menu, note):
+        """Botão direito numa tecla: timbre da zona (mão esquerda/direita) e divisão do teclado."""
+        k = self.inst.keys
+        mode = key_mode(k)
+        left = mode == "split" and note < k["split"]
+        if mode == "split":
+            zone = (f"Mão esquerda (abaixo de {note_name(k['split'])})" if left
+                    else f"Mão direita (de {note_name(k['split'])} para cima)")
+            slot = 2 if left else 1
+        else:
+            zone, slot = ("Timbre 1" if mode == "layer" else "Timbre do teclado"), 1
+        current = k["sound2" if slot == 2 else "sound1"]
+        menu.addSection(f"{zone}: {current}")
+        self._sound_menu(menu, slot, current)
+        if mode == "layer":
+            self._sound_menu(menu.addMenu(f"Timbre 2 (junto): {k['sound2']}"), 2, k["sound2"])
+        menu.addSection("Teclado")
+        cut = min(max(note + (0 if left else 1), SPLIT_NOTES[0]), SPLIT_NOTES[-1])
+        menu.addAction(f"Dividir aqui: mão esquerda até {note_name(cut - 1)}",
+                       lambda: self._set_key_mode("split", cut))
+        if mode != "single":
+            menu.addAction("Um timbre só (desfazer divisão/camada)", lambda: self._set_key_mode("single"))
+        if mode != "layer":
+            menu.addAction("Dois timbres juntos (camadas)", lambda: self._set_key_mode("layer"))
+        sub = menu.addMenu("Timbres prontos")
+        for group, items in READY_GROUPS:
+            sg = sub.addMenu(group)
+            for name in items:
+                a = sg.addAction(name)
+                a.triggered.connect(lambda _, n=name: self.inst.set_ready(n))
+
+    def open_pad_eq(self):
+        from .analyzer import PadEqDialog
+
+        PadEqDialog(self.inst, self.accent, self).exec()
         self.refresh()
 
     def _learn_clicked(self):
@@ -479,12 +533,17 @@ class KeysView(QWidget):
                 i = combo.findData(k[key]) if k[key] else -1
                 if i >= 0:
                     combo.setCurrentIndex(i)
-            has2 = bool(k["sound2"]) and k["layer2_on"]
-            self.layer_on.setChecked(has2)
-            for w in (self.sound2, self.mode2, self.split):
-                w.setEnabled(has2)
-            self.mode2.setCurrentIndex(1 if k["mode2"] == "split" else 0)
-            self.split.setVisible(k["mode2"] == "split")
+            mode = key_mode(k)
+            self.mode2.setCurrentIndex(("single", "layer", "split").index(mode))
+            self.split.setVisible(mode == "split")
+            self.sound2.setVisible(mode != "single")
+            self.sound2_label.setVisible(mode != "single")
+            if mode == "split":
+                self.sound1_label.setText("Mão direita:")
+                self.sound2_label.setText("Mão esquerda:")
+            else:
+                self.sound1_label.setText("Timbre 1:" if mode == "layer" else "Timbre:")
+                self.sound2_label.setText("Timbre 2:")
             if k["split"] in SPLIT_NOTES:
                 self.split.setCurrentIndex(SPLIT_NOTES.index(k["split"]))
             self.pad_preset.setCurrentText(inst.pad_preset or "(personalizado)")
@@ -513,6 +572,9 @@ class KeysView(QWidget):
         c.cont_key = inst.cont_key
         c.knob_labels = list(inst.knob_funcs)
         c.button_labels = list(inst.button_funcs)
+        mode = key_mode(k)
+        c.split_note = k["split"] if mode == "split" else None
+        c.zone_names = (k["sound2"], k["sound1"]) if mode == "split" else ("", k["sound1"])
         self.on_learn()
         quick = self.inst.device == QUICK
         if (self.left_stack.currentIndex() == 1) != quick or (not quick and c.model_name != self.inst.device):

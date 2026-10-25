@@ -135,6 +135,7 @@ def promote_audio_thread():
             avrt = ctypes.windll.avrt
             idx = ctypes.c_ulong(0)
             avrt.AvSetMmThreadCharacteristicsW.restype = ctypes.c_void_p
+            avrt.AvSetMmThreadPriority.argtypes = (ctypes.c_void_p, ctypes.c_int)
             h = avrt.AvSetMmThreadCharacteristicsW("Pro Audio", ctypes.byref(idx))
             if h:
                 AVRT_PRIORITY_CRITICAL = 2
@@ -142,6 +143,8 @@ def promote_audio_thread():
             else:
                 THREAD_PRIORITY_TIME_CRITICAL = 15
                 k32 = ctypes.windll.kernel32
+                k32.GetCurrentThread.restype = ctypes.c_void_p
+                k32.SetThreadPriority.argtypes = (ctypes.c_void_p, ctypes.c_int)
                 k32.SetThreadPriority(k32.GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL)
         except (AttributeError, OSError):
             pass
