@@ -656,3 +656,18 @@ def test_restart_button_when_folder_has_newer_version(win, monkeypatch):
     win._running_commit = "a" * 40
     monkeypatch.setattr(updater, "local_commit", lambda root=None: "b" * 40)
     assert win._check_stale() and win.topbar.update_btn.isVisibleTo(win)
+
+
+def test_pitch_and_mod_move_on_the_drawing(win, app):
+    win.tabs.setCurrentIndex(2)
+    win.pad_view.set_device("M-VAVE SMK-25")
+    c = win.pad_view.ctrl
+    win.inst.handle_midi(0xE0, 127, 127)               # pitch todo para cima (16383)
+    win.inst.handle_midi(0xB0, 1, 64)                  # modulação pela metade
+    app.processEvents()
+    assert c.pitch > 0.99 and abs(c.mod - 64 / 127) < 1e-6
+    c.grab()                                           # desenha sem erro com o overlay
+    win.inst.handle_midi(0xE0, 0, 64)                  # volta ao centro
+    app.processEvents()
+    assert abs(c.pitch) < 0.01
+    win.pad_view.set_device("Teclado simples")

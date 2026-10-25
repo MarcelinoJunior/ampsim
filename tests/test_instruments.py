@@ -313,3 +313,66 @@ def test_describe_midi_for_monitor(engine):
     assert inst.describe_midi("cc", 0, 99, 10).endswith("NÃO MAPEADO")
     assert inst.describe_midi("cc", 0, 64, 127).endswith("sustain")
     assert "Pitch bend" in inst.describe_midi("bend", 0, 0, 64)
+
+
+SAME = [[9, n] for n in (40, 41, 42, 43, 36, 37, 38, 39)]
+
+
+def test_pad_b_button_switches_bank_when_pads_send_same_notes(engine):
+    """M-VAVE: os pads mandam as mesmas notas nos dois bancos; o PAD-B é que troca."""
+    inst = engine.instruments
+    inst.stop_learning()
+    inst.mapping["pads"] = [list(p) for p in SAME]
+    inst.mapping["pads_b"] = [list(p) for p in SAME]
+    inst.mapping["buttons"] = [None] * 7 + [["cc", 0, 30]]
+    inst.button_funcs[7] = "Banco de pads A/B (tela)"
+    hits = []
+    inst.on_pad = lambda i, v: hits.append(i)
+    inst.handle_midi(0x99, 40, 100)
+    assert hits[-1] == 0                                 # banco A: bateria
+    inst.handle_midi(0xB0, 30, 127)                      # aperta PAD-B
+    assert inst.screen_bank == 1
+    inst.handle_midi(0x99, 40, 100)
+    assert hits[-1] == 8                                 # mesmo pad agora é o 1º do banco B
+    inst.handle_midi(0xB0, 30, 0)                        # soltou logo: não troca de novo
+    assert inst.screen_bank == 1
+    inst.handle_midi(0xB0, 30, 127)                      # aperta de novo: volta para o A
+    inst.handle_midi(0x99, 40, 100)
+    assert inst.screen_bank == 0 and hits[-1] == 0
+    inst.stop_cont_pad(immediate=True)
+
+
+def test_latching_button_toggles_on_both_values(engine, monkeypatch):
+    import ampsim.instruments as ins
+    inst = engine.instruments
+    inst.mapping["buttons"] = [None] * 7 + [["cc", 0, 31]]
+    inst.button_funcs[7] = "Banco de pads A/B (tela)"
+    inst.screen_bank = 0
+    t = [100.0]
+    monkeypatch.setattr(ins.time, "monotonic", lambda: t[0])
+    inst.handle_midi(0xB0, 31, 127)                      # botão que trava: 1º toque manda 127
+    assert inst.screen_bank == 1
+    t[0] += 5.0
+    inst.handle_midi(0xB0, 31, 0)                        # 2º toque (bem depois) manda 0
+    assert inst.screen_bank == 0
+
+
+def test_learning_pads_with_same_notes_in_both_banks_and_pc_button(engine):
+    inst = engine.instruments
+    inst.start_learning(("pads", "pads_b"))
+    for bank in range(2):
+        for _, n in SAME:
+            inst.handle_midi(0x99, n, 100)
+    assert not inst.learn_steps                          # o banco B aceitou as mesmas notas
+    assert inst.mapping["pads_b"] == SAME
+    inst.start_learning(("buttons",))
+    for _ in range(7):
+        inst.skip_learning_step()
+    inst.handle_midi(0xC0, 5, 0)                         # PAD-B que manda Program Change
+    assert inst.mapping["buttons"][7] == ["pc", 0, 5]
+    inst.button_funcs[7] = "Banco de pads A/B (tela)"
+    inst.screen_bank = 0
+    inst.handle_midi(0xC0, 5, 0)
+    assert inst.screen_bank == 1
+    assert "botão PAD-B" in inst.describe_midi("pc", 0, 5, 0)
+    inst.screen_bank = 0

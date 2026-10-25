@@ -322,6 +322,7 @@ DEFAULT_PADS = [[9, n] for n in (40, 41, 42, 43, 36, 37, 38, 39)]
 DEFAULT_PADS_B = [[9, n] for n in (48, 49, 50, 51, 44, 45, 46, 47)]
 OLD_DEFAULT_PADS = [[9, n] for n in range(36, 44)]          # padrão antigo (fileiras trocadas)
 OLD_DEFAULT_PADS_B = [[9, n] for n in range(44, 52)]
+LATCH_GAP = 1.5     # s: o "0" de um botão comum chega ao soltar; depois disso é um toque novo
 # CCs de uso geral (modulação, volume, sustain, efeitos, banco, "all notes off"…): não são knobs
 GENERAL_CCS = {0, 1, 2, 7, 10, 11, 32, 64, 65, 66, 67, 91, 93, 120, 121, 122, 123, 124, 125, 126, 127}
 
@@ -371,6 +372,7 @@ class Instruments:
         self._melodic_off = []               # [(instante, canal, nota)]
         self.drum_events = deque()           # (tipo, velocidade) para a bateria sintetizada
         self._held = {}
+        self._btn_on = {}                    # botão (índice) -> instante do último valor > 0
         self.learn_steps = []
         self._learned = set()
         # ganchos da interface (chamados de qualquer thread; a UI os liga a sinais Qt)
@@ -919,6 +921,11 @@ class Instruments:
             self.on_monitor("pc" if kind == 0xC0 else "bend", ch, d1, d2)
         if self.capture:
             return
+        if kind == 0xC0 and not self.learn_steps:
+            for i, b in enumerate(self.mapping["buttons"]):
+                if b == ["pc", ch, d1]:
+                    self.button(i)
+                    return
         if kind in (0x90, 0xB0) and self.free_map:
             key = ["cc" if kind == 0xB0 else "note", ch, d1]
             for func, k in self.free_map.items():
@@ -936,7 +943,10 @@ class Instruments:
         m = self.mapping
         if kind in (0x80, 0x90):
             on = kind == 0x90 and d2 > 0
-            for bank, key in ((0, "pads"), (1, "pads_b")):
+            # o banco da tela vem primeiro: se o controlador manda as mesmas notas nos dois bancos,
+            # o PAD-B (mapeado como botão) troca o banco e os pads seguem a tela
+            banks = ((0, "pads"), (1, "pads_b"))
+            for bank, key in (banks if self.screen_bank == 0 else banks[::-1]):
                 for i, pad in enumerate(m[key]):
                     if pad == [ch, d1]:
                         if on:
@@ -963,8 +973,12 @@ class Instruments:
                 self.on_unmapped(ch, d1)
             for i, b in enumerate(m["buttons"]):
                 if b == ["cc", ch, d1]:
+                    now = time.monotonic()
                     if d2 > 0:
+                        self._btn_on[i] = now
                         self.button(i)
+                    elif now - self._btn_on.get(i, 0.0) > LATCH_GAP:
+                        self.button(i)              # botão que trava: 127 num toque, 0 no seguinte
                     return
             if d1 == 64:
                 self.engine.send_event(Ly.EV_SUSTAIN, d2)
@@ -987,6 +1001,9 @@ class Instruments:
         """Texto do monitor MIDI: o que o AmpSim faz com esta mensagem."""
         m = self.mapping
         if kind == "pc":
+            for i, b in enumerate(m["buttons"]):
+                if b == ["pc", ch, num]:
+                    return f"Troca de programa {num} · canal {ch + 1} → botão {BUTTONS[i]}"
             return f"Troca de programa {num} · canal {ch + 1} → não usado"
         if kind == "bend":
             return f"Pitch bend · canal {ch + 1} → afinação das teclas"
@@ -1061,21 +1078,25 @@ class Instruments:
             key = ("note", ch, d1)
         elif kind == 0xB0:
             key = ("cc", ch, d1)
+        elif kind == 0xC0 and step == "buttons":
+            key = ("pc", ch, d1)
         else:
             return
-        if key in self._learned:          # resto do movimento de um knob já aprendido
+        # CC já aprendido = resto do giro de um knob; nota já usada só vale de novo em outro banco
+        seen = key if key[0] != "note" else (step, key)
+        if seen in self._learned:
             return
         if step in ("pads", "pads_b") and key[0] == "note":
             self.mapping[step][i] = [ch, d1]
         elif step == "knobs" and key[0] == "cc":
             self.mapping["knobs"][i] = [ch, d1]
-        elif step == "buttons" and (key[0] == "note" or d2 > 0):
+        elif step == "buttons" and (key[0] in ("note", "pc") or d2 > 0):
             self.mapping["buttons"][i] = list(key)
         elif step == "pads_b" and key[0] == "cc":
             return                        # o próprio botão PAD-B: ignora
         else:
             return
-        self._learned.add(key)
+        self._learned.add(seen)
         self.learn_steps.pop(0)
         if step == "pads":
             self.pad_hit(i, d2)

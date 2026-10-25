@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from ..instruments import BUTTONS, PAD_COUNT, note_name
+from .theme import ACCENT
 
 WHITE_STEPS = (0, 2, 4, 5, 7, 9, 11)
 
@@ -114,6 +115,8 @@ class ControllerWidget(QWidget):
         self.knob_values = [64] * 8
         self.pad_glow = [0.0] * PAD_COUNT
         self.active = set()
+        self.pitch = 0.0                    # pitch bend do controlador (-1 a 1), desenhado por cima
+        self.mod = 0.0                      # modulação (0 a 1)
         self.split_note = None              # teclado dividido: 1ª nota da mão direita
         self.zone_names = ("", "")           # timbres (mão esquerda, mão direita)
         self.learn_target = None            # ("pads"|"pads_b"|"knobs"|"buttons", índice)
@@ -161,6 +164,14 @@ class ControllerWidget(QWidget):
 
     def set_key(self, note, on):
         (self.active.add if on else self.active.discard)(note)
+        self._update_keys()
+
+    def set_wheel(self, kind, value):
+        """Pitch bend (14 bits, centro 8192) ou modulação (CC1, 0-127) vindos do teclado."""
+        if kind == "pitch":
+            self.pitch = max(-1.0, min(1.0, (value - 8192) / 8191.0))
+        else:
+            self.mod = max(0.0, min(1.0, value / 127.0))
         self._update_keys()
 
     def set_knob(self, i, value):
@@ -314,7 +325,7 @@ class ControllerWidget(QWidget):
             self._cache, self._cache_key = pm, key
         qp = QPainter(self)
         qp.drawPixmap(0, 0, self._cache)
-        if self.active or any(self.pad_glow):
+        if self.active or any(self.pad_glow) or self.pitch or self.mod:
             self._paint_active_keys(qp)
 
     def _paint_active_keys(self, qp):
@@ -325,6 +336,8 @@ class ControllerWidget(QWidget):
         for i, r in self.m["pads"]:
             if self.pad_glow[i] > 0:
                 self._draw_pad(qp, i, r)
+        if self.pitch or self.mod:
+            self._paint_wheels(qp)
         qp.setFont(self._font(10))
         keys = self._keys()
         lit = [r for n, r, w in keys if w and n in self.active]
@@ -366,6 +379,35 @@ class ControllerWidget(QWidget):
         qp.setPen(QColor("#2a1d0d") if (self.bank or style != "reg" or i % 2) else QColor("#ffffff"))
         qp.drawText(r.adjusted(3, 2, -3, -2), Qt.AlignCenter | Qt.TextWordWrap,
                     text if self.bank or r.height() > 60 else _short2(text, 12))
+
+    def _paint_wheels(self, qp):
+        """Pitch e modulação em azul por cima do desenho (faixas do SMK, roda do PSR, alavanca do VR)."""
+        blue = QColor(ACCENT)
+        qp.setPen(Qt.NoPen)
+        style = self.m.get("style", "smk")
+        if style == "smk":
+            for r, label in self.m.get("strips", []):
+                inner = r.adjusted(3, 3, -3, -3)
+                if label == "PITCH":
+                    y = inner.center().y() - self.pitch * (inner.height() / 2 - 9)
+                    qp.setBrush(QColor(47, 124, 246, 70))
+                    top, bot = sorted((inner.center().y(), y))
+                    qp.drawRect(QRectF(inner.left(), top, inner.width(), bot - top))
+                    qp.setBrush(blue)
+                    qp.drawRoundedRect(QRectF(inner.left(), y - 9, inner.width(), 18), 6, 6)
+                elif self.mod:
+                    h = inner.height() * self.mod
+                    qp.setBrush(blue)
+                    qp.drawRoundedRect(QRectF(inner.left(), inner.bottom() - h, inner.width(), h), 6, 6)
+        elif style == "psr":
+            inner = _r(36, 410, 46, 150).adjusted(10, 12, -10, -12)
+            y = inner.center().y() - self.pitch * (inner.height() / 2 - 4)
+            qp.setBrush(blue)
+            qp.drawRoundedRect(QRectF(inner.left() - 2, y - 4, inner.width() + 4, 8), 3, 3)
+        else:                                              # alavanca do VR: lado = pitch, frente = mod
+            c = QPointF(67 + self.pitch * 14, 321 - self.mod * 22)
+            qp.setBrush(blue)
+            qp.drawRoundedRect(QRectF(c.x() - 9, c.y() - 25, 18, 50), 4, 4)
 
     def _draw_white(self, qp, note, r):
         wg = QLinearGradient(r.topLeft(), r.bottomLeft())

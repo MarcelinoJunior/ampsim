@@ -132,8 +132,7 @@ class MainWindow(QMainWindow):
         inst.on_control = br.control.emit
         inst.on_unmapped = br.unmapped.emit
         br.unmapped.connect(self._unmapped_control)
-        br.monitor.connect(lambda kind, ch, num, val: self.dock.log_midi(
-            self.inst.describe_midi(kind, ch, num, val)))
+        br.monitor.connect(self._midi_activity)
         self._unmapped_at = 0.0
         self.tabs.currentChanged.connect(self._tab_changed)
         self.midi = winmm.MidiInput(inst.handle_midi) if winmm.available else None
@@ -411,6 +410,15 @@ class MainWindow(QMainWindow):
     def _on_learn(self):
         self.dock.on_learn()
         self.pad_view.refresh()
+
+    def _midi_activity(self, kind, ch, num, val):
+        """Toda mensagem do teclado: monitor + pitch/modulação mexendo no desenho."""
+        self.dock.log_midi(self.inst.describe_midi(kind, ch, num, val))
+        ctrl = self.pad_view.ctrl
+        if kind == "bend":
+            ctrl.set_wheel("pitch", num | (val << 7))
+        elif kind == "cc" and num == 1:
+            ctrl.set_wheel("mod", val)
 
     def _unmapped_control(self, ch, cc):
         """Knob girado que não está ligado a nada: avisa (no máximo a cada 6 s)."""
