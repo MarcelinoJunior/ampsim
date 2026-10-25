@@ -14,7 +14,7 @@ from numba import njit
 from .layout import (
     A_BIAS, A_BLEND, A_G1, A_G2, A_G3, A_ON, A_OUT, A_PDRIVE, A_SAG, A_SAGCOEF, A_STAGES,
     BQ_A_BASS, BQ_A_DEPTH, BQ_A_DI, BQ_A_HPF, BQ_A_INTER1, BQ_A_INTER2, BQ_A_MID, BQ_A_PRES,
-    BQ_A_TREB, BQ_CAB, BQ_EQ, BQ_OD_HPF, BQ_OD_TONE,
+    BQ_A_TREB, BQ_CAB, BQ_EQ, BQ_NR_HPF, BQ_NR_HUM, BQ_NR_LPF, BQ_OD_HPF, BQ_OD_TONE,
     C_ATT, C_MAKEUP, C_ON, C_REL, C_SLOPE, C_THR_DB,
     CAB_GAIN, CAB_IRLEN, CAB_MODE, CAB_NBQ, CAB_ON,
     CH_BASE, CH_DEPTH, CH_MIX, CH_ON, CH_RATE, CHORUS_BUF,
@@ -23,11 +23,12 @@ from .layout import (
     EV_ALL_OFF, EV_BEND, EV_MOD, EV_NOTE_OFF, EV_NOTE_ON, EV_SUSTAIN,
     G_ATT, G_DET, G_ON, G_REL, G_THR,
     IR_BUF, MAX_VOICES,
+    NR_ATT, NR_DYN, NR_FMAX, NR_FMIN, NR_HPF, NR_HUM, NR_LPF, NR_ON, NR_REL, NR_THR,
     O_DRIVE, O_LEVEL, O_ON, OS_PHASE, OS_TAPS, OVERSAMPLE,
     RV_APS, RV_COMBS, RV_DAMP, RV_DRY, RV_FB, RV_ON, RV_WET, RV_WIDTH,
     S_CH_PHASE, S_CH_POS, S_COMP_ENV, S_DL_LEN, S_DL_LP_L, S_DL_LP_R, S_DL_POS,
     S_GATE_ENV, S_GATE_GAIN, S_GATE_OPEN, S_IR_POS, S_OSD0, S_OSD1, S_OSU0, S_OSU1,
-    S_PEAK_IN, S_PEAK_OUT, S_SAG,
+    S_NR_ENV, S_NR_IC1, S_NR_IC2, S_PEAK_IN, S_PEAK_OUT, S_SAG,
     SS_AGE, SS_BEND, SS_LFO, SS_MOD, SS_SUSTAIN,
     SY_AATT, SY_ADEC, SY_AREL, SY_ASUS, SY_BEND_RANGE, SY_CUTOFF, SY_DETUNE, SY_FATT,
     SY_FDEC, SY_FENV, SY_FREL, SY_FSUS, SY_KEYTRK, SY_LFODEPTH, SY_LFORATE, SY_MIX2,
@@ -101,6 +102,55 @@ def downsample_block(u, n, h, buf, ST, si, y):
 
 
 # ======================================================================= efeitos (mono)
+@njit(**JIT)
+def fx_denoise(x, n, D, BQ, Z, ST):
+    """Corte grave, notches da rede elétrica (hum) e corte agudo fixos, mais um passa-baixa
+    dinâmico (anti-chiado) que fecha os agudos quando o sinal cai abaixo do limiar."""
+    hum = int(D[NR_HUM])
+    hpf = D[NR_HPF] > 0.5
+    lpf = D[NR_LPF] > 0.5
+    amt = D[NR_DYN]
+    thr = D[NR_THR]
+    att = D[NR_ATT]
+    rel = D[NR_REL]
+    fmin = D[NR_FMIN]
+    fmax = D[NR_FMAX]
+    ratio = fmin / fmax
+    k = 1.4142135623730951          # Q = 0.707
+    env = ST[S_NR_ENV]
+    ic1 = ST[S_NR_IC1]
+    ic2 = ST[S_NR_IC2]
+    for i in range(n):
+        v = x[i]
+        if hpf:
+            v = bq(v, BQ, Z, BQ_NR_HPF)
+        for h in range(hum):
+            v = bq(v, BQ, Z, BQ_NR_HUM + h)
+        if lpf:
+            v = bq(v, BQ, Z, BQ_NR_LPF)
+        if amt > 0.0:
+            a = abs(v)
+            env += (a - env) * (att if a > env else rel)
+            o = (20.0 * math.log10(env + 1e-9) - thr) / 20.0 + 1.0    # 0 = 20 dB abaixo do limiar
+            if o > 1.0:
+                o = 1.0
+            elif o < 0.0:
+                o = 0.0
+            g = math.tan(math.pi * fmax * math.pow(ratio, (1.0 - o) * amt))
+            a1 = 1.0 / (1.0 + g * (g + k))
+            a2 = g * a1
+            v3 = v - ic2
+            v1 = a1 * ic1 + a2 * v3
+            v2 = ic2 + a2 * ic1 + g * a2 * v3
+            ic1 = 2.0 * v1 - ic1
+            ic2 = 2.0 * v2 - ic2
+            v = v2
+        x[i] = v
+    ST[S_NR_ENV] = env
+    ST[S_NR_IC1] = ic1 if abs(ic1) > 1e-15 else 0.0
+    ST[S_NR_IC2] = ic2 if abs(ic2) > 1e-15 else 0.0
+
+
 @njit(**JIT)
 def fx_gate(x, n, D, ST):
     thr = D[G_THR]
@@ -391,6 +441,8 @@ def process_track(src, ch, n, mix, D, BQ, Z, ST, H, OSU, OSD, IR, IRH, CHB, DLB,
             peak = abs(v)
     ST[S_PEAK_IN] = peak
 
+    if D[NR_ON] > 0.5:
+        fx_denoise(x, n, D, BQ, Z, ST)
     if D[G_ON] > 0.5:
         fx_gate(x, n, D, ST)
     if D[C_ON] > 0.5:
@@ -680,9 +732,11 @@ def warmup(fs=48000.0):
     from .track import TrackDSP
     from .synth import SynthDSP
 
+    from .params import EFFECTS
+
     t = TrackDSP(fs)
-    for key in ("gate", "comp", "overdrive", "amp", "cab", "eq", "chorus", "delay", "reverb"):
-        t.set_on(key, True)
+    for e in EFFECTS:
+        t.set_on(e.key, True)
     n = 64
     src = np.zeros((n, 2), dtype=np.float32)
     src[:, 0] = 0.1

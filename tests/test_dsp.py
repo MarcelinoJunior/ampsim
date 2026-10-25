@@ -160,3 +160,45 @@ def test_realtime_budget():
     print(f"\nCPU por bloco: {per_block * 1e6:.0f} us de {budget * 1e6:.0f} us "
           f"({100 * per_block / budget:.0f}% da janela)")
     assert per_block < budget * 0.6
+
+
+def _rms_db(y):
+    return 20 * np.log10(np.sqrt(np.mean(y ** 2)) + 1e-12)
+
+
+def test_denoise_cuts_amplified_hiss():
+    """Chiado de entrada (-60 dB, típico de entrada de microfone USB) num preset com distorção."""
+    from ampsim.presets import FACTORY
+
+    hiss = np.random.default_rng(3).standard_normal(int(FS * 2)) * 1e-3
+    preset = FACTORY["guitar"]["Crunch Clássico"]["values"]
+    off = TrackDSP(FS)
+    off.load_state({"values": {k: v for k, v in preset.items() if k not in ("denoise", "gate")}})
+    on = TrackDSP(FS)
+    on.load_state({"values": preset})
+    # o que o botão "Calibrar ruído" faz: limiares 6 dB acima do pico do chiado
+    thr = round(20 * np.log10(np.abs(hiss).max()) + 6)
+    on.set_param("denoise", "sens", thr)
+    on.set_param("gate", "threshold", thr)
+    before = _rms_db(run(off, hiss)[int(FS):, 0])
+    after = _rms_db(run(on, hiss)[int(FS):, 0])
+    print(f"\nchiado amplificado: {before:.1f} dB -> {after:.1f} dB")
+    assert after < before - 30
+
+
+def test_denoise_keeps_playing_signal():
+    t = TrackDSP(FS)
+    t.set_on("denoise", True)
+    x = guitar_signal(1.0, amp=0.3)
+    y = run(t, x)[:, 0]
+    assert abs(_rms_db(y[:24000]) - _rms_db(x[:24000])) < 1.5
+
+
+def test_hum_notch():
+    t = TrackDSP(FS)
+    t.set_on("denoise", True)
+    t.set_param("denoise", "hiss", 0)
+    tt = np.arange(int(FS * 2)) / FS
+    hum = 0.1 * (np.sin(2 * np.pi * 60 * tt) + 0.5 * np.sin(2 * np.pi * 180 * tt))
+    y = run(t, hum)[int(FS):, 0]
+    assert _rms_db(y) < _rms_db(hum) - 25

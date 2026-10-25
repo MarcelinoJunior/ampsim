@@ -6,13 +6,15 @@ import numpy as np
 
 from . import layout as Ly
 from .filters import IDENTITY, biquad, db, onepole_coef, oversampling_kernel
-from .params import AMP_MODELS, CAB_IR_INDEX, CAB_MODELS, EFFECTS, EQ_FREQS, TRACK_PARAMS
+from .params import (
+    AMP_MODELS, CAB_IR_INDEX, CAB_MODELS, EFFECTS, EQ_FREQS, HUM_FREQS, TRACK_PARAMS,
+)
 from .wav import read_wav
 
 OS_KERNEL = oversampling_kernel()
 
 ON_SLOT = {
-    "gate": Ly.G_ON, "comp": Ly.C_ON, "overdrive": Ly.O_ON, "amp": Ly.A_ON, "cab": Ly.CAB_ON,
+    "denoise": Ly.NR_ON, "gate": Ly.G_ON, "comp": Ly.C_ON, "overdrive": Ly.O_ON, "amp": Ly.A_ON, "cab": Ly.CAB_ON,
     "eq": Ly.EQ_ON, "chorus": Ly.CH_ON, "delay": Ly.DL_ON, "reverb": Ly.RV_ON,
 }
 
@@ -151,6 +153,27 @@ class TrackDSP:
         p = (v["pan"] + 100.0) / 200.0 * (math.pi / 2)        # pan de potência constante
         D[Ly.T_PANL] = math.cos(p) * math.sqrt(2)
         D[Ly.T_PANR] = math.sin(p) * math.sqrt(2)
+
+    def _upd_denoise(self, v, D, fs):
+        hum = HUM_FREQS[int(round(v["hum"]))]
+        notches = 0
+        for h in range(Ly.NR_NOTCHES):
+            f = hum * (h + 1)
+            if hum and f < fs * 0.45:
+                # mesma largura de banda (~6 Hz) para a fundamental e os harmônicos
+                self._bq(Ly.BQ_NR_HUM + h, biquad("notch", fs, f, q=f / 6.0))
+                notches += 1
+        D[Ly.NR_HUM] = notches
+        D[Ly.NR_HPF] = 1.0 if v["lowcut"] > 20.5 else 0.0
+        self._bq(Ly.BQ_NR_HPF, biquad("hp", fs, v["lowcut"], q=0.707))
+        D[Ly.NR_LPF] = 1.0 if v["highcut"] < 19500 else 0.0
+        self._bq(Ly.BQ_NR_LPF, biquad("lp", fs, v["highcut"], q=0.707))
+        D[Ly.NR_DYN] = v["hiss"] / 100.0
+        D[Ly.NR_THR] = v["sens"]
+        D[Ly.NR_ATT] = onepole_coef(fs, 0.001)
+        D[Ly.NR_REL] = onepole_coef(fs, 0.120)
+        D[Ly.NR_FMAX] = min(18000.0, 0.45 * fs) / fs
+        D[Ly.NR_FMIN] = 1500.0 / fs
 
     def _upd_gate(self, v, D, fs):
         D[Ly.G_THR] = db(v["threshold"])

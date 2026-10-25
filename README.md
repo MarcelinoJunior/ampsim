@@ -59,10 +59,16 @@ Dicas:
 ## Cadeia de efeitos (igual para as três trilhas)
 
 ```
-Noise Gate → Compressor → Overdrive → Amplificador → Gabinete → EQ 5 bandas
+Redutor de Ruído → Noise Gate → Compressor → Overdrive → Amplificador → Gabinete → EQ 5 bandas
            → Chorus (estéreo) → Delay (ping-pong opcional) → Reverb → Volume/Pan
 ```
 
+- **Redutor de Ruído**: anti-hum (notches em 50/60 Hz e harmônicos), anti-chiado (filtro
+  que fecha os agudos quando você não está tocando), corte de graves e de agudos.
+- **Calibrar ruído** (cabeçalho das trilhas Guitarra/Baixo): abafe as cordas e clique; o app
+  mede o chiado da entrada por 2 s e ajusta os limiares do Gate e do Redutor de Ruído.
+  Entradas de microfone de placas USB simples costumam ter bastante chiado: com distorção ele
+  vira um "zunido" agudo se o gate ficar abaixo do ruído.
 - **Amplificador**: 5 modelos — Clean (americano), Crunch (britânico), Lead (hi-gain),
   Baixo Clean (valvulado) e Baixo Drive. Gain, Graves, Médios, Agudos, Presença, Master e
   **Blend DI** (mistura sinal limpo — útil no baixo para manter o grave).

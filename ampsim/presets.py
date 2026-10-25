@@ -62,3 +62,19 @@ FACTORY = {
 }
 
 DEFAULT_PRESET = {"guitar": "Crunch Clássico", "bass": "Baixo Limpo", "pads": "Pad Ambiente"}
+
+# Redutor de ruído ligado em todos os presets de guitarra e baixo (menos o DI puro), e gate
+# mais alto nos timbres com distorção, onde o chiado da entrada é amplificado.
+_DENOISE = {
+    "guitar": dict(on=True, hum=2, hiss=50, sens=-45, lowcut=40, highcut=9000),
+    "bass": dict(on=True, hum=2, hiss=40, sens=-45, lowcut=25, highcut=7000),
+}
+_GATE = {"Crunch Clássico": -50, "Solo com Delay": -50, "Hi-Gain Rítmico": -48, "Baixo Fuzz": -50}
+for _kind, _cfg in _DENOISE.items():
+    for _name, _preset in FACTORY[_kind].items():
+        if _name.startswith("DI"):
+            continue
+        _preset["values"]["denoise"] = dict(_cfg)
+        if _name in _GATE:
+            _g = _preset["values"].setdefault("gate", {})
+            _g.update(on=True, threshold=_GATE[_name])

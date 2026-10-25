@@ -69,9 +69,19 @@ EQ_FREQS = (100, 400, 1000, 2500, 6000)
 ONOFF = ("Não", "Sim")
 
 # --------------------------------------------------------------------- cadeia de efeitos
+HUM_CHOICES = ("Desligado", "50 Hz", "60 Hz")
+HUM_FREQS = (0, 50, 60)
+
 EFFECTS = (
+    EffectDef("denoise", "Redutor de Ruído", (
+        Param("hum", "Anti-hum (rede)", 0, 2, 2, choices=HUM_CHOICES),
+        Param("hiss", "Anti-chiado", 0, 100, 50, "%"),
+        Param("sens", "Limiar", -80, -20, -50, "dB"),
+        Param("lowcut", "Corte grave", 20, 250, 30, "Hz", log=True),
+        Param("highcut", "Corte agudo", 2000, 20000, 9000, "Hz", log=True),
+    )),
     EffectDef("gate", "Noise Gate", (
-        Param("threshold", "Limiar", -90, -20, -65, "dB"),
+        Param("threshold", "Limiar", -90, -20, -60, "dB"),
         Param("release", "Release", 5, 500, 60, "ms", log=True),
     )),
     EffectDef("comp", "Compressor", (

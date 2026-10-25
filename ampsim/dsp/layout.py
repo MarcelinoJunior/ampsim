@@ -29,7 +29,8 @@ RV_ON, RV_FB, RV_DAMP, RV_WET, RV_DRY, RV_WIDTH = range(41, 47)
 T_VOL, T_PANL, T_PANR, T_ON, T_INGAIN = range(47, 52)
 G_DET = 52                       # coeficiente de release do detector do gate
 A_SAGCOEF = 53                   # coeficiente do envelope de "sag" (taxa 4x)
-D_SIZE = 64
+NR_ON, NR_HUM, NR_DYN, NR_THR, NR_ATT, NR_REL, NR_FMIN, NR_FMAX, NR_HPF, NR_LPF = range(54, 64)
+D_SIZE = 80
 
 # ---------------------------------------------------------------- slots de biquad (BQ/Z)
 BQ_OD_HPF = 0       # taxa base
@@ -45,7 +46,11 @@ BQ_A_DEPTH = 9      # taxa base
 BQ_A_DI = 10        # taxa base (EQ do sinal limpo do blend)
 BQ_CAB = 11         # 11..16
 BQ_EQ = BQ_CAB + CAB_MAX_BQ   # 17..21
-NBQ = BQ_EQ + EQ_BANDS
+NR_NOTCHES = 4
+BQ_NR_HUM = BQ_EQ + EQ_BANDS  # 22..25 (notches da fundamental e harmônicos da rede)
+BQ_NR_HPF = BQ_NR_HUM + NR_NOTCHES
+BQ_NR_LPF = BQ_NR_HPF + 1
+NBQ = BQ_NR_LPF + 1
 
 # ---------------------------------------------------------------- estado escalar (ST)
 S_GATE_ENV, S_GATE_GAIN = 0, 1
@@ -61,6 +66,7 @@ S_OSU1, S_OSD1 = 12, 13       # índices dos oversamplers (amp)
 S_PEAK_IN, S_PEAK_OUT = 14, 15
 S_GATE_OPEN = 16
 S_DL_LEN = 17                 # tamanho do buffer de delay (potência de 2)
+S_NR_ENV, S_NR_IC1, S_NR_IC2 = 18, 19, 20
 ST_SIZE = 32
 
 # ---------------------------------------------------------------- reverb (Freeverb)

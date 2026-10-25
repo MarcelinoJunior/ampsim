@@ -1,4 +1,5 @@
 """Painéis de efeito, painel do synth e página de cada trilha."""
+import math
 import os
 
 from PySide6.QtCore import Qt
@@ -14,6 +15,9 @@ from ..presets import FACTORY
 from .widgets import Knob, LedButton, Meter
 
 KNOBS_PER_ROW = 4
+CALIB_TICKS = 70          # ~2,3 s com o timer de 33 ms da janela principal
+CALIB_SKIP = 10           # ignora o começo (clique do mouse, transientes)
+CALIB_MARGIN_DB = 6.0     # limiar fica 6 dB acima do pico do ruído
 
 
 def _choice_box(param, on_change):
@@ -217,6 +221,14 @@ class TrackPage(QWidget):
         self.input_label = QLabel("")
         self.input_label.setObjectName("small")
         hl.addWidget(self.input_label)
+        self._calib = None
+        if name != "pads":
+            self.calib_btn = QPushButton("Calibrar ruído")
+            self.calib_btn.setFocusPolicy(Qt.NoFocus)
+            self.calib_btn.setToolTip("Com o instrumento plugado e as cordas abafadas, mede o chiado da\n"
+                                      "entrada por 2 s e ajusta os limiares do Gate e do Redutor de Ruído.")
+            self.calib_btn.clicked.connect(self._start_calibration)
+            hl.addWidget(self.calib_btn)
         hl.addSpacing(8)
         self.track_knobs = {}
         for p in TRACK_PARAMS:
@@ -259,7 +271,8 @@ class TrackPage(QWidget):
             bl.addWidget(self.synth_panel)
         grid = QGridLayout()
         grid.setSpacing(6)
-        layout_rows = (("gate", "comp", "overdrive", "amp"), ("cab", "eq", "chorus", "delay", "reverb"))
+        layout_rows = (("denoise", "gate", "comp", "overdrive", "amp"),
+                       ("cab", "eq", "chorus", "delay", "reverb"))
         by_key = {e.key: e for e in EFFECTS}
         for r, keys in enumerate(layout_rows):
             for c, key in enumerate(keys):
@@ -295,7 +308,45 @@ class TrackPage(QWidget):
         pin, pout = self.track().meters()
         self.m_in.push(pin)
         self.m_out.push(pout)
+        if self._calib is not None:
+            self._calib.append(pin)
+            if len(self._calib) >= CALIB_TICKS:
+                self._finish_calibration()
         return pout
+
+    # ------------------------------------------------------------------ calibração de ruído
+    def _start_calibration(self):
+        if not self.engine.running:
+            QMessageBox.information(self, "Calibrar ruído", "Ligue o áudio antes de calibrar.")
+            return
+        self._calib = []
+        self.calib_btn.setEnabled(False)
+        self.calib_btn.setText("Medindo… não toque")
+
+    def _finish_calibration(self):
+        peaks = self._calib[CALIB_SKIP:]
+        self._calib = None
+        self.calib_btn.setEnabled(True)
+        self.calib_btn.setText("Calibrar ruído")
+        noise = max(peaks) if peaks else 0.0
+        if noise <= 1e-6:
+            QMessageBox.information(self, "Calibrar ruído",
+                                    "Nenhum sinal na entrada. Confira o canal da trilha em ⚙ Áudio.")
+            return
+        noise_db = 20 * math.log10(noise)
+        thr = round(min(max(noise_db + CALIB_MARGIN_DB, -80.0), -20.0))
+        t = self.track()
+        t.set_on("denoise", True)
+        t.set_param("denoise", "sens", thr)
+        t.set_on("gate", True)
+        t.set_param("gate", "threshold", thr)
+        self.refresh()
+        msg = (f"Ruído de entrada medido: {noise_db:.0f} dB (pico).\n"
+               f"Gate e Redutor de Ruído ajustados para {thr} dB.")
+        if noise_db > -40:
+            msg += ("\n\nO ruído está alto. Verifique cabo e captadores, abaixe o ganho de entrada "
+                    "do microfone no Windows ou afaste o instrumento do computador/monitor.")
+        QMessageBox.information(self, "Calibrar ruído", msg)
 
     # ------------------------------------------------------------------ presets
     def reload_presets(self, select=None):

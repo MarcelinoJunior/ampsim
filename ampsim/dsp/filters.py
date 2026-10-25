@@ -23,6 +23,8 @@ def biquad(kind, fs, f, gain_db=0.0, q=0.707):
         return _norm((1 - cw) / 2, 1 - cw, (1 - cw) / 2, 1 + alpha, -2 * cw, 1 - alpha)
     if kind == "hp":
         return _norm((1 + cw) / 2, -(1 + cw), (1 + cw) / 2, 1 + alpha, -2 * cw, 1 - alpha)
+    if kind == "notch":
+        return _norm(1, -2 * cw, 1, 1 + alpha, -2 * cw, 1 - alpha)
     if kind == "peak":
         return _norm(1 + alpha * A, -2 * cw, 1 - alpha * A, 1 + alpha / A, -2 * cw, 1 - alpha / A)
     if kind in ("ls", "hs"):
