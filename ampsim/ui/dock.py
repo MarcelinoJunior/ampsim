@@ -312,6 +312,15 @@ class BottomDock(QFrame):
         self.learn_btn.setToolTip("Toque cada pad, gire cada knob e aperte cada botão quando o AmpSim pedir.")
         self.learn_btn.clicked.connect(lambda: None if self.inst.learn_steps else self.inst.start_learning())
         col.addWidget(self.learn_btn)
+        only = QHBoxLayout()
+        for text, what, tip in (("Só os knobs", ("knobs",), "Gire cada knob quando pedir (o da tela pisca)"),
+                                ("Só os pads", ("pads", "pads_b"), "Toque cada pad quando pedir (bancos A e B)")):
+            b = QPushButton(text)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setToolTip(tip)
+            b.clicked.connect(lambda *_, w=what: None if self.inst.learn_steps else self.inst.start_learning(w))
+            only.addWidget(b)
+        col.addLayout(only)
         row = QHBoxLayout()
         self.skip_btn = QPushButton("Pular")
         self.skip_btn.clicked.connect(self.inst.skip_learning_step)

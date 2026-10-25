@@ -618,3 +618,17 @@ def test_continuous_pad_timbre_buttons(win, app):
     QTest.mouseClick(win.dock.cont_tiles[0], Qt.LeftButton)          # e o caminho inverso
     assert pv.cont_sound_buttons[CONT_PAD_SOUNDS[0]].isChecked()
     win.inst.stop_cont_pad(immediate=True)
+
+
+def test_map_only_knobs_button_and_unmapped_warning(win, app):
+    from PySide6.QtWidgets import QPushButton
+    win.dock.show_tab(2)
+    b = next(x for x in win.dock.findChildren(QPushButton) if x.text() == "Só os knobs")
+    QTest.mouseClick(b, Qt.LeftButton)
+    assert win.inst.learn_steps and all(k == "knobs" for k, _ in win.inst.learn_steps)
+    assert "KNOB 1" in win.dock.learn_label.text()
+    win.inst.stop_learning()
+    win.inst.mapping["knobs"] = [None] * 8
+    win.inst.handle_midi(0xB0, 75, 40)
+    app.processEvents()
+    assert "CC 75" in win.topbar.info2.text() and "Só os knobs" in win.topbar.info2.text()

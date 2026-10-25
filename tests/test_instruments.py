@@ -262,3 +262,41 @@ def test_pulse_bass_follows_bpm_and_tap(engine):
         inst.tap_tempo()
         time.sleep(0.4)
     assert abs(inst.bpm - 150) <= 3
+
+
+def test_default_pads_match_controller_rows(engine):
+    """Fileira de baixo do SMK-25 = notas 36-39; na tela os pads 1-4 são a fileira de cima."""
+    inst = engine.instruments
+    inst.mapping["pads"] = [[9, n] for n in (40, 41, 42, 43, 36, 37, 38, 39)]
+    hits = []
+    inst.on_pad = lambda i, v: hits.append(i)
+    inst.handle_midi(0x99, 40, 100)            # pad de cima à esquerda
+    inst.handle_midi(0x99, 36, 100)            # pad de baixo à esquerda
+    assert hits == [0, 4]
+
+
+def test_old_inverted_pad_default_is_fixed_on_load(engine):
+    from ampsim.instruments import DEFAULT_PADS, DEFAULT_PADS_B, OLD_DEFAULT_PADS, OLD_DEFAULT_PADS_B
+    inst = engine.instruments
+    inst.load_state({"mapping": {"pads": OLD_DEFAULT_PADS, "pads_b": OLD_DEFAULT_PADS_B}})
+    assert inst.mapping["pads"] == DEFAULT_PADS and inst.mapping["pads_b"] == DEFAULT_PADS_B
+    mine = [[9, n] for n in (60, 61, 62, 63, 64, 65, 66, 67)]          # mapeamento feito pelo usuário
+    inst.load_state({"mapping": {"pads": mine}})
+    assert inst.mapping["pads"] == mine
+
+
+def test_unmapped_knob_is_reported_and_knob_learning(engine):
+    inst = engine.instruments
+    inst.mapping["knobs"] = [None] * 8
+    seen, moved = [], []
+    inst.on_unmapped = lambda ch, cc: seen.append(cc)
+    inst.on_knob = lambda i, v: moved.append((i, v))
+    inst.handle_midi(0xB0, 74, 50)             # knob ainda sem mapeamento
+    inst.handle_midi(0xB0, 64, 127)            # sustain: não é knob
+    assert seen == [74] and moved == []
+    inst.start_learning(("knobs",))            # "Só os knobs"
+    assert [k for k, _ in inst.learn_steps] == ["knobs"] * 8
+    inst.handle_midi(0xB0, 74, 51)
+    inst.stop_learning()
+    inst.handle_midi(0xB0, 74, 99)
+    assert moved and moved[-1] == (0, 99) and seen == [74]   # agora mexe o knob 1 da tela

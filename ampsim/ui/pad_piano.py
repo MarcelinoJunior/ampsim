@@ -53,6 +53,7 @@ class InstrumentBridge(QObject):
     learn = Signal()
     monitor = Signal(str, int, int, int)     # atividade MIDI (diálogo de mapeamento)
     control = Signal(str, int)               # função acionada por controle mapeado
+    unmapped = Signal(int, int)              # canal, CC de um knob ainda não mapeado
 
 
 def _combo(items=(), width=None):

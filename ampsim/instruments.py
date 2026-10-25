@@ -316,6 +316,16 @@ def clean_layer(d):
                 zone=d.get("zone", "all") if d.get("zone", "all") in LAYER_ZONES else "all")
 
 
+# Pads na tela: índices 0-3 = fileira de cima, 4-7 = de baixo. No SMK-25 (e na maioria dos
+# controladores com 8 pads) a fileira de BAIXO manda as notas 36-39 e a de cima 40-43.
+DEFAULT_PADS = [[9, n] for n in (40, 41, 42, 43, 36, 37, 38, 39)]
+DEFAULT_PADS_B = [[9, n] for n in (48, 49, 50, 51, 44, 45, 46, 47)]
+OLD_DEFAULT_PADS = [[9, n] for n in range(36, 44)]          # padrão antigo (fileiras trocadas)
+OLD_DEFAULT_PADS_B = [[9, n] for n in range(44, 52)]
+# CCs de uso geral (modulação, volume, sustain, efeitos, banco, "all notes off"…): não são knobs
+GENERAL_CCS = {0, 1, 2, 7, 10, 11, 32, 64, 65, 66, 67, 91, 93, 120, 121, 122, 123, 124, 125, 126, 127}
+
+
 class Instruments:
     """Estado e roteamento. Os métodos de nota/MIDI podem ser chamados de qualquer thread."""
 
@@ -332,8 +342,8 @@ class Instruments:
         self.cont_sound = "Pad Halo"
         self.levels = dict(keys=80, drums=85, pad=70, reverb=110, chorus=40, shimmer=65,
                            drumverb=35, bright=64, release=64, attack=0, touch=100)
-        self.mapping = dict(pads=[[9, n] for n in range(36, 44)],
-                            pads_b=[[9, n] for n in range(44, 52)],
+        self.mapping = dict(pads=[list(p) for p in DEFAULT_PADS],
+                            pads_b=[list(p) for p in DEFAULT_PADS_B],
                             knobs=[None] * KNOB_COUNT, buttons=[None] * len(BUTTONS))
         self.knob_funcs = list(DEFAULT_KNOB_FUNCS)
         self.button_funcs = list(DEFAULT_BUTTON_FUNCS)
@@ -369,6 +379,7 @@ class Instruments:
         self.on_knob = lambda i, val: None
         self.on_change = lambda: None
         self.on_learn = lambda: None
+        self.on_unmapped = lambda ch, cc: None   # knob/fader que ainda não está ligado a nada
 
     # ------------------------------------------------------------------ camadas
     @property
@@ -946,6 +957,8 @@ class Instruments:
                 if k == [ch, d1]:
                     self.set_knob(i, d2)
                     return
+            if d1 not in GENERAL_CCS and not any(b == ["cc", ch, d1] for b in m["buttons"]):
+                self.on_unmapped(ch, d1)
             for i, b in enumerate(m["buttons"]):
                 if b == ["cc", ch, d1]:
                     if d2 > 0:
@@ -1093,6 +1106,11 @@ class Instruments:
             v = st.get("mapping", {}).get(k)
             if isinstance(v, list) and len(v) == n:
                 self.mapping[k] = v
+        # sessões com o padrão antigo dos pads (fileiras invertidas no SMK-25): corrige sozinho
+        if self.mapping["pads"] == OLD_DEFAULT_PADS:
+            self.mapping["pads"] = [list(p) for p in DEFAULT_PADS]
+        if self.mapping["pads_b"] == OLD_DEFAULT_PADS_B:
+            self.mapping["pads_b"] = [list(p) for p in DEFAULT_PADS_B]
         for attr, valid, n in (("knob_funcs", KNOB_FUNCS, KNOB_COUNT),
                                ("button_funcs", BUTTON_FUNCS, len(BUTTONS))):
             v = st.get(attr)

@@ -130,6 +130,9 @@ class MainWindow(QMainWindow):
         inst.on_learn = br.learn.emit
         inst.on_monitor = br.monitor.emit
         inst.on_control = br.control.emit
+        inst.on_unmapped = br.unmapped.emit
+        br.unmapped.connect(self._unmapped_control)
+        self._unmapped_at = 0.0
         self.tabs.currentChanged.connect(self._tab_changed)
         self.midi = winmm.MidiInput(inst.handle_midi) if winmm.available else None
 
@@ -400,6 +403,16 @@ class MainWindow(QMainWindow):
     def _on_learn(self):
         self.dock.on_learn()
         self.pad_view.refresh()
+
+    def _unmapped_control(self, ch, cc):
+        """Knob girado que não está ligado a nada: avisa (no máximo a cada 6 s)."""
+        import time
+
+        now = time.monotonic()
+        if now - self._unmapped_at < 6.0:
+            return
+        self._unmapped_at = now
+        self.flash_status(f"Knob (CC {cc}) ainda não ligado: MIDI / Controlador → Só os knobs")
 
     def _show_key(self, note, on):
         self.pad_view.show_key(note, on)
