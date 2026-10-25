@@ -376,3 +376,21 @@ def test_learning_pads_with_same_notes_in_both_banks_and_pc_button(engine):
     assert inst.screen_bank == 1
     assert "botão PAD-B" in inst.describe_midi("pc", 0, 5, 0)
     inst.screen_bank = 0
+
+
+def test_button_that_sends_a_note_never_plays_sound(engine):
+    """PAD-B do M-VAVE manda nota: mapeado como botão, troca o banco e não toca bateria/piano."""
+    inst = engine.instruments
+    inst.mapping["pads"] = [list(p) for p in SAME]
+    inst.mapping["pads_b"] = [list(p) for p in SAME]
+    inst.mapping["buttons"] = [None] * 7 + [["note", 9, 40]]       # mesma nota de um pad
+    inst.button_funcs[7] = "Banco de pads A/B (tela)"
+    inst.screen_bank = 0
+    hits, keys = [], []
+    inst.on_pad = lambda i, v: hits.append(i)
+    inst.on_key = lambda n, on: keys.append(n)
+    inst.handle_midi(0x99, 40, 100)                                 # aperta PAD-B
+    inst.handle_midi(0x89, 40, 0)
+    assert inst.screen_bank == 1 and hits == [] and keys == []
+    inst.mapping["buttons"] = [None] * 8
+    inst.screen_bank = 0

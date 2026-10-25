@@ -943,6 +943,13 @@ class Instruments:
         m = self.mapping
         if kind in (0x80, 0x90):
             on = kind == 0x90 and d2 > 0
+            # botão mapeado vem antes de tudo: um botão que manda nota (ex.: o PAD-B do M-VAVE)
+            # nunca toca som de pad ou de tecla
+            for i, b in enumerate(m["buttons"]):
+                if b == ["note", ch, d1]:
+                    if on:
+                        self.button(i)
+                    return
             # o banco da tela vem primeiro: se o controlador manda as mesmas notas nos dois bancos,
             # o PAD-B (mapeado como botão) troca o banco e os pads seguem a tela
             banks = ((0, "pads"), (1, "pads_b"))
@@ -955,11 +962,6 @@ class Instruments:
                                 self.on_change()
                             self.pad_hit(i + bank * PAD_COUNT, d2)
                         return
-            for i, b in enumerate(m["buttons"]):
-                if b == ["note", ch, d1]:
-                    if on:
-                        self.button(i)
-                    return
             if on:
                 self.key_on(d1, d2)
             else:
