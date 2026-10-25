@@ -29,7 +29,7 @@ from .layout import (
     S_CH_PHASE, S_CH_POS, S_COMP_ENV, S_DL_LEN, S_DL_LP_L, S_DL_LP_R, S_DL_POS,
     S_GATE_ENV, S_GATE_GAIN, S_GATE_OPEN, S_IR_POS, S_OSD0, S_OSD1, S_OSU0, S_OSU1,
     S_NR_ENV, S_NR_IC1, S_NR_IC2, S_PEAK_IN, S_PEAK_OUT, S_SAG,
-    SS_AGE, SS_BEND, SS_LFO, SS_MOD, SS_PULSE, SS_SUSTAIN,
+    SS_AGE, SS_BEND, SS_LFO, SS_MOD, SS_PRESTART, SS_PULSE, SS_SUSTAIN, SS_XF, SS_XFMUL, SS_XFOCT,
     SY_AATT, SY_ADEC, SY_AREL, SY_ASUS, SY_BEND_RANGE, SY_CUTOFF, SY_DETUNE, SY_FATT,
     SY_FDEC, SY_FENV, SY_FREL, SY_FSUS, SY_KEYTRK, SY_LFODEPTH, SY_LFORATE, SY_MIX2,
     SY_PULSE_DEPTH, SY_PULSE_FILT, SY_PULSE_RATE, SY_PULSE_RETRIG, SY_PULSE_SHAPE,
@@ -696,7 +696,12 @@ def _env_step(stage, level, att, dec, sus, rel):
 def pulse_shape(ph, shape):
     """Envelope rítmico 0..1 dentro de um ciclo do pulso (ph = 0 no tempo)."""
     if shape == 0:      # "Pulso": cai no tempo e volta subindo (efeito sidechain)
-        return (1.0 - math.exp(-5.0 * ph)) / (1.0 - math.exp(-5.0))
+        # a queda é uma curva suave (6% do ciclo); um degrau de 1 para 0 faria um clique
+        duck = 0.06
+        if ph < duck:
+            return 0.5 + 0.5 * math.cos(math.pi * ph / duck)
+        t = (ph - duck) / (1.0 - duck)
+        return (1.0 - math.exp(-5.0 * t)) / (1.0 - math.exp(-5.0))
     if shape == 1:      # "Ondas": vai e volta suave
         return 0.5 - 0.5 * math.cos(TWO_PI * ph)
     # "Gate": nota picada (metade do tempo)
@@ -730,6 +735,17 @@ def render_synth(out, n, ev, nev, SD, VS, SST, fs):
     p_shape = int(SD[SY_PULSE_SHAPE])
     p_filt = SD[SY_PULSE_FILT]
     pph0 = SST[SS_PULSE]
+    if SST[SS_PRESTART] > 0.5:           # Tap: recomeça o ciclo com 12 ms de transição
+        pv = pulse_shape(pph0, p_shape)
+        SST[SS_XFMUL] = 1.0 - p_depth * (1.0 - pv)
+        SST[SS_XFOCT] = p_filt * (pv - 1.0)
+        SST[SS_XF] = 0.012 * fs
+        SST[SS_PRESTART] = 0.0
+        pph0 = 0.0
+    xf_len = 0.012 * fs
+    xf_left = SST[SS_XF]
+    xf_mul = SST[SS_XFMUL]
+    xf_oct = SST[SS_XFOCT]
 
     lfo_ph0 = SST[SS_LFO]
     for v in range(MAX_VOICES):
@@ -782,6 +798,10 @@ def render_synth(out, n, ev, nev, SD, VS, SST, fs):
                 pph += p_inc
                 if pph >= 1.0:
                     pph -= 1.0
+                if xf_left > i:
+                    w = (xf_left - i) / xf_len
+                    pmul = pmul * (1.0 - w) + xf_mul * w
+                    poct = poct * (1.0 - w) + xf_oct * w
             fc = cutoff * math.pow(2.0, fenv * fl + lfo * lfo_depth + key_oct + poct)
             if fc > nyq:
                 fc = nyq
@@ -817,6 +837,7 @@ def render_synth(out, n, ev, nev, SD, VS, SST, fs):
     SST[SS_LFO] = ph - math.floor(ph)
     ph = pph0 + p_inc * n
     SST[SS_PULSE] = ph - math.floor(ph)
+    SST[SS_XF] = max(0.0, xf_left - n)
 
 
 def warmup(fs=48000.0):

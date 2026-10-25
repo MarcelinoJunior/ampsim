@@ -107,7 +107,7 @@ class SynthDSP:
         self.update_all()
 
     def restart_pulse(self):
-        self.SST[Ly.SS_PULSE] = 0.0
+        self.SST[Ly.SS_PRESTART] = 1.0     # o kernel recomeça o ciclo com transição suave
 
     def reset_voices(self):
         self.VS[:] = 0

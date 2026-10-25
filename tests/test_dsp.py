@@ -319,3 +319,25 @@ def test_vst3_slot_with_nam_plugin():
     t2 = TrackDSP(FS)
     t2.load_state(state)
     assert t2.vst is not None and t2.vst.name == t.vst.name
+
+
+@pytest.mark.parametrize("shape", [0, 1, 2])
+def test_pulse_has_no_clicks(shape):
+    """O pulso no BPM (e o Tap no meio da nota) não pode gerar degraus audíveis (cliques)."""
+    s = SynthDSP(FS)
+    s.apply_preset("Baixo Pulsante")
+    s.set_bpm(80)
+    s.values["pulse_shape"] = shape
+    s.update_all()
+    out = np.zeros((BLOCK, 1), dtype=np.float32)
+    ev = np.zeros((4, 3), dtype=np.int32)
+    ev[0] = (Ly.EV_NOTE_ON, 36, 110)
+    ys = []
+    for b in range(int(FS * 3 / BLOCK)):
+        if b in (700, 1000):
+            s.restart_pulse()
+        render_synth(out, BLOCK, ev, 1 if b == 0 else 0, s.SD, s.VS, s.SST, FS)
+        ys.append(out[:, 0].astype(float))
+    y = np.concatenate(ys)[int(FS * 0.5):]
+    d2 = np.abs(np.diff(y, 2))
+    assert d2.max() / np.percentile(d2, 99) < 8.0

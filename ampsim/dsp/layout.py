@@ -95,7 +95,8 @@ SY_PULSE_DEPTH, SY_PULSE_RATE, SY_PULSE_SHAPE, SY_PULSE_FILT, SY_PULSE_RETRIG = 
 SD_SIZE = 32
 # estado global do synth (SST)
 SS_LFO, SS_BEND, SS_SUSTAIN, SS_MOD, SS_AGE, SS_PULSE = range(6)
-SST_SIZE = 8
+SS_PRESTART, SS_XF, SS_XFMUL, SS_XFOCT = range(6, 10)   # recomeço do pulso (Tap) com transição
+SST_SIZE = 12
 
 # tipos de evento
 EV_NOTE_ON, EV_NOTE_OFF, EV_SUSTAIN, EV_BEND, EV_MOD, EV_ALL_OFF = 1, 2, 3, 4, 5, 6
