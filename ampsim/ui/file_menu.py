@@ -187,22 +187,28 @@ class FileMenu(QMenu):
             self.win.flash_status(f"Cena “{doc['nome']}” aberta.")
             return
         kind = doc["trilha"]
+        name = doc["nome"] or "Importado"
+        if doc.get("autor"):
+            name += f" ({doc['autor']})"
         if kind == "teclas":
-            e.instruments.load_state(sharing.sanitize_instruments(d, inst_now))
-            self.win.tabs.setCurrentWidget(self.win.pages["pads"])
-            self.win.pages["pads"].keys_view.refresh()
+            clean = sharing.sanitize_instruments(d, inst_now)
+            storage.save_user_preset("teclas", name, clean)      # fica em "Meus timbres"
+            self.win.load_from_bank("keys_user", storage._safe(name))
+            self.win._rebuild_ready_combo()
         else:
             data = sharing.sanitize_track(d)
             if kind == "pads":
                 data["synth"] = sharing.sanitize_synth(d.get("synth"))
-            name = doc["nome"] or "Importado"
-            if doc.get("autor"):
-                name += f" ({doc['autor']})"
             storage.save_user_preset(kind, name, data)
-            page = self.win.pages[kind]
+            page = self.win.track_pages[kind]
             page.apply_preset_data(data)
             page.reload_presets(select=("user", storage._safe(name)))
-            self.win.tabs.setCurrentWidget(page)
+            if kind == "pads":
+                self.win.tabs.setCurrentWidget(self.win.pad_view)
+                self.win.pad_view.show_view(2)
+            else:
+                self.win.tabs.setCurrentWidget(page)
+        self.win.bank.reload()
         missing = self._missing_capture(kind, d)
         self.win.flash_status(f"Preset “{doc['nome']}” importado." + missing)
 

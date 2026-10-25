@@ -13,7 +13,8 @@ from ..audio.engine import RTA_N
 from ..dsp.filters import biquad
 from ..dsp.padeq import DEFAULT_PAD_EQ, PAD_AMB_PARAMS, PAD_EQ_PARAMS, PAD_EQ_PRESETS, VOICINGS
 from ..dsp.params import EQ_FREQS
-from .widgets import Knob
+from ..dsp.params import EFFECT_BY_KEY
+from .widgets import Knob, ToggleSwitch
 
 F_LO, F_HI = 20.0, 20000.0
 GRID_F = (50, 100, 200, 500, 1000, 2000, 5000, 10000)
@@ -196,23 +197,31 @@ class TrackAnalyzer(QFrame):
         lay.setContentsMargins(8, 4, 8, 6)
         lay.setSpacing(3)
         head = QHBoxLayout()
-        title = QLabel("EQ gráfico e analisador (RTA)")
+        self.eq_on = ToggleSwitch()
+        self.eq_on.setToolTip("Liga/desliga o Equalizador")
+        self.eq_on.toggled.connect(self._eq_toggled)
+        head.addWidget(self.eq_on)
+        title = QLabel("Equalizador e RTA")
         title.setObjectName("fxtitle")
         head.addWidget(title)
-        head.addSpacing(10)
-        self.show_eq = QCheckBox("Curva do EQ")
+        head.addSpacing(6)
+        level = next(p for p in EFFECT_BY_KEY["eq"].params if p.key == "level")
+        self.eq_level = Knob(level, accent, size="mini")
+        self.eq_level.valueChanged.connect(lambda v: self._eq_param("level", v))
+        head.addWidget(self.eq_level)
+        head.addSpacing(6)
+        self.show_eq = QCheckBox("Curva")
         self.show_eq.setChecked(True)
         self.show_rta = QCheckBox("RTA saída")
         self.show_rta.setChecked(True)
-        self.show_in = QCheckBox("RTA entrada (sinal seco)")
+        self.show_in = QCheckBox("RTA entrada")
+        self.show_in.setToolTip("Espectro do sinal seco (antes do amp e dos efeitos), para comparar")
         for w in (self.show_eq, self.show_rta, self.show_in):
             w.setFocusPolicy(Qt.NoFocus)
             w.toggled.connect(self._options)
             head.addWidget(w)
         head.addStretch(1)
-        self.hint = QLabel("Arraste os pontos para mexer no Equalizador · duplo-clique zera a banda")
-        self.hint.setObjectName("small")
-        head.addWidget(self.hint)
+        self.graph_tip = "Arraste os pontos para mexer no Equalizador · duplo-clique zera a banda"
         self.float_btn = QPushButton("⇱ Janela")
         self.float_btn.setToolTip("Abrir o analisador numa janela separada (feche para voltar aqui)")
         self.float_btn.setFocusPolicy(Qt.NoFocus)
@@ -220,6 +229,7 @@ class TrackAnalyzer(QFrame):
         head.addWidget(self.float_btn)
         lay.addLayout(head)
         self.graph = EqGraph(accent, 15.0, EQ_FREQS)
+        self.graph.setToolTip(self.graph_tip)
         self.graph.bandMoved.connect(self._band_moved)
         lay.addWidget(self.graph, 1)
         self.dialog = None
@@ -231,6 +241,14 @@ class TrackAnalyzer(QFrame):
         return self.page.track()
 
     def _options(self):
+        self.refresh()
+
+    def _eq_toggled(self, on):
+        self.track().set_on("eq", bool(on))
+        self.refresh()
+
+    def _eq_param(self, key, v):
+        self.track().set_param("eq", key, v)
         self.refresh()
 
     def _band_moved(self, i, g):
@@ -247,6 +265,10 @@ class TrackAnalyzer(QFrame):
         v = self.track().values["eq"]
         fs = self.page.engine.fs
         g = self.graph
+        for w, val in ((self.eq_on, bool(v["on"])), (self.eq_level, v["level"])):
+            w.blockSignals(True)
+            (w.setChecked if w is self.eq_on else w.setValue)(val)
+            w.blockSignals(False)
         g.gains = [v[f"b{i}"] for i in range(len(EQ_FREQS))]
         if self.show_eq.isChecked():
             z = np.exp(-2j * np.pi * g.freqs / fs)

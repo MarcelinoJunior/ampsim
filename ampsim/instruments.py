@@ -292,7 +292,7 @@ class Instruments:
         self.button_funcs = list(DEFAULT_BUTTON_FUNCS)
         self.knob_values = [0] * KNOB_COUNT
         self.screen_bank = 0                 # banco mostrado na tela (0 = A, 1 = B)
-        self.device = "M-VAVE SMK-25"         # instrumento desenhado na tela
+        self.device = "Teclado simples"         # instrumento desenhado na tela
         self.bpm = 100
         self._taps = []
         self.fx = dict(DEFAULT_FX)           # efeitos das teclas (drive, rotação, delay)
@@ -689,13 +689,13 @@ class Instruments:
             if self.sf:
                 for ch in PAD_CHANNELS:
                     self.sf.cc(ch, 91, value)
-        elif self.sf and func in ("Reverb", "Chorus", "Brilho", "Release", "Ataque"):
+        elif func in ("Reverb", "Chorus", "Brilho", "Release", "Ataque"):
             key, cc = {"Reverb": ("reverb", 91), "Chorus": ("chorus", 93), "Brilho": ("bright", 74),
                        "Release": ("release", 72), "Ataque": ("attack", 73)}[func]
             lv[key] = value
-            chans = (CH_KEYS1, CH_KEYS2) + (CH_CPAD if cc in (91, 93) else ())
-            for ch in chans:
-                self.sf.cc(ch, cc, value)
+            if self.sf:                     # só as teclas: o pad contínuo tem reverb/chorus próprios
+                for ch in (CH_KEYS1, CH_KEYS2):
+                    self.sf.cc(ch, cc, value)
 
     # ------------------------------------------------------------------ andamento
     def set_bpm(self, bpm):

@@ -1,12 +1,10 @@
 """Página de cada trilha: cabeçalho fino, seletor de amplificador e pedais compactos.
 
-Layout (de cima para baixo):
-    cabeçalho da trilha (uma linha)
-    [synth de pads — só na aba Pads]
-    Amplificador: seletor único (modelos AmpSim / capturas NAM / plugins VST3 / sem amp),
-                  controles do amp escolhido e o gabinete ao lado
-    Pedais antes do amp:  redutor de ruído, gate, compressor, overdrive
-    Efeitos depois do amp: EQ, chorus, delay, reverb
+Layout:
+    centro: Amplificador (seletor único: modelos AmpSim / capturas NAM / plugins VST3 / sem amp)
+            e os controles do amp escolhido; pedais antes do amp (redutor de ruído, gate,
+            compressor, overdrive) e depois (chorus, delay, reverb); EQ gráfico + RTA
+    direita: trilha (liga, entrada, volume, pan, medidores, calibrar ruído) e gabinete
 """
 import math
 import os
@@ -15,8 +13,8 @@ import shutil
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QStandardItemModel
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
-    QInputDialog, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
+    QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
+    QInputDialog, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
     QVBoxLayout, QWidget,
 )
 
@@ -27,7 +25,9 @@ from ..dsp.params import AMP_MODELS, CAB_IR_INDEX, EFFECT_BY_KEY, SYNTH_GROUPS, 
 from ..dsp.synth import SYNTH_PRESETS
 from ..presets import FACTORY
 from .amp_skins import SKINS, TRADEMARK_NOTICE, capture_face, paint_face
-from .widgets import Knob, LedButton, Meter
+from .icons import icon
+from .theme import ACCENT, C
+from .widgets import Knob, LedButton, Meter, ToggleSwitch, find_data
 
 CALIB_TICKS = 70          # ~2,3 s com o timer de 33 ms da janela principal
 CALIB_SKIP = 10           # ignora o começo (clique do mouse, transientes)
@@ -284,10 +284,7 @@ class AmpRigPanel(QFrame):
             box.setFixedHeight(104)          # espaço para o modelo escrito e o aviso de marca
             fl.addWidget(box)
 
-        outer.addWidget(self.face, 4)
-        self.cab = CabPanel(EFFECT_BY_KEY["cab"], accent, page)
-        self.cab.setMinimumWidth(240)
-        outer.addWidget(self.cab, 1)
+        outer.addWidget(self.face, 1)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self._fill_selector()
 
@@ -463,7 +460,6 @@ class AmpRigPanel(QFrame):
             self.vst_status.setText(f"{t.vst.name} · o estado do plugin fica salvo no preset")
         for lab in (self.nam_status, self.vst_status):
             lab.setStyleSheet(f"color: {skin.dim};")
-        self.cab.refresh()
         self.face.update()
 
 
@@ -538,30 +534,32 @@ class SynthPanel(QFrame):
 
 
 class TrackPage(QWidget):
-    """Uma aba: cabeçalho fino da trilha + synth (pads) + amplificador + pedais."""
+    """Guitarra, baixo ou amp/efeitos das teclas: amp e pedais no centro, trilha à direita."""
 
-    def __init__(self, name, engine, accent):
+    def __init__(self, name, engine, accent=ACCENT):
         super().__init__()
         self.name = name
         self.engine = engine
         self.panels = []
-        root = QVBoxLayout(self)
-        root.setContentsMargins(4, 4, 4, 4)
-        root.setSpacing(4)
-        root.addWidget(self._build_header(accent))
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(10)
 
         body = QWidget()
         bl = QVBoxLayout(body)
         bl.setContentsMargins(0, 0, 0, 0)
-        bl.setSpacing(4)
+        bl.setSpacing(8)
         self.rig = AmpRigPanel(self, accent)
         bl.addWidget(self.rig)
         self.pre_panels = []
+        has_rta = name != "pads"
         for caption, keys in (("Antes do amp", PRE_AMP), ("Depois do amp", POST_AMP)):
             row = QHBoxLayout()
-            row.setSpacing(4)
+            row.setSpacing(6)
             row.addWidget(_VLabel(caption))
             for key in keys:
+                if key == "eq" and has_rta:
+                    continue                     # o EQ fica no gráfico (EQ e RTA) logo abaixo
                 panel = EffectPanel(EFFECT_BY_KEY[key], accent, self)
                 self.panels.append(panel)
                 if key in PRE_AMP:
@@ -569,7 +567,7 @@ class TrackPage(QWidget):
                 row.addWidget(panel, sum(1 for p in EFFECT_BY_KEY[key].params if not p.is_choice))
             bl.addLayout(row)
         self.analyzer = None
-        if name != "pads":
+        if has_rta:
             from .analyzer import TrackAnalyzer
 
             self.analyzer = TrackAnalyzer(self, accent)
@@ -580,111 +578,101 @@ class TrackPage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(body)
+        root.addWidget(scroll, 1)
+        root.addWidget(self._build_side(accent))
 
-        self.synth_panel = None
-        self.keys_view = None
-        if name != "pads":
-            root.addWidget(scroll, 1)
-        else:
-            # aba Teclas & Pads: três visões que se alternam (nada de rolagem)
-            from .keys_page import KeysView
-
-            self.keys_view = KeysView(engine, accent)
-            self.synth_panel = SynthPanel(engine, accent)
-            synth_page = QWidget()
-            sl = QVBoxLayout(synth_page)
-            sl.setContentsMargins(0, 0, 0, 0)
-            sl.addWidget(self.synth_panel)
-            sl.addStretch(1)
-            self.stack = QStackedWidget()
-            for w in (self.keys_view, synth_page, scroll):
-                self.stack.addWidget(w)
-            switch = QHBoxLayout()
-            switch.setSpacing(2)
-            self.view_buttons = []
-            for i, text in enumerate(("Controlador e timbres", "Synth AmpSim (pads)",
-                                      "Amplificador e efeitos")):
-                b = QPushButton(text)
-                b.setObjectName("seg")
-                b.setCheckable(True)
-                b.setFocusPolicy(Qt.NoFocus)
-                b.clicked.connect(lambda _, i=i: self.show_view(i))
-                self.view_buttons.append(b)
-                switch.addWidget(b)
-            switch.addStretch(1)
-            root.addLayout(switch)
-            root.addWidget(self.stack, 1)
-            self.show_view(0)
+        self.preset = _combo()          # fica na barra superior (TopBar.preset_stack)
+        self.preset.setToolTip("Preset desta aba (★ = de fábrica)")
+        self.preset.activated.connect(self._load_preset)
         self.reload_presets()
 
-    def _build_header(self, accent):
-        head = QFrame()
-        head.setObjectName("trackhead")
-        hl = QHBoxLayout(head)
-        hl.setContentsMargins(8, 2, 8, 2)
-        hl.setSpacing(8)
-        self.enabled = QCheckBox("Ativa")
-        self.enabled.setFocusPolicy(Qt.NoFocus)
+    def _build_side(self, accent):
+        side = QFrame()
+        side.setObjectName("side")
+        side.setFixedWidth(262)
+        lay = QVBoxLayout(side)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(8)
+        head = QHBoxLayout()
+        hi = QLabel()
+        hi.setPixmap(icon({"guitar": "guitar", "bass": "bass"}.get(self.name, "eq"), C["text"], 18).pixmap(18, 18))
+        head.addWidget(hi)
+        t = QLabel({"guitar": "Trilha da Guitarra", "bass": "Trilha do Baixo"}.get(self.name, "Trilha das teclas"))
+        t.setObjectName("h2")
+        head.addWidget(t, 1)
+        self.enabled = ToggleSwitch()
+        self.enabled.setToolTip("Liga/desliga a trilha")
         self.enabled.toggled.connect(lambda on: self._track_param("on", on))
-        hl.addWidget(self.enabled)
-        if self.name == "pads":
-            self.amp_check = QCheckBox("Teclas passam pelo amplificador")
-            self.amp_check.setFocusPolicy(Qt.NoFocus)
-            self.amp_check.setToolTip("Ligado: as teclas (ex.: timbre de guitarra) passam pelo amplificador,\n"
-                                      "gabinete e pedais. Desligado: som limpo do timbre, só com os efeitos.\n"
-                                      "A bateria dos pads nunca passa pelo amplificador.")
-            self.amp_check.toggled.connect(self._amp_toggled)
-            hl.addWidget(self.amp_check)
+        head.addWidget(self.enabled)
+        lay.addLayout(head)
         self.input_label = _small()
-        hl.addWidget(self.input_label)
+        self.input_label.setWordWrap(True)
+        lay.addWidget(self.input_label)
         self.mute_label = QLabel("")
-        self.mute_label.setStyleSheet("color: #ff6b6b; font-weight: 600;")
-        hl.addWidget(self.mute_label)
-        self._calib = None
-        if self.name != "pads":
-            self.calib_btn = QPushButton("Calibrar ruído")
-            self.calib_btn.setFocusPolicy(Qt.NoFocus)
-            self.calib_btn.setToolTip("Com o instrumento plugado e as cordas abafadas, mede o chiado da\n"
-                                      "entrada por 2 s e ajusta os limiares do Gate e do Redutor de Ruído.")
-            self.calib_btn.clicked.connect(self._start_calibration)
-            hl.addWidget(self.calib_btn)
+        self.mute_label.setObjectName("bad")
+        self.mute_label.setWordWrap(True)
+        lay.addWidget(self.mute_label)
+
+        card = QFrame()
+        card.setObjectName("card")
+        kl = QHBoxLayout(card)
+        kl.setContentsMargins(4, 8, 4, 4)
+        kl.setSpacing(0)
         self.track_knobs = {}
         for p in TRACK_PARAMS:
             if self.name == "pads" and p.key == "input_gain":
                 continue
-            k = Knob(p, accent, size="mini")
+            k = Knob(p, accent, size="medium")
             k.valueChanged.connect(lambda v, key=p.key: self._track_param(key, v))
             self.track_knobs[p.key] = k
-            hl.addWidget(k)
+            kl.addWidget(k, 1)
+        lay.addWidget(card)
+
         meters = QGridLayout()
-        meters.setSpacing(2)
+        meters.setHorizontalSpacing(8)
+        meters.setVerticalSpacing(4)
         self.m_in, self.m_out = Meter(horizontal=True), Meter(horizontal=True)
-        for r, (lab, m) in enumerate((("in", self.m_in), ("out", self.m_out))):
+        for r, (lab, m) in enumerate((("Entrada", self.m_in), ("Saída", self.m_out))):
+            m.setFixedSize(170, 8)
             if self.name == "pads" and m is self.m_in:
                 continue
             meters.addWidget(_small(lab), r, 0)
             meters.addWidget(m, r, 1)
-        hl.addLayout(meters)
-        hl.addStretch(1)
-        hl.addWidget(QLabel("Preset:"))
-        self.preset = _combo()
-        self.preset.setMinimumWidth(220)
-        self.preset.activated.connect(self._load_preset)
-        hl.addWidget(self.preset)
-        for text, slot in (("Salvar…", self._save_preset), ("Excluir", self._delete_preset)):
-            b = QPushButton(text)
-            b.setFocusPolicy(Qt.NoFocus)
-            b.clicked.connect(slot)
-            hl.addWidget(b)
-        return head
+        lay.addLayout(meters)
+
+        self._calib = None
+        if self.name != "pads":
+            self.calib_btn = QPushButton(" Calibrar ruído")
+            self.calib_btn.setIcon(icon("volume", C["text"], 15))
+            self.calib_btn.setFocusPolicy(Qt.NoFocus)
+            self.calib_btn.setToolTip("Com o instrumento plugado e as cordas abafadas, mede o chiado da\n"
+                                      "entrada por 2 s e ajusta os limiares do Gate e do Redutor de Ruído.")
+            self.calib_btn.clicked.connect(self._start_calibration)
+            lay.addWidget(self.calib_btn)
+        else:
+            row = QHBoxLayout()
+            row.addWidget(QLabel("Teclas passam pelo amplificador"), 1)
+            self.amp_check = ToggleSwitch()
+            self.amp_check.setToolTip("Ligado: as teclas (ex.: timbre de guitarra) passam pelo amplificador,\n"
+                                      "gabinete e pedais. Desligado: som limpo do timbre, só com os efeitos.\n"
+                                      "A bateria dos pads nunca passa pelo amplificador.")
+            self.amp_check.toggled.connect(self._amp_toggled)
+            row.addWidget(self.amp_check)
+            lay.addLayout(row)
+
+        self.cab = CabPanel(EFFECT_BY_KEY["cab"], accent, self)
+        lay.addWidget(self.cab)
+        lay.addStretch(1)
+        return side
 
     def track(self):
         return self.engine.tracks[self.name]
 
-    def show_view(self, i):
-        self.stack.setCurrentIndex(i)
-        for j, b in enumerate(self.view_buttons):
-            b.setChecked(j == i)
+    def set_compact(self, on):
+        """Barra inferior aberta: o EQ/RTA sai da tela (continua disponível em janela)."""
+        a = self.analyzer
+        if a is not None and a.dialog is None:
+            a.setVisible(not on)
 
     def _amp_toggled(self, on):
         self.track().set_param("track", "use_amp", bool(on))
@@ -700,6 +688,7 @@ class TrackPage(QWidget):
         muted = v["volume"] <= -59.9 or not v["on"]
         self.mute_label.setText("⚠ trilha muda (volume no mínimo)" if v["volume"] <= -59.9 and v["on"]
                                 else ("⚠ trilha desligada" if muted else ""))
+        self.mute_label.setVisible(bool(self.mute_label.text()))
 
     def refresh(self):
         v = self.track().values["track"]
@@ -710,6 +699,7 @@ class TrackPage(QWidget):
             k.setValue(v[key])
         self._update_mute_label()
         self.rig.refresh()
+        self.cab.refresh()
         for p in self.panels:
             p.refresh()
         use_amp = v.get("use_amp", True)
@@ -720,10 +710,8 @@ class TrackPage(QWidget):
             self.amp_check.blockSignals(True)
             self.amp_check.setChecked(use_amp)
             self.amp_check.blockSignals(False)
-        if self.synth_panel:
-            self.synth_panel.refresh()
-        if self.keys_view:
-            self.keys_view.refresh()
+        if self.analyzer is not None:
+            self.analyzer.refresh()
 
     def update_meters(self):
         pin, pout = self.track().meters()
@@ -737,6 +725,7 @@ class TrackPage(QWidget):
             if len(self._calib) >= CALIB_TICKS:
                 self._finish_calibration()
         return pout
+
 
     # ------------------------------------------------------------------ calibração de ruído
     def _start_calibration(self):
@@ -781,7 +770,7 @@ class TrackPage(QWidget):
         for n in storage.list_user_presets(self.name):
             self.preset.addItem(n, ("user", n))
         if select:
-            i = self.preset.findData(select)
+            i = find_data(self.preset, select)
             if i >= 0:
                 self.preset.setCurrentIndex(i)
         self.preset.blockSignals(False)
@@ -805,23 +794,37 @@ class TrackPage(QWidget):
         if data:
             self.apply_preset_data(data)
 
-    def _save_preset(self):
-        n, ok = QInputDialog.getText(self, "Salvar preset", "Nome do preset:")
-        if not ok or not n.strip():
-            return
-        n = n.strip()
+    def preset_step(self, d):
+        n = self.preset.count()
+        if n:
+            self.preset.setCurrentIndex((self.preset.currentIndex() + d) % n)
+            self._load_preset(self.preset.currentIndex())
+
+    def load_preset(self, kind, n):
+        i = find_data(self.preset, (kind, n))
+        if i >= 0:
+            self.preset.setCurrentIndex(i)
+            self._load_preset(i)
+
+    def preset_data(self):
         data = self.track().get_state()
         data["values"].pop("track", None)
         if self.name == "pads":
             data["synth"] = self.engine.synth.get_state()
-        storage.save_user_preset(self.name, n, data)
-        self.reload_presets(select=("user", n))
+        return data
 
-    def _delete_preset(self):
-        kind, n = self.preset.currentData() or ("factory", "")
-        if kind != "user":
-            QMessageBox.information(self, "Presets", "Presets de fábrica (★) não podem ser excluídos.")
-            return
+    def save_preset(self):
+        n, ok = QInputDialog.getText(self, "Salvar preset", "Nome do preset:")
+        if not ok or not n.strip():
+            return None
+        n = n.strip()
+        storage.save_user_preset(self.name, n, self.preset_data())
+        self.reload_presets(select=("user", storage._safe(n)))
+        return n
+
+    def delete_user_preset(self, n):
         if QMessageBox.question(self, "Excluir preset", f"Excluir o preset “{n}”?") == QMessageBox.Yes:
             storage.delete_user_preset(self.name, n)
             self.reload_presets()
+            return True
+        return False

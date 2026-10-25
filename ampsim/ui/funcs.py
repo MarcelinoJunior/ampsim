@@ -1,0 +1,64 @@
+"""Funções de knob (as mesmas do mapeamento MIDI) com faixa e leitura do valor atual.
+
+Usado pelos knobs grandes do Pad/Piano, pelo mixer e pelo painel lateral: todos mexem no som
+pelo mesmo caminho do controlador MIDI (Instruments.apply_knob_func), então a tela e o
+controlador físico ficam sempre iguais.
+"""
+import math
+
+from ..dsp.params import Param
+
+# função: (rótulo curto, mínimo, máximo, unidade)
+FUNC_RANGES = {
+    "Volume teclas": ("Volume", 0, 100, "%"),
+    "Volume camada 2": ("Camada 2", 0, 100, "%"),
+    "Volume bateria": ("Bateria", 0, 100, "%"),
+    "Volume pad contínuo": ("Pad contínuo", 0, 100, "%"),
+    "Reverb": ("Reverb", 0, 100, "%"),
+    "Chorus": ("Chorus", 0, 100, "%"),
+    "Shimmer": ("Shimmer", 0, 100, "%"),
+    "Reverb da bateria": ("Sala bateria", 0, 100, "%"),
+    "Rotação (intensidade)": ("Rotação", 0, 100, "%"),
+    "Drive": ("Drive", 0, 100, "%"),
+    "Delay (mix)": ("Delay", 0, 100, "%"),
+    "Tempo do delay": ("Tempo delay", 80, 1200, "ms"),
+    "Repetições do delay": ("Repetições", 0, 100, "%"),
+    "Brilho": ("Brilho", 0, 100, "%"),
+    "Release": ("Release", 0, 100, "%"),
+    "Ataque": ("Ataque", 0, 100, "%"),
+    "Sensibilidade ao toque": ("Toque", 0, 100, "%"),
+    "Master": ("Master", 0, 100, "%"),
+}
+
+
+def func_param(func, label=None):
+    short, lo, hi, unit = FUNC_RANGES[func]
+    return Param(func, label or short, lo, hi, lo, unit, step=1.0 if unit == "%" else 0.0)
+
+
+def func_value(engine, func):
+    """Valor atual da função, na escala de FUNC_RANGES."""
+    inst = engine.instruments
+    lv, fx = inst.levels, inst.fx
+    pct127 = {"Reverb": "reverb", "Chorus": "chorus", "Ataque": "attack", "Release": "release",
+              "Brilho": "bright", "Reverb da bateria": "drumverb"}
+    if func in pct127:
+        return lv[pct127[func]] / 1.27
+    return {
+        "Shimmer": lv["shimmer"], "Rotação (intensidade)": fx["rot_mix"], "Drive": fx["drive"],
+        "Delay (mix)": fx["delay_mix"], "Tempo do delay": fx["delay_ms"], "Repetições do delay": fx["delay_fb"],
+        "Sensibilidade ao toque": lv["touch"], "Volume teclas": lv["keys"],
+        "Volume camada 2": inst.keys["vol2"] / 1.27, "Volume bateria": lv["drums"],
+        "Volume pad contínuo": lv["pad"], "Master": master_pct(engine.master),
+    }.get(func, 0.0)
+
+
+def set_func(engine, func, v):
+    """Aplica `v` (escala de FUNC_RANGES) pelo mesmo caminho do MIDI."""
+    _, lo, hi, _ = FUNC_RANGES[func]
+    engine.instruments.apply_knob_func(func, round((v - lo) / (hi - lo) * 127))
+
+
+def master_pct(master):
+    """engine.master (linear, até 2.0) -> 0-100 na mesma curva do knob MIDI "Master"."""
+    return min(100.0, math.sqrt(max(master, 0.0) / 2.0) * 100.0)

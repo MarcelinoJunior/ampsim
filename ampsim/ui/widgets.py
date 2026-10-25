@@ -3,13 +3,25 @@ import math
 import time
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF, QRadialGradient
+from PySide6.QtGui import (
+    QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPolygonF, QRadialGradient,
+)
 from PySide6.QtWidgets import QAbstractButton, QSizePolicy, QWidget
 
-BG = QColor("#16181d")
-PANEL = QColor("#22252c")
-TEXT = QColor("#d8dae0")
-DIM = QColor("#7d828d")
+from .theme import ACCENT, C
+
+BG = QColor(C["bg"])
+PANEL = QColor(C["card"])
+TEXT = QColor(C["text"])
+DIM = QColor(C["dim"])
+
+
+def find_data(combo, data):
+    """Como QComboBox.findData, mas funciona com tuplas (o findData do PySide6 não acha tuplas)."""
+    for i in range(combo.count()):
+        if combo.itemData(i) == data:
+            return i
+    return -1
 
 
 def fmt_value(p, v):
@@ -34,6 +46,8 @@ def fmt_value(p, v):
 
 # geometria por tamanho: (largura, altura, raio, centro y, y do rótulo, y do valor)
 KNOB_SIZES = {
+    "big": (100, 112, 30.0, 36, 76, 94),
+    "medium": (80, 96, 24.0, 30, 62, 78),
     "normal": (66, 84, 20.0, 26, 50, 65),
     "small": (58, 68, 15.0, 19, 37, 51),
 }
@@ -47,16 +61,16 @@ class Knob(QWidget):
 
     valueChanged = Signal(float)
 
-    def __init__(self, param, accent="#e8a33d", parent=None, size="normal"):
+    def __init__(self, param, accent=ACCENT, parent=None, size="normal"):
         super().__init__(parent)
         self.size_mode = size
         self.p = param
         self.accent = QColor(accent)
-        self.cap = QColor("#2f333c")
-        self.ring = QColor("#3a3e48")
+        self.cap = QColor("#1a2740")
+        self.ring = QColor("#1c2a42")
         self.text = TEXT
         self.dim = DIM
-        self.pointer = TEXT
+        self.pointer = QColor("#ffffff")
         self.style = "arc"            # "arc" (moderno) ou estilos de amp: tophat, skirt, chicken, chrome
         self.skirt = QColor("#111111")
         self.upper = False
@@ -147,43 +161,59 @@ class Knob(QWidget):
         else:
             _, _, r, cy, ly, vy = KNOB_SIZES[self.size_mode]
             c = QPointF(w / 2, cy)
-        thick = 4 if r >= 18 else 3
         if self.style != "arc" and self.size_mode == "normal":
             self._paint_amp_knob(qp, c, r)
             return
+        thick = max(3.0, r * 0.17)
         rect = QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r)
         qp.setPen(QPen(self.ring, thick, Qt.SolidLine, Qt.RoundCap))
         qp.drawArc(rect, 225 * 16, -270 * 16)
         t = self._to_norm(self._value)
-        qp.setPen(QPen(self.accent, thick, Qt.SolidLine, Qt.RoundCap))
         if self.p.lo < 0 < self.p.hi and not self.p.log:      # bipolar: arco a partir do centro
             t0 = self._to_norm(0.0)
-            qp.drawArc(rect, int((225 - 270 * t0) * 16), int(-270 * (t - t0) * 16))
+            start, span = int((225 - 270 * t0) * 16), int(-270 * (t - t0) * 16)
         else:
-            qp.drawArc(rect, 225 * 16, int(-270 * t * 16))
-        inner = r - (6 if r >= 18 else 4.5)
-        qp.setPen(Qt.NoPen)
-        qp.setBrush(self.cap)
+            start, span = 225 * 16, int(-270 * t * 16)
+        if r >= 22:                                            # brilho em volta do arco
+            glow = QColor(self.accent)
+            glow.setAlpha(55)
+            qp.setPen(QPen(glow, thick * 2.2, Qt.SolidLine, Qt.RoundCap))
+            qp.drawArc(rect, start, span)
+        qp.setPen(QPen(self.accent, thick, Qt.SolidLine, Qt.RoundCap))
+        qp.drawArc(rect, start, span)
+        inner = r - thick * 1.25
+        cg = QRadialGradient(c.x() - inner * 0.35, c.y() - inner * 0.45, inner * 1.6)
+        cg.setColorAt(0, self.cap.lighter(150))
+        cg.setColorAt(1, self.cap.darker(160))
+        qp.setPen(QPen(QColor(0, 0, 0, 120), 1))
+        qp.setBrush(cg)
         qp.drawEllipse(c, inner, inner)
         ang = math.radians(225 - 270 * t)
-        qp.setPen(QPen(self.pointer, 2.5 if r >= 18 else 2, Qt.SolidLine, Qt.RoundCap))
-        tip = inner - 2
-        qp.drawLine(c, QPointF(c.x() + tip * math.cos(ang), c.y() - tip * math.sin(ang)))
+        qp.setPen(QPen(self.pointer, max(2.0, r * 0.08), Qt.SolidLine, Qt.RoundCap))
+        qp.drawLine(QPointF(c.x() + inner * 0.3 * math.cos(ang), c.y() - inner * 0.3 * math.sin(ang)),
+                    QPointF(c.x() + inner * 0.82 * math.cos(ang), c.y() - inner * 0.82 * math.sin(ang)))
         f = QFont(self.font())
-        f.setPointSizeF(8 if self.size_mode == "normal" else 7.5)
+        big = self.size_mode in ("big", "medium")
+        f.setPointSizeF({"big": 11.0, "medium": 9.5, "normal": 8.0}.get(self.size_mode, 7.5))
+        f.setBold(big)
         qp.setFont(f)
         if self.size_mode == "mini":
+            f.setBold(False)
+            qp.setFont(f)
             qp.setPen(self.text)
             qp.drawText(QRectF(30, 0, w - 30, 15), Qt.AlignLeft | Qt.AlignVCenter, self.p.label)
             qp.setPen(self.dim)
             qp.drawText(QRectF(30, 14, w - 30, 15), Qt.AlignLeft | Qt.AlignVCenter,
                         fmt_value(self.p, self._value))
             return
+        lh = 18 if big else 15
         qp.setPen(self.text)
-        qp.drawText(QRectF(0, ly, w, 15), Qt.AlignCenter, self.p.label)
+        qp.drawText(QRectF(0, ly, w, lh), Qt.AlignCenter, self.p.label)
+        f.setBold(False)
+        f.setPointSizeF(f.pointSizeF() - (1.0 if big else 0))
+        qp.setFont(f)
         qp.setPen(self.dim)
-        qp.drawText(QRectF(0, vy, w, 15), Qt.AlignCenter, fmt_value(self.p, self._value))
-
+        qp.drawText(QRectF(0, vy, w, lh), Qt.AlignCenter, fmt_value(self.p, self._value))
 
     def _paint_amp_knob(self, qp, c, r):
         """Knobs no estilo dos amplificadores reais: escala 0-10 em volta e ponteiro."""
@@ -303,8 +333,8 @@ class Meter(QWidget):
     def paintEvent(self, _):
         qp = QPainter(self)
         h, w = self.height(), self.width()
-        qp.fillRect(0, 0, w, h, QColor("#0e0f12"))
-        color = QColor("#4cc26a") if self.level < 0.85 else QColor("#e6c23a")
+        qp.fillRect(0, 0, w, h, QColor("#08101b"))
+        color = QColor(C["green"]) if self.level < 0.85 else QColor(C["yellow"])
         if self.horizontal:
             fill = int((w - 6) * self.level)
             qp.fillRect(0, 1, fill, h - 2, color)
@@ -330,6 +360,8 @@ class PianoWidget(QWidget):
         self.low, self.high = low, high
         self.active = set()
         self.marker_low = None          # faixa coberta pelo teclado do PC
+        self.split_note = None          # teclado dividido: 1ª nota da mão direita
+        self.zone_names = ("", "")      # timbre da mão esquerda e da direita
         self._mouse_note = None
         self.setMinimumHeight(90)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -394,24 +426,148 @@ class PianoWidget(QWidget):
 
     def paintEvent(self, _):
         qp = QPainter(self)
+        qp.setRenderHint(QPainter.Antialiasing)
         keys = self._geometry()
-        hl = QColor("#7c9cff")
+        h = self.height()
+        f = QFont(self.font())
+        f.setPointSizeF(8)
+        qp.setFont(f)
         for n, (r, white) in keys.items():
-            if white:
-                qp.setPen(QPen(QColor("#555"), 1))
-                qp.setBrush(hl if n in self.active else QColor("#ececec"))
-                qp.drawRect(r)
-                if n % 12 == 0:
-                    qp.setPen(QColor("#666"))
-                    qp.drawText(r.adjusted(0, 0, 0, -4), Qt.AlignHCenter | Qt.AlignBottom, f"C{n // 12 - 1}")
+            if not white:
+                continue
+            k = r.adjusted(1, 0, -1, 0)
+            g = QLinearGradient(k.topLeft(), k.bottomLeft())
+            if n in self.active:
+                g.setColorAt(0, QColor("#8fb7ff"))
+                g.setColorAt(1, QColor(ACCENT))
+            elif self.split_note is not None and n < self.split_note:
+                g.setColorAt(0, QColor("#d9e2f1"))
+                g.setColorAt(1, QColor("#b9c8e2"))
+            else:
+                g.setColorAt(0, QColor("#e9edf3"))
+                g.setColorAt(0.85, QColor("#ffffff"))
+                g.setColorAt(1, QColor("#d6dbe4"))
+            path = QPainterPath()
+            path.addRoundedRect(k, 3, 3)
+            qp.fillPath(path, g)
+            qp.setPen(QPen(QColor("#7d8798"), 0.8))
+            qp.drawPath(path)
+            if n % 12 == 0:
+                qp.setPen(QColor("#56627a"))
+                qp.drawText(k.adjusted(0, 0, 0, -5), Qt.AlignHCenter | Qt.AlignBottom, f"C{n // 12 - 1}")
         if self.marker_low is not None:
             lo, hi = self.marker_low, self.marker_low + 16
             xs = [r.left() for n, (r, w) in keys.items() if w and lo <= n <= hi]
             xe = [r.right() for n, (r, w) in keys.items() if w and lo <= n <= hi]
             if xs:
-                qp.fillRect(QRectF(min(xs), self.height() - 5, max(xe) - min(xs), 5), QColor("#e8a33d"))
+                qp.fillRect(QRectF(min(xs) + 1, h - 4, max(xe) - min(xs) - 2, 4), QColor(C["yellow"]))
         for n, (r, white) in keys.items():
-            if not white:
-                qp.setPen(QPen(QColor("#111"), 1))
-                qp.setBrush(hl.darker(130) if n in self.active else QColor("#1b1b1f"))
-                qp.drawRect(r)
+            if white:
+                continue
+            g = QLinearGradient(r.topLeft(), r.bottomLeft())
+            if n in self.active:
+                g.setColorAt(0, QColor("#5b8cff"))
+                g.setColorAt(1, QColor("#1f4fb8"))
+            else:
+                g.setColorAt(0, QColor("#2a2f3a"))
+                g.setColorAt(0.8, QColor("#090b10"))
+                g.setColorAt(1, QColor("#2d3340"))
+            path = QPainterPath()
+            path.addRoundedRect(r, 2.5, 2.5)
+            qp.fillPath(path, g)
+            qp.setPen(QPen(QColor("#000000"), 1))
+            qp.drawPath(path)
+        if self.split_note is not None:
+            xs = [r.left() for n, (r, w) in keys.items() if w and n >= self.split_note]
+            if xs:
+                x = min(xs)
+                qp.setPen(QPen(QColor(C["yellow"]), 3))
+                qp.drawLine(QPointF(x, 0), QPointF(x, h))
+                f.setBold(True)
+                qp.setFont(f)
+                for text, rect, col in (("◀ " + self.zone_names[0], QRectF(x - 220, h * 0.68, 210, 18), "#c98a1d"),
+                                        (self.zone_names[1] + " ▶", QRectF(x + 10, h * 0.68, 210, 18), ACCENT)):
+                    if len(text) < 4:
+                        continue
+                    w = min(rect.width(), qp.fontMetrics().horizontalAdvance(text) + 16)
+                    pill = QRectF(rect.right() - w if text.startswith("◀") else rect.left(), rect.top(), w, 18)
+                    pp = QPainterPath()
+                    pp.addRoundedRect(pill, 9, 9)
+                    qp.fillPath(pp, QColor(col))
+                    qp.setPen(QColor("#ffffff"))
+                    qp.drawText(pill, Qt.AlignCenter, qp.fontMetrics().elidedText(text, Qt.ElideRight, int(w - 8)))
+
+
+class ToggleSwitch(QAbstractButton):
+    """Chave liga/desliga (estilo celular)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setFixedSize(40, 22)
+
+    def sizeHint(self):
+        return QSize(40, 22)
+
+    def paintEvent(self, _):
+        qp = QPainter(self)
+        qp.setRenderHint(QPainter.Antialiasing)
+        on = self.isChecked()
+        r = QRectF(1, 1, self.width() - 2, self.height() - 2)
+        qp.setPen(Qt.NoPen)
+        qp.setBrush(QColor(ACCENT) if on else QColor(C["border2"]))
+        qp.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+        d = r.height() - 6
+        x = r.right() - d - 3 if on else r.left() + 3
+        qp.setBrush(QColor("#ffffff"))
+        qp.drawEllipse(QRectF(x, r.top() + 3, d, d))
+
+
+# paletas das miniaturas (por categoria de timbre)
+ART = {
+    "Pianos": ("#1b3d8f", "#4f8cff", "#0b1f4d"), "Pads e cordas": ("#1a2f6e", "#7aa5ff", "#0a1435"),
+    "Órgãos": ("#3a1f6e", "#a07bff", "#170b35"), "Baixos": ("#0f4250", "#3fd0c9", "#062028"),
+    "Guitarras e violões": ("#5a2a10", "#ffae5c", "#2a1206"), "Synth AmpSim": ("#3b1450", "#ff6bd5", "#1a0624"),
+    "guitar": ("#5a2a10", "#ffae5c", "#2a1206"), "bass": ("#0f4250", "#3fd0c9", "#062028"),
+}
+
+
+class ArtTile(QWidget):
+    """Miniatura decorativa (céu + montanhas) com as cores da categoria do timbre."""
+
+    def __init__(self, size=96, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self.palette_key = "Pads e cordas"
+
+    def set_kind(self, key):
+        if key != self.palette_key:
+            self.palette_key = key
+            self.update()
+
+    def paintEvent(self, _):
+        qp = QPainter(self)
+        qp.setRenderHint(QPainter.Antialiasing)
+        top, light, deep = (QColor(c) for c in ART.get(self.palette_key, ART["Pads e cordas"]))
+        r = QRectF(self.rect())
+        clip = QPainterPath()
+        clip.addRoundedRect(r, 10, 10)
+        qp.setClipPath(clip)
+        sky = QLinearGradient(r.topLeft(), r.bottomLeft())
+        sky.setColorAt(0, top)
+        sky.setColorAt(0.55, light)
+        sky.setColorAt(1, deep)
+        qp.fillRect(r, sky)
+        w, h = r.width(), r.height()
+        for k, (alpha, base, amp) in enumerate(((90, 0.62, 0.22), (170, 0.74, 0.16), (255, 0.86, 0.1))):
+            path = QPainterPath(QPointF(0, h))
+            for i in range(9):
+                x = w * i / 8
+                y = h * (base - amp * abs(math.sin(i * 1.3 + k * 2.1)))
+                path.lineTo(x, y)
+            path.lineTo(w, h)
+            col = QColor(deep)
+            col.setAlpha(alpha)
+            qp.fillPath(path, col)
