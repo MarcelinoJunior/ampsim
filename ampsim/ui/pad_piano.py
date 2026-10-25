@@ -2,15 +2,16 @@
 "Instrumento / Layer" à direita. Também abriga o Synth AmpSim e o amp/efeitos das teclas.
 """
 from PySide6.QtCore import QObject, QSize, Qt, Signal
-from PySide6.QtGui import QStandardItemModel
+from PySide6.QtGui import QIntValidator, QStandardItemModel
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
-    QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox, QStackedWidget, QToolButton, QTreeWidget,
+    QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QToolButton, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..instruments import (
-    BUTTON_FUNCS, BUTTONS, CATEGORIES, CONT_PAD_SOUNDS, DELAY_DIVS, KNOB_FUNCS, PAD_B_CHOICES, PAD_CATEGORIES,
+    BUTTON_FUNCS, BUTTONS, CATEGORIES, CONT_PAD_SOUNDS, DELAY_DIVS, KEY_NAMES, KNOB_FUNCS, PAD_B_CHOICES,
+    PAD_CATEGORIES,
     PAD_COUNT, PAD_SOUNDS, READY, READY_GROUPS, SOUND_BY_NAME, SOUNDS, note_name,
 )
 from .controller import MODELS, TRADEMARKS, ControllerWidget
@@ -21,6 +22,7 @@ from .theme import ACCENT, C
 from .widgets import ArtTile, Knob, PianoWidget, ToggleSwitch
 
 SPLIT_NOTES = list(range(36, 73))
+FLATS = {"C#": "Db", "D#": "Eb", "F#": "Gb", "G#": "Ab", "A#": "Bb"}
 SIMPLE = "Teclado simples"
 QUICK = "Atalhos rápidos (qualquer teclado)"        # nome antigo, tratado como teclado simples
 DEVICES = [SIMPLE] + list(MODELS)
@@ -82,6 +84,53 @@ def _label(text, name=None):
 
 def _short(text, n):
     return text if len(text) <= n else text[: n - 1] + "…"
+
+
+class BpmBox(QLineEdit):
+    """Campo do BPM: digita (40-220) ou gira a roda do mouse. (QSpinBox sem setas some com o
+    estilo do app: o Qt deixa o texto com 1 px de largura.)"""
+
+    changed = Signal(int)
+    LO, HI = 40, 220
+
+    def __init__(self):
+        super().__init__()
+        self.setValidator(QIntValidator(1, 999, self))
+        self.setAlignment(Qt.AlignCenter)
+        self.setFixedSize(58, 30)
+        self.setStyleSheet("QLineEdit { padding: 2px 2px; font-weight: 600; }")
+        self.setFocusPolicy(Qt.ClickFocus)
+        self.editingFinished.connect(self._commit)
+        self._value = 100
+        self.setText("100")
+
+    def value(self):
+        return self._value
+
+    def set_value(self, v):
+        self._value = int(v)
+        if not self.hasFocus():
+            self.setText(str(self._value))
+
+    def _commit(self):
+        try:
+            v = int(self.text())
+        except ValueError:
+            v = self._value
+        v = max(self.LO, min(self.HI, v))
+        self.setText(str(v))
+        self.clearFocus()
+        if v != self._value:
+            self._value = v
+            self.changed.emit(v)
+
+    def wheelEvent(self, e):
+        step = 1 if e.angleDelta().y() > 0 else -1
+        v = max(self.LO, min(self.HI, self._value + step))
+        if v != self._value:
+            self._value = v
+            self.setText(str(v))
+            self.changed.emit(v)
 
 
 class PadSoundDialog(QDialog):
@@ -322,13 +371,10 @@ class PadPianoView(QWidget):
         bpm_box = QVBoxLayout()
         bpm_box.setSpacing(0)
         bpm_box.addWidget(_label("BPM", "small"), 0, Qt.AlignHCenter)
-        self.bpm = QSpinBox()
-        self.bpm.setRange(40, 220)
-        self.bpm.setFixedWidth(64)
-        self.bpm.setFocusPolicy(Qt.ClickFocus)
-        self.bpm.setToolTip("Andamento da música (pulso do Baixo Pulsante e delay no tempo)")
-        self.bpm.valueChanged.connect(lambda v: None if self._updating else self.inst.set_bpm(v))
-        self.bpm.editingFinished.connect(self.bpm.clearFocus)
+        self.bpm = BpmBox()
+        self.bpm.setToolTip("Andamento da música (pulso do Baixo Pulsante e delay no tempo).\n"
+                            "Digite, use a roda do mouse ou clique TAP no ritmo.")
+        self.bpm.changed.connect(lambda v: None if self._updating else self.inst.set_bpm(v))
         bpm_box.addWidget(self.bpm)
         acts.addLayout(bpm_box)
         self.action_buttons = {}
@@ -404,21 +450,53 @@ class PadPianoView(QWidget):
         eq.setFocusPolicy(Qt.NoFocus)
         eq.clicked.connect(self.open_pad_eq)
         head.addWidget(eq)
+        self.stop_btn = QPushButton(" Parar")
+        self.stop_btn.setIcon(icon("stop", "#ffffff", 13))
+        self.stop_btn.setFocusPolicy(Qt.NoFocus)
+        self.stop_btn.setFixedHeight(26)
+        self.stop_btn.setToolTip("Para o pad contínuo (com fade)")
+        self.stop_btn.setStyleSheet("QPushButton { background: #c62a3a; border: 1px solid #ff5466; color: white;"
+                                    " font-weight: 700; border-radius: 7px; padding: 2px 10px; }"
+                                    "QPushButton:hover { background: #dd3446; }")
+        self.stop_btn.clicked.connect(lambda *_: self.inst.stop_cont_pad())
+        head.insertWidget(1, self.stop_btn)
         lay.addLayout(head)
+        # os 12 tons como um teclado: naturais embaixo, sustenidos/bemóis em cima, entre eles
         grid = QGridLayout()
-        grid.setSpacing(8)
-        self.cont_buttons = []
-        for j in range(PAD_COUNT):
-            b = QPushButton("")
+        grid.setHorizontalSpacing(4)
+        grid.setVerticalSpacing(5)
+        self.cont_buttons = {}
+        for k, key in enumerate(KEY_NAMES):
+            sharp = "#" in key
+            if sharp:
+                flat = FLATS[key]
+                b = QPushButton(f"{key}\n{flat}")
+                b.setFixedSize(44, 40)
+            else:
+                b = QPushButton(key)
+                b.setFixedSize(44, 54)
             b.setFocusPolicy(Qt.NoFocus)
-            b.setFixedSize(70, 56)
-            b.pressed.connect(lambda j=j: self.inst.pad_hit(PAD_COUNT + j, 110))
+            b.setProperty("sharp", sharp)
+            b.setToolTip(f"Pad contínuo em {key}" + (f" / {FLATS[key]}" if sharp else "") +
+                         "\nClique de novo para parar · botão direito: timbre e EQ")
+            b.pressed.connect(lambda key=key: self._cont_key(key))
             b.setContextMenuPolicy(Qt.CustomContextMenu)
-            b.customContextMenuRequested.connect(lambda _, j=j: self._cont_menu(j))
-            self.cont_buttons.append(b)
-            grid.addWidget(b, j // 4, j % 4)
+            b.customContextMenuRequested.connect(lambda *_: self._cont_menu())
+            self.cont_buttons[key] = b
+            natural_index = sum(1 for x in KEY_NAMES[:k] if "#" not in x)
+            if sharp:                          # fica entre a natural anterior e a seguinte
+                grid.addWidget(b, 0, 2 * natural_index - 1, 1, 2, Qt.AlignHCenter)
+            else:
+                grid.addWidget(b, 1, 2 * natural_index, 1, 2, Qt.AlignHCenter)
         lay.addLayout(grid)
         return card
+
+    def _cont_key(self, key):
+        if key == self.inst.cont_key:
+            self.inst.stop_cont_pad()
+        else:
+            self.inst.start_cont_pad(key)
+        self.inst.on_change()
 
     # ------------------------------------------------------------------ painel direito
     def _build_side(self):
@@ -649,15 +727,17 @@ class PadPianoView(QWidget):
         self.refresh()
 
     # ------------------------------------------------------------------ menus de botão direito
-    def _cont_menu(self, j):
+    def _cont_menu(self, j=None):
+        """j = pad B do controlador (tom configurável); sem j = grade de tons da tela."""
         menu = QMenu(self)
-        menu.addSection(f"Pad {j + 1}: tom do pad contínuo")
-        for key in PAD_B_CHOICES:
-            a = menu.addAction(key)
-            a.setCheckable(True)
-            a.setChecked(self.inst.pad_keys[j] == key)
-            a.triggered.connect(lambda _, key=key: self.inst.set_pad_key(j, key))
-        menu.addSeparator()
+        if j is not None:
+            menu.addSection(f"Pad {j + 1}: tom do pad contínuo")
+            for key in PAD_B_CHOICES:
+                a = menu.addAction(key)
+                a.setCheckable(True)
+                a.setChecked(self.inst.pad_keys[j] == key)
+                a.triggered.connect(lambda _, key=key: self.inst.set_pad_key(j, key))
+            menu.addSeparator()
         menu.addAction("Equalizador e ambiente do pad contínuo…", self.open_pad_eq)
         sub = menu.addMenu("Timbre do pad contínuo")
         for name in CONT_PAD_SOUNDS:
@@ -797,7 +877,7 @@ class PadPianoView(QWidget):
             self.delay_div.setCurrentIndex(int(fx.get("delay_div", 0)))
             self.touch.setValue(int(inst.levels["touch"]))
             self.action_buttons["Sustain (segurar)"].setChecked(inst.sustain)
-            self.bpm.setValue(inst.bpm)
+            self.bpm.set_value(inst.bpm)
         finally:
             self._updating = False
         for w in self.mapped.values():
@@ -858,22 +938,21 @@ class PadPianoView(QWidget):
         self.other_art.set_kind(s2.cat if s2 else "Pads e cordas")
 
         self.cont_title.setText(f"Pad contínuo · {inst.cont_sound}")
-        for j, b in enumerate(self.cont_buttons):
-            key = inst.pad_keys[j]
-            on = key == inst.cont_key and key != "Parar"
-            b.setText(key)
-            if key == "Parar":
-                b.setStyleSheet("QPushButton { background: #c62a3a; border: 1px solid #ff5466; color: white;"
-                                " font-size: 12.5pt; font-weight: 700; border-radius: 10px; }"
-                                "QPushButton:hover { background: #dd3446; }")
+        for key, b in self.cont_buttons.items():
+            on = key == inst.cont_key
+            sharp = b.property("sharp")
+            if on:
+                bg, bottom, bd = "#2f7cf6", "#1a4fb0", "#8fbaff"
+            elif sharp:
+                bg, bottom, bd = "#0f1d36", "#08101f", "#2a4677"
             else:
-                bg = "#2f7cf6" if on else "#17305a"
-                bd = "#8fbaff" if on else "#2d5aa6"
-                b.setStyleSheet(f"QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-                                f"stop:0 {bg}, stop:1 #0f2142); border: 1px solid {bd}; color: white;"
-                                f" font-size: 22pt; font-weight: 700; border-radius: 10px; }}"
-                                f"QPushButton:hover {{ border: 2px solid #8fbaff; }}")
-            b.setToolTip(f"Pad contínuo em {key}" if key != "Parar" else "Para o pad contínuo (fade)")
+                bg, bottom, bd = "#17305a", "#0f2142", "#2d5aa6"
+            size = "9pt" if sharp else "17pt"
+            b.setStyleSheet(f"QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+                            f"stop:0 {bg}, stop:1 {bottom}); border: 1px solid {bd}; color: white;"
+                            f" font-size: {size}; font-weight: 700; border-radius: 8px; padding: 0; }}"
+                            f"QPushButton:hover {{ border: 2px solid #8fbaff; }}")
+        self.stop_btn.setEnabled(inst.cont_key is not None)
 
         simple = is_simple(inst.device)
         self.device.setCurrentText(SIMPLE if simple else inst.device)

@@ -517,12 +517,13 @@ class MainWindow(QMainWindow):
         peaks = {name: self.track_pages[name].update_meters() for name in TRACKS}
         peaks["master"] = max(peaks.values()) * e.master
         self.dock.update_meters(peaks)
-        if e.running:
+        self._cpu_tick = getattr(self, "_cpu_tick", 0) + 1
+        if e.running and self._cpu_tick % 15 == 0:          # 2x por segundo basta
+            cfg = e.config
+            _, _, total = e.latency_ms()
+            self.topbar.info2.setText(f"Buffer {cfg.blocksize} · {total:.1f} ms · CPU {e.cpu_load() * 100:.0f}%")
             self.topbar.power.setToolTip(f"Áudio ligado · CPU {e.cpu_load() * 100:.0f}% · falhas {e.xruns}\n"
                                          "Clique para desligar")
-            self.topbar.power_title.setText(f"Áudio · CPU {e.cpu_load() * 100:.0f}%")
-        else:
-            self.topbar.power_title.setText("Áudio")
 
     # ------------------------------------------------------------------ cenas (menu Arquivo)
     def scene_state(self):

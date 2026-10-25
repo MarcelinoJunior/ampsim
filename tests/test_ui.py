@@ -88,6 +88,54 @@ def test_top_nav_switches_pages_and_preset_box(win, app):
         assert [x.isChecked() for x in win.topbar.nav] == [j == i for j in range(3)]
 
 
+class FakeStream:
+    active = True
+    latency = (0.003, 0.005)
+    cpu_load = 0.1
+
+    def stop(self):
+        self.active = False
+
+    def close(self):
+        pass
+
+
+def test_power_button_real_clicks(win, app, monkeypatch):
+    """Clicar no bloco "Áudio" (em qualquer ponto) liga e desliga de verdade."""
+    e = win.engine
+    e.config.output_device = "Placa de teste"
+    monkeypatch.setattr(e, "start", lambda cfg: setattr(e, "stream", FakeStream()))
+    b = win.topbar.power
+    for target in (b, win.topbar.power_title, win.topbar.power_state, win.topbar.dot):
+        pos = target.rect().center()
+        QTest.mouseClick(target, Qt.LeftButton, Qt.NoModifier, pos)
+        app.processEvents()
+        assert e.running, target
+        assert "ligado" in win.topbar.power_title.text() and b.isChecked()
+        QTest.mouseClick(target, Qt.LeftButton, Qt.NoModifier, pos)
+        app.processEvents()
+        assert not e.running, target
+        assert "desligado" in win.topbar.power_title.text() and not b.isChecked()
+
+
+def test_buttons_with_signals_really_fire(win, monkeypatch):
+    called = []
+    monkeypatch.setattr(win, "open_audio_dialog", lambda: called.append("audio"))
+    monkeypatch.setattr(win.file_menu, "open_file", lambda: called.append("import"))
+    monkeypatch.setattr(win, "save_preset", lambda: called.append("save"))
+    win.topbar.audioSettings.disconnect()
+    win.topbar.audioSettings.connect(win.open_audio_dialog)
+    win.bank.requestImport.disconnect()
+    win.bank.requestImport.connect(win.file_menu.open_file)
+    win.bank.requestSave.disconnect()
+    win.bank.requestSave.connect(win.save_preset)
+    QTest.mouseClick(win.topbar.info, Qt.LeftButton)
+    from PySide6.QtWidgets import QPushButton
+    for b in win.bank.findChildren(QPushButton):
+        QTest.mouseClick(b, Qt.LeftButton)
+    assert called == ["audio", "save", "import"]
+
+
 def test_dock_remembers_collapsed_per_page(win, app):
     win.tabs.setCurrentIndex(0)
     assert win.dock.collapsed                      # guitarra: mais tela para o amp
@@ -149,7 +197,7 @@ def test_export_and_import_each_preset_kind(win, monkeypatch, dirs, kind):
 
     def walk(it):
         for j in range(it.childCount()):
-            labels.append(it.child(j).text(0))
+            labels.append(it.child(j).text(0).strip())
             walk(it.child(j))
     walk(root)
     assert f"Meu {kind} (Ministério X)" in labels
@@ -177,8 +225,8 @@ def test_bank_file_list_shows_shared_folder(win, monkeypatch, dirs):
     fm.export_preset("guitar")
     win.bank.reload()
     files = [win.bank.tree.topLevelItem(i) for i in range(win.bank.tree.topLevelItemCount())
-             if win.bank.tree.topLevelItem(i).text(0).startswith("Meus arquivos")][0]
-    assert files.child(0).text(0) == "Arquivo recebido"
+             if win.bank.tree.topLevelItem(i).text(0).strip().startswith("Meus arquivos")][0]
+    assert files.child(0).text(0).strip() == "Arquivo recebido"
     win.bank._clicked(files.child(0))              # carregar pelo banco = importar
     assert "Arquivo recebido (Ministério X)" in storage.list_user_presets("guitar")
 
@@ -258,13 +306,20 @@ def test_save_guitar_preset_from_top_bar(win, monkeypatch):
 
 # ------------------------------------------------------------------ Pad/Piano
 @needs_sf
-def test_continuous_pad_grid(win):
+def test_continuous_pad_grid_has_all_12_keys(win):
     pv = win.pad_view
-    keys = win.inst.pad_keys
-    d = keys.index("D")
-    QTest.mouseClick(pv.cont_buttons[d], Qt.LeftButton)
+    assert list(pv.cont_buttons) == ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+    assert pv.cont_buttons["C#"].text() == "C#\nDb" and pv.cont_buttons["A#"].text() == "A#\nBb"
+    c, cs, d = (pv.cont_buttons[k].geometry() for k in ("C", "C#", "D"))
+    assert cs.bottom() < c.top() and c.center().x() < cs.center().x() < d.center().x()   # entre C e D
+    QTest.mouseClick(pv.cont_buttons["D"], Qt.LeftButton)
     assert win.inst.cont_key == "D"
-    QTest.mouseClick(pv.cont_buttons[keys.index("Parar")], Qt.LeftButton)
+    QTest.mouseClick(pv.cont_buttons["C#"], Qt.LeftButton)
+    assert win.inst.cont_key == "C#"
+    QTest.mouseClick(pv.cont_buttons["C#"], Qt.LeftButton)      # mesmo tom de novo = para
+    assert win.inst.cont_key is None
+    QTest.mouseClick(pv.cont_buttons["F#"], Qt.LeftButton)
+    QTest.mouseClick(pv.stop_btn, Qt.LeftButton)
     assert win.inst.cont_key is None
 
 
@@ -321,6 +376,19 @@ def test_screen_piano_plays_notes(win, app):
     assert 60 in win.inst._held and 60 in piano.active
     QTest.mouseRelease(piano, Qt.LeftButton, Qt.NoModifier, pos)
     assert 60 not in win.inst._held
+
+
+def test_bpm_box_shows_value(win, app):
+    win.tabs.setCurrentIndex(2)
+    app.processEvents()
+    bpm = win.pad_view.bpm
+    assert bpm.text() == str(win.inst.bpm) and bpm.width() >= 50
+    bpm.setText("128")
+    bpm.editingFinished.emit()
+    assert win.inst.bpm == 128
+    bpm.setText("999")
+    bpm.editingFinished.emit()
+    assert win.inst.bpm == 220 and bpm.text() == "220"
 
 
 def test_effect_switches(win):

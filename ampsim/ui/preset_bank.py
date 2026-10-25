@@ -55,7 +55,10 @@ class PresetBank(QFrame):
 
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
-        self.tree.setIndentation(14)
+        # sem recuo do Qt: o estilo do Windows pinta a seleção no recuo (blocos azuis à esquerda);
+        # o recuo vem de espaços no texto (ver _indent)
+        self.tree.setIndentation(0)
+        self.tree.setRootIsDecorated(False)
         self.tree.setIconSize(QSize(16, 16))
         self.tree.setFocusPolicy(Qt.NoFocus)
         pal = self.tree.palette()                   # a seleção só pinta o item (não o recuo)
@@ -75,14 +78,22 @@ class PresetBank(QFrame):
             b.setIcon(icon(ic, C["text"], 15))
             b.setToolTip(tip)
             b.setFocusPolicy(Qt.NoFocus)
-            b.clicked.connect(sig.emit)
+            b.clicked.connect(lambda *_, s=sig: s.emit())
             row.addWidget(b)
         lay.addLayout(row)
         self.reload()
 
     # ------------------------------------------------------------------ conteúdo
+    @staticmethod
+    def _indent(parent):
+        depth = 0
+        while parent is not None:
+            depth += 1
+            parent = parent.parent()
+        return "    " * depth
+
     def _group(self, text, ic=None, parent=None):
-        it = QTreeWidgetItem([text])
+        it = QTreeWidgetItem([self._indent(parent) + text])
         f = QFont(self.tree.font())
         f.setBold(True)
         it.setFont(0, f)
@@ -93,14 +104,14 @@ class PresetBank(QFrame):
         return it
 
     def _leaf(self, parent, text, data, ic="file"):
-        it = QTreeWidgetItem([text])
+        it = QTreeWidgetItem([self._indent(parent) + text])
         it.setData(0, ROLE, data)
         it.setIcon(0, icon(ic, C["dim"], 15, active="#ffffff"))
         parent.addChild(it)
         return it
 
     def reload(self):
-        expanded = {self.tree.topLevelItem(i).text(0) for i in range(self.tree.topLevelItemCount())
+        expanded = {self.tree.topLevelItem(i).text(0).strip() for i in range(self.tree.topLevelItemCount())
                     if self.tree.topLevelItem(i).isExpanded()}
         self.tree.clear()
         inst = self._group("Instrumentos (Pad/Piano)", "keys")
@@ -130,12 +141,12 @@ class PresetBank(QFrame):
         for f in found[:200]:
             self._leaf(files, f.stem, ("file", str(f)), "file")
         if not found:
-            hint = QTreeWidgetItem(["(salve ou receba arquivos em Documentos\\AmpSim)"])
+            hint = QTreeWidgetItem(["    (salve ou receba arquivos em Documentos\\AmpSim)"])
             hint.setFlags(Qt.NoItemFlags)
             files.addChild(hint)
         for i in range(self.tree.topLevelItemCount()):
             top = self.tree.topLevelItem(i)
-            top.setExpanded(top.text(0) in expanded if expanded else i == 0)
+            top.setExpanded(top.text(0).strip() in expanded if expanded else i == 0)
         self._filter(self.search.text())
 
     def select(self, data):

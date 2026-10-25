@@ -82,7 +82,8 @@ class TopBar(QFrame):
         self.power.setObjectName("flat")
         self.power.setCheckable(True)
         self.power.setFocusPolicy(Qt.NoFocus)
-        self.power.setToolTip("Ligar / desligar o áudio")
+        self.power.setToolTip("Clique para ligar ou desligar o áudio")
+        self.power.setCursor(Qt.PointingHandCursor)
         pl = QHBoxLayout(self.power)
         pl.setContentsMargins(8, 2, 8, 2)
         self.dot = _Dot()
@@ -95,8 +96,9 @@ class TopBar(QFrame):
         ptxt.addWidget(self.power_title)
         ptxt.addWidget(self.power_state)
         pl.addLayout(ptxt)
-        self.power.setMinimumSize(104, 46)
-        self.power.clicked.connect(self.powerToggled.emit)
+        self.power.setMinimumSize(150, 46)
+        # sem passar pelo argumento do clicked(): no PySide6 ele pode vir vazio
+        self.power.clicked.connect(lambda *_: self.powerToggled.emit(self.power.isChecked()))
         lay.addWidget(self.power)
 
         self.info = QPushButton()
@@ -112,7 +114,8 @@ class TopBar(QFrame):
         il.addWidget(self.info1)
         il.addWidget(self.info2)
         self.info.setMinimumSize(168, 46)
-        self.info.clicked.connect(self.audioSettings.emit)
+        self.info.setCursor(Qt.PointingHandCursor)
+        self.info.clicked.connect(lambda *_: self.audioSettings.emit())
         lay.addWidget(self.info)
         lay.addWidget(self._sep())
 
@@ -174,10 +177,12 @@ class TopBar(QFrame):
     def set_audio(self, running, line1, line2, error=False):
         self.power.setChecked(running)
         self.dot.set_color(C["green"] if running else (C["red"] if error else C["faint"]))
-        self.power_state.setText("Ativo" if running else ("Erro" if error else "Desligado"))
+        self.power_title.setText("Áudio ligado" if running else "Áudio desligado")
+        self.power_state.setText("clique para desligar" if running else
+                                 ("erro · clique para tentar" if error else "clique para ligar"))
         self.power_state.setObjectName("ok" if running else ("bad" if error else "small"))
-        self.power_state.setStyleSheet(f"color: {C['green'] if running else C['red'] if error else C['dim']};"
-                                       "font-weight: 600;")
+        self.power_title.setStyleSheet(f"color: {C['green'] if running else C['text']}; font-weight: 600;")
+        self.power_state.setStyleSheet(f"color: {C['red'] if error else C['dim']}; font-size: 8.5pt;")
         self.info1.setText(line1)
         self.info2.setText(line2)
 
