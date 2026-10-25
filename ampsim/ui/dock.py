@@ -3,8 +3,9 @@
 Pode ser recolhida (fica só a fileira de abas) para sobrar tela nas abas de guitarra/baixo.
 """
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSlider,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget, QPushButton, QSlider,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -314,7 +315,8 @@ class BottomDock(QFrame):
         col.addWidget(self.learn_btn)
         only = QHBoxLayout()
         for text, what, tip in (("Só os knobs", ("knobs",), "Gire cada knob quando pedir (o da tela pisca)"),
-                                ("Só os pads", ("pads", "pads_b"), "Toque cada pad quando pedir (bancos A e B)")):
+                                ("Só os pads", ("pads", "pads_b"), "Toque cada pad quando pedir (bancos A e B)"),
+                                ("Só os botões", ("buttons",), "Aperte cada botão quando pedir (PLAY, STOP…)")):
             b = QPushButton(text)
             b.setFocusPolicy(Qt.NoFocus)
             b.setToolTip(tip)
@@ -351,8 +353,8 @@ class BottomDock(QFrame):
             g.addWidget(lab, r, 0)
             for i in range(n):
                 c = _combo(choices)
-                c.setMinimumWidth(100)
-                c.setMaximumWidth(170)
+                c.setMinimumWidth(84)
+                c.setMaximumWidth(150)
                 if label.startswith("Pads"):
                     c.setToolTip(f"Pad {i + 1} do banco B: tom do pad contínuo")
                     c.activated.connect(lambda idx, i=i: self.inst.set_pad_key(i, PAD_B_CHOICES[idx]))
@@ -365,7 +367,46 @@ class BottomDock(QFrame):
                 store.append(c)
                 g.addWidget(c, r, i + 1)
         lay.addLayout(g, 1)
+        lay.addWidget(_vsep())
+
+        col = QVBoxLayout()
+        col.setSpacing(4)
+        head = QHBoxLayout()
+        head.addWidget(_title("Monitor MIDI"), 1)
+        copy = QPushButton()
+        copy.setIcon(icon("copy", C["text"], 14))
+        copy.setFixedSize(28, 24)
+        copy.setFocusPolicy(Qt.NoFocus)
+        copy.setToolTip("Copiar o registro (para pedir ajuda)")
+        copy.clicked.connect(lambda *_: QGuiApplication.clipboard().setText("\n".join(self.midi_log)))
+        head.addWidget(copy)
+        col.addLayout(head)
+        self.monitor = QListWidget()
+        self.monitor.setFocusPolicy(Qt.NoFocus)
+        self.monitor.setFixedWidth(270)
+        self.monitor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.monitor.setTextElideMode(Qt.ElideMiddle)
+        self.monitor.setStyleSheet("QListWidget { font-size: 8.5pt; } QListWidget::item { padding: 1px 4px; }")
+        self.monitor.setToolTip("O que chega do teclado MIDI e o que o AmpSim faz com cada mensagem.\n"
+                                "Se apertar um botão e nada aparecer, ele não manda MIDI comum.")
+        self.monitor.addItem("Mexa no teclado: as mensagens aparecem aqui")
+        col.addWidget(self.monitor, 1)
+        lay.addLayout(col)
+        self.midi_log = []
         return w
+
+    def log_midi(self, text):
+        """Uma linha no monitor (mais nova em cima); guarda as últimas 200 para copiar."""
+        import time
+        line = time.strftime("%H:%M:%S ") + text
+        self.midi_log.append(line)
+        del self.midi_log[:-200]
+        if self.monitor.count() == 1 and not self.midi_log[:-1]:
+            self.monitor.clear()
+        self.monitor.insertItem(0, line)
+        self.monitor.item(0).setToolTip(line)
+        while self.monitor.count() > 40:
+            self.monitor.takeItem(self.monitor.count() - 1)
 
     def _knob_func(self, i, f):
         self.inst.knob_funcs[i] = f

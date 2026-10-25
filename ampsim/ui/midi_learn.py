@@ -64,6 +64,8 @@ class MidiLearnDialog(QDialog):
         self._fade.start(80)
 
     def _activity(self, kind, ch, num, val):
+        if kind not in ("cc", "note"):
+            return
         key = (kind, ch, num)
         it = self._rows.get(key)
         if it is None:

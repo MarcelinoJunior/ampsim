@@ -132,6 +132,8 @@ class MainWindow(QMainWindow):
         inst.on_control = br.control.emit
         inst.on_unmapped = br.unmapped.emit
         br.unmapped.connect(self._unmapped_control)
+        br.monitor.connect(lambda kind, ch, num, val: self.dock.log_midi(
+            self.inst.describe_midi(kind, ch, num, val)))
         self._unmapped_at = 0.0
         self.tabs.currentChanged.connect(self._tab_changed)
         self.midi = winmm.MidiInput(inst.handle_midi) if winmm.available else None
@@ -157,6 +159,12 @@ class MainWindow(QMainWindow):
         self.topbar.version_btn.clicked.connect(lambda *_: self.show_about())
         self.dock.auto_update.toggled.connect(lambda on: setattr(self, "auto_update", on))
         self._show_version()
+        # a pasta pode ganhar uma versão nova com o programa aberto (git pull, atualização feita
+        # por outra janela): aí o botão de reiniciar aparece mesmo sem nada para baixar
+        self._running_commit = updater.local_commit()
+        self.stale_timer = QTimer(self)
+        self.stale_timer.timeout.connect(self._check_stale)
+        self.stale_timer.start(30000)
         if self.auto_update and not os.environ.get("AMPSIM_NO_UPDATE"):    # testes não acessam a rede
             QTimer.singleShot(2500, self.check_updates)
 
@@ -524,10 +532,22 @@ class MainWindow(QMainWindow):
                     return
                 self._update_ready(info)
             return
+        if self._check_stale():
+            return
         msg = info.reason or "Você já está com a versão mais nova."
         self._show_version(msg)
         if manual:
             QMessageBox.information(self, "Atualizações", msg)
+
+    def _check_stale(self):
+        now = updater.local_commit()
+        if self._running_commit and now and now != self._running_commit:
+            self.topbar.update_btn.setVisible(True)
+            self.topbar.update_btn.setToolTip("Os arquivos do AmpSim já estão numa versão mais nova que a aberta.\n"
+                                              "Clique para reiniciar e usar a versão nova.")
+            self._show_version("Versão nova já instalada na pasta: reinicie para usar.")
+            return True
+        return False
 
     def _update_ready(self, info):
         notes = [n for n in info.notes if n != "ok"]
@@ -796,6 +816,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, ev):
         self.hotplug_timer.stop()
+        self.stale_timer.stop()
         self.save_state()
         if self.midi:
             self.midi.close()

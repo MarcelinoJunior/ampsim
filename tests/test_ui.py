@@ -632,3 +632,27 @@ def test_map_only_knobs_button_and_unmapped_warning(win, app):
     win.inst.handle_midi(0xB0, 75, 40)
     app.processEvents()
     assert "CC 75" in win.topbar.info2.text() and "Só os knobs" in win.topbar.info2.text()
+
+
+def test_midi_monitor_and_buttons_learning(win, app):
+    from PySide6.QtWidgets import QPushButton
+    win.dock.show_tab(2)
+    win.inst.mapping["pads_b"] = [[9, n] for n in (48, 49, 50, 51, 44, 45, 46, 47)]
+    win.inst.handle_midi(0x99, 48, 100)                    # pad B1 (o M-VAVE no banco B)
+    win.inst.handle_midi(0xB0, 99, 5)                      # knob sem mapeamento
+    app.processEvents()
+    top = [win.dock.monitor.item(i).text() for i in range(2)]
+    assert "NÃO MAPEADO" in top[0] and "pad 1 do banco B" in top[1]
+    assert win.inst.screen_bank == 1                       # a tela foi para o banco B
+    b = next(x for x in win.dock.findChildren(QPushButton) if x.text() == "Só os botões")
+    QTest.mouseClick(b, Qt.LeftButton)
+    assert [k for k, _ in win.inst.learn_steps] == ["buttons"] * 8
+    assert "PLAY" in win.dock.learn_label.text() or "botão" in win.dock.learn_label.text()
+    win.inst.stop_learning()
+
+
+def test_restart_button_when_folder_has_newer_version(win, monkeypatch):
+    from ampsim import updater
+    win._running_commit = "a" * 40
+    monkeypatch.setattr(updater, "local_commit", lambda root=None: "b" * 40)
+    assert win._check_stale() and win.topbar.update_btn.isVisibleTo(win)

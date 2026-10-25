@@ -300,3 +300,16 @@ def test_unmapped_knob_is_reported_and_knob_learning(engine):
     inst.stop_learning()
     inst.handle_midi(0xB0, 74, 99)
     assert moved and moved[-1] == (0, 99) and seen == [74]   # agora mexe o knob 1 da tela
+
+
+def test_describe_midi_for_monitor(engine):
+    inst = engine.instruments
+    inst.mapping["pads"] = [[9, n] for n in (40, 41, 42, 43, 36, 37, 38, 39)]
+    inst.mapping["knobs"] = [[0, 70]] + [None] * 7
+    inst.knob_funcs[0] = "Reverb"
+    assert inst.describe_midi("note", 9, 36, 100).endswith("pad 5 do banco A")
+    assert inst.describe_midi("note", 0, 60, 90).endswith("tecla C4")
+    assert inst.describe_midi("cc", 0, 70, 10).endswith("knob 1 (Reverb)")
+    assert inst.describe_midi("cc", 0, 99, 10).endswith("NÃO MAPEADO")
+    assert inst.describe_midi("cc", 0, 64, 127).endswith("sustain")
+    assert "Pitch bend" in inst.describe_midi("bend", 0, 0, 64)

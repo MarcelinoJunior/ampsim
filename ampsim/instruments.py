@@ -915,6 +915,8 @@ class Instruments:
         kind, ch = status & 0xF0, status & 0x0F
         if kind in (0x90, 0xB0) or (kind == 0x80):
             self.on_monitor("cc" if kind == 0xB0 else "note", ch, d1, d2 if kind != 0x80 else 0)
+        elif kind in (0xC0, 0xE0):
+            self.on_monitor("pc" if kind == 0xC0 else "bend", ch, d1, d2)
         if self.capture:
             return
         if kind in (0x90, 0xB0) and self.free_map:
@@ -980,6 +982,41 @@ class Instruments:
             if self.sf:
                 for c in CH_LAYERS:
                     self.sf.pitch_bend(c, val)
+
+    def describe_midi(self, kind, ch, num, val):
+        """Texto do monitor MIDI: o que o AmpSim faz com esta mensagem."""
+        m = self.mapping
+        if kind == "pc":
+            return f"Troca de programa {num} · canal {ch + 1} → não usado"
+        if kind == "bend":
+            return f"Pitch bend · canal {ch + 1} → afinação das teclas"
+        key = [kind, ch, num]
+        head = f"{'CC' if kind == 'cc' else 'Nota'} {num} · canal {ch + 1}" + (f" · valor {val}" if kind == "cc" else "")
+        for func, k in self.free_map.items():
+            if k == key:
+                return f"{head} → {func}"
+        if kind == "note":
+            if val == 0:
+                return f"{head} (soltou)"
+            for bank, name in ((0, "pads"), (1, "pads_b")):
+                for i, pad in enumerate(m[name]):
+                    if pad == [ch, num]:
+                        return f"{head} → pad {i + 1} do banco {'AB'[bank]}"
+            for i, b in enumerate(m["buttons"]):
+                if b == key:
+                    return f"{head} → botão {BUTTONS[i]}"
+            return f"{head} → tecla {note_name(num)}"
+        for i, k in enumerate(m["knobs"]):
+            if k == [ch, num]:
+                return f"{head} → knob {i + 1} ({self.knob_funcs[i]})"
+        for i, b in enumerate(m["buttons"]):
+            if b == key:
+                return f"{head} → botão {BUTTONS[i]}"
+        general = {1: "modulação", 7: "volume", 10: "pan", 11: "expressão", 64: "sustain", 66: "sostenuto",
+                   67: "pedal suave", 91: "reverb", 93: "chorus"}
+        if num in general:
+            return f"{head} → {general[num]}"
+        return f"{head} → NÃO MAPEADO"
 
     # ------------------------------------------------------------------ assistente de mapeamento
     def start_learning(self, what=("pads", "pads_b", "knobs", "buttons")):
