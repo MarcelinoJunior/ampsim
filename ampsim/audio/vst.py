@@ -24,11 +24,29 @@ def find_plugins():
                   if f.lower().endswith(".vst3"))
 
 
+def resolve_binary(path):
+    """Um .vst3 no Windows costuma ser uma pasta (pacote); o pedalboard às vezes só consegue
+    ler o binário de dentro dela (Contents/x86_64-win/*.vst3)."""
+    if os.path.isdir(path):
+        inner = os.path.join(path, "Contents", "x86_64-win")
+        if os.path.isdir(inner):
+            for f in sorted(os.listdir(inner)):
+                if f.lower().endswith(".vst3"):
+                    return os.path.join(inner, f)
+    return path
+
+
 class VstSlot:
     def __init__(self, path, fs, max_block):
         if pedalboard is None:
             raise RuntimeError("Pacote 'pedalboard' não instalado (pip install pedalboard)")
-        plugin = pedalboard.load_plugin(path)
+        try:
+            plugin = pedalboard.load_plugin(path)
+        except ImportError:
+            binary = resolve_binary(path)
+            if binary == path:
+                raise
+            plugin = pedalboard.load_plugin(binary)
         if not getattr(plugin, "is_effect", True):
             raise RuntimeError("Esse plugin é um instrumento, não um efeito de áudio")
         self.plugin = plugin

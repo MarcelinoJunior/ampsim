@@ -114,6 +114,11 @@ Baixa para `third_party/` (fora do git):
   capturas sozinho — e serve para quem quiser usar o plugin oficial no slot VST3. O
   instalador não é assinado digitalmente; execute-o só se confiar na fonte (release oficial).
 
+Com o plugin instalado, escolha **NeuralAmpModeler** no painel *Plugin VST3*, clique em
+**Abrir editor** e carregue um `.nam` (ex.: os de `third_party\nam_models`) e, se quiser, uma
+IR de gabinete. Feche a janela do plugin para voltar ao AmpSim — o som não para enquanto ela
+está aberta, e o que você escolheu fica salvo no preset.
+
 Para usar outras capturas (ex.: do site ToneHunt), clique em **Adicionar captura…** no
 painel NAM: o arquivo é copiado para `%APPDATA%\AmpSim\nam`.
 

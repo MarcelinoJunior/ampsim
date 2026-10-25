@@ -1,4 +1,5 @@
 """Testes offline do DSP (sem placa de som): estabilidade, níveis e desempenho."""
+import os
 import time
 
 import numpy as np
@@ -300,3 +301,21 @@ def test_vst_bad_path_is_reported():
     t = TrackDSP(FS)
     assert t.load_vst(r"C:\nao\existe.vst3") is False
     assert t.vst is None and t.vst_error
+
+
+NAM_VST3 = r"C:\Program Files\Common Files\VST3\NeuralAmpModeler.vst3"
+
+
+@pytest.mark.skipif(not os.path.isdir(NAM_VST3), reason="plugin NAM não instalado")
+def test_vst3_slot_with_nam_plugin():
+    t = TrackDSP(FS)
+    assert t.load_vst(NAM_VST3), t.vst_error
+    t.set_on("vst", True)
+    assert t.external_active()
+    y = run(t, guitar_signal(0.3))
+    assert np.all(np.isfinite(y)) and t.vst.error is None
+    state = t.get_state()
+    assert state["values"]["vst"]["state"]
+    t2 = TrackDSP(FS)
+    t2.load_state(state)
+    assert t2.vst is not None and t2.vst.name == t.vst.name
