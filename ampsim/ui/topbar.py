@@ -140,6 +140,13 @@ class TopBar(QFrame):
         lay.addLayout(pcol)
         lay.addWidget(self._sep())
 
+        self.update_btn = QPushButton(" Reiniciar para atualizar")
+        self.update_btn.setObjectName("primary")
+        self.update_btn.setIcon(icon("refresh", "#ffffff", 16))
+        self.update_btn.setFocusPolicy(Qt.NoFocus)
+        self.update_btn.setMinimumHeight(38)
+        self.update_btn.setVisible(False)
+        lay.addWidget(self.update_btn)
         self.file_btn = QPushButton(" Arquivo")
         self.file_btn.setIcon(icon("folder", C["text"], 18))
         self.file_btn.setFocusPolicy(Qt.NoFocus)

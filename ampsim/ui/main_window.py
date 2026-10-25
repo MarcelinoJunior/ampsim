@@ -2,13 +2,16 @@
 barra inferior (Pads, Mixer, MIDI / Controlador, Configurações).
 """
 import math
+import os
+import subprocess
+import threading
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QMainWindow, QMenu, QMessageBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from .. import sharing, storage
+from .. import sharing, storage, updater
 from ..audio import devices as dev
 from ..audio.hotplug import DeviceWatcher, audio_outputs, find_instrument_output, instrument_of
 from ..audio.engine import TRACKS
@@ -30,6 +33,10 @@ from .widgets import find_data
 TITLES = {"guitar": "Guitarra", "bass": "Baixo", "pads": "Pad/Piano"}
 NO_MIDI = "(nenhum)"
 PAGE_ORDER = ("guitar", "bass", "pads")
+
+
+class _UpdateBridge(QObject):
+    done = Signal(object, str, bool)       # UpdateInfo ou None, erro, foi pedido à mão
 
 
 class MainWindow(QMainWindow):
@@ -138,6 +145,15 @@ class MainWindow(QMainWindow):
         self.hotplug_timer = QTimer(self)
         self.hotplug_timer.timeout.connect(self.check_new_devices)
         self.hotplug_timer.start(2000)
+        # atualização pelo GitHub: confere ao abrir (em segundo plano)
+        self._update_bridge = _UpdateBridge()
+        self._update_bridge.done.connect(self._update_done)
+        self._update_thread = None
+        self.topbar.update_btn.clicked.connect(lambda *_: self.restart())
+        self.dock.auto_update.toggled.connect(lambda on: setattr(self, "auto_update", on))
+        self._show_version()
+        if self.auto_update and not os.environ.get("AMPSIM_NO_UPDATE"):    # testes não acessam a rede
+            QTimer.singleShot(2500, self.check_updates)
 
     # ------------------------------------------------------------------ construção
     def _build_ready_combo(self):
@@ -450,6 +466,71 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "MIDI", str(exc))
                 self.dock.midi_combo.setCurrentText(NO_MIDI)
 
+    # ------------------------------------------------------------------ atualização (GitHub)
+    def _show_version(self, extra=""):
+        sha = updater.local_commit()
+        mode = "git" if updater.install_mode() == "git" else "ZIP"
+        self.dock.version_label.setText(f"Versão instalada: {sha[:7] or 'desconhecida'} ({mode})" +
+                                        (f"\n{extra}" if extra else ""))
+
+    def check_updates(self, manual=False):
+        """Confere o GitHub numa thread; com atualização automática, já baixa e instala."""
+        if self._update_thread is not None and self._update_thread.is_alive():
+            return
+        auto = self.auto_update and not manual
+        self.dock.version_label.setText("Procurando atualização…")
+
+        def work():
+            try:
+                info = updater.check_and_apply(auto=auto)
+                self._update_bridge.done.emit(info, "", manual)
+            except Exception as exc:  # noqa: BLE001 - rede/GitHub/disco: só avisa
+                self._update_bridge.done.emit(None, str(exc), manual)
+        self._update_thread = threading.Thread(target=work, daemon=True)
+        self._update_thread.start()
+
+    def _update_done(self, info, error, manual):
+        if info is None:
+            self._show_version("Sem conexão com o GitHub agora." if not manual else f"Erro: {error}")
+            if manual:
+                QMessageBox.information(self, "Atualizações", f"Não foi possível verificar agora.\n\n{error}")
+            return
+        if info.notes:                                   # instalou
+            self._update_ready(info)
+            return
+        if info.available:                               # achou, mas só instala com o seu ok
+            if QMessageBox.question(self, "Atualização disponível",
+                                    f"Nova versão no GitHub ({info.remote[:7]}):\n{info.message}\n\n"
+                                    "Baixar e instalar agora?") == QMessageBox.Yes:
+                try:
+                    info.notes = updater.apply(info) or ["ok"]
+                except Exception as exc:  # noqa: BLE001
+                    QMessageBox.warning(self, "Atualizações", f"Não foi possível atualizar:\n{exc}")
+                    return
+                self._update_ready(info)
+            return
+        msg = info.reason or "Você já está com a versão mais nova."
+        self._show_version(msg)
+        if manual:
+            QMessageBox.information(self, "Atualizações", msg)
+
+    def _update_ready(self, info):
+        notes = [n for n in info.notes if n != "ok"]
+        self.topbar.update_btn.setVisible(True)
+        self.topbar.update_btn.setToolTip(f"Versão {info.remote[:7]}: {info.message}\n"
+                                          "Clique para reiniciar o AmpSim com a versão nova")
+        self._show_version(f"Atualização {info.remote[:7]} instalada: reinicie para usar." +
+                           (" " + " ".join(notes) if notes else ""))
+        self.flash_status("Atualização instalada · clique em “Reiniciar para atualizar”")
+
+    def restart(self):
+        """Fecha (salvando a sessão) e abre de novo, já com a versão nova."""
+        cmd, cwd = updater.restart_command()
+        flags = 0x00000008 if hasattr(subprocess, "STARTUPINFO") else 0     # DETACHED_PROCESS
+        self.close()
+        subprocess.Popen(cmd, cwd=cwd, creationflags=flags, close_fds=True)
+        QApplication.quit()
+
     # ------------------------------------------------------------------ aparelhos conectados
     def check_new_devices(self):
         if getattr(self, "_asking", False):             # pergunta aberta: o timer continua rodando
@@ -648,6 +729,8 @@ class MainWindow(QMainWindow):
         self.kbd.velocity = kb.get("velocity", 100)
         self.dock.kbd_enable.setChecked(kb.get("enabled", True))
         ui = st.get("ui", {})
+        self.auto_update = ui.get("auto_update", True) is not False
+        self.dock.auto_update.setChecked(self.auto_update)
         if ui.get("layout") != 2:
             e.instruments.device = "Teclado simples"      # 1ª vez no visual novo: teclado + knobs
         if isinstance(ui.get("dock_collapsed"), dict):
@@ -682,7 +765,8 @@ class MainWindow(QMainWindow):
             "midi_input": self.midi.name if self.midi else None,
             "tab": self.tabs.currentIndex(),
             "running": e.running,
-            "ui": {"layout": 2, "dock_collapsed": dict(self._dock_by_page), "dock_tab": self.dock.stack.currentIndex(),
+            "ui": {"layout": 2, "auto_update": self.auto_update,
+                   "dock_collapsed": dict(self._dock_by_page), "dock_tab": self.dock.stack.currentIndex(),
                    "keys_user": self.pad_view.user_preset},
         })
 

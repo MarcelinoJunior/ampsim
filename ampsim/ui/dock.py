@@ -459,6 +459,27 @@ class BottomDock(QFrame):
         col.addLayout(row)
         col.addStretch(1)
         lay.addLayout(col, 1)
+        lay.addWidget(_vsep())
+
+        col = QVBoxLayout()
+        col.setSpacing(6)
+        col.addWidget(_title("Atualizações"))
+        self.auto_update = QCheckBox("Atualizar sozinho ao abrir")
+        self.auto_update.setChecked(True)
+        self.auto_update.setFocusPolicy(Qt.NoFocus)
+        self.auto_update.setToolTip("Ao abrir, o AmpSim confere o GitHub e baixa a versão nova em segundo plano")
+        col.addWidget(self.auto_update)
+        self.version_label = QLabel("")
+        self.version_label.setObjectName("small")
+        self.version_label.setWordWrap(True)
+        col.addWidget(self.version_label)
+        self.check_btn = QPushButton(" Verificar agora")
+        self.check_btn.setIcon(icon("refresh", C["text"], 15))
+        self.check_btn.setFocusPolicy(Qt.NoFocus)
+        self.check_btn.clicked.connect(lambda *_: self.win.check_updates(manual=True))
+        col.addWidget(self.check_btn, 0, Qt.AlignLeft)
+        col.addStretch(1)
+        lay.addLayout(col, 1)
         return w
 
     # ------------------------------------------------------------------ atualização
