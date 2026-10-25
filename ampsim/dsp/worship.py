@@ -23,26 +23,29 @@ NPARAM = 14
 #        queda do ruído s, passa-baixa ruído Hz, passa-alta ruído Hz, click, rajadas (palmas),
 #        2º tom (corpo da caixa) Hz, nível, envio de reverb)
 DRUM_TYPES = {
-    "Bumbo Sub Worship":       (130, 42, 0.045, 0.95, 1.0, 0.05, 0.02, 3000, 40, 0.35, 0, 0, 0.315, 0.10),
-    "Bumbo Boom Cinemático":   (95, 31, 0.09, 2.2, 1.0, 0.25, 0.25, 600, 30, 0.2, 0, 0, 0.325, 0.25),
-    "Bumbo Punch (pop)":       (165, 55, 0.03, 0.38, 1.0, 0.12, 0.015, 6000, 60, 0.6, 0, 0, 0.27, 0.08),
-    "Bumbo 808 Longo":         (110, 48, 0.06, 1.6, 1.0, 0.0, 0.01, 2000, 40, 0.25, 0, 0, 0.337, 0.05),
-    "Caixa Grave Worship":     (190, 150, 0.04, 0.32, 0.55, 0.85, 0.42, 5500, 900, 0.4, 0, 225, 0.162, 0.45),
-    "Caixa Ampla (rimshot)":   (230, 180, 0.03, 0.2, 0.45, 0.9, 0.3, 8000, 1500, 0.6, 0, 330, 0.162, 0.4),
-    "Palmas Largas":           (0, 0, 0.01, 0.01, 0.0, 1.0, 0.55, 3200, 900, 0.0, 3, 0, 0.217, 0.5),
-    "Palmas + Caixa Worship":  (185, 150, 0.04, 0.3, 0.45, 1.0, 0.5, 4200, 800, 0.3, 3, 230, 0.167, 0.5),
-    "Tom Cinemático":          (125, 78, 0.12, 1.3, 1.0, 0.18, 0.12, 1500, 60, 0.25, 0, 0, 0.33, 0.35),
-    "Tom Grave Cinemático":    (82, 46, 0.18, 2.0, 1.0, 0.22, 0.2, 900, 40, 0.2, 0, 0, 0.334, 0.35),
-    "Chimbal Fechado (synth)": (0, 0, 0.01, 0.01, 0.0, 1.0, 0.045, 14000, 7000, 0.0, 0, 0, 0.199, 0.1),
-    "Chimbal Aberto (synth)":  (0, 0, 0.01, 0.01, 0.0, 1.0, 0.42, 14000, 6500, 0.0, 0, 0, 0.176, 0.15),
-    "Shaker Suave":            (0, 0, 0.01, 0.01, 0.0, 1.0, 0.11, 9000, 4500, 0.0, 0, 0, 0.184, 0.15),
-    "Impacto (Boom + Prato)":  (70, 30, 0.12, 2.6, 1.0, 0.6, 2.2, 9000, 2500, 0.3, 0, 0, 0.224, 0.45),
+    "Bumbo Sub Worship":       (130, 42, 0.045, 0.95, 1.0, 0.05, 0.02, 3000, 40, 0.35, 0, 0, 0.313, 0.10),
+    "Bumbo Boom Cinemático":   (95, 31, 0.09, 2.2, 1.0, 0.25, 0.25, 600, 30, 0.2, 0, 0, 0.344, 0.25),
+    "Bumbo Punch (pop)":       (165, 55, 0.03, 0.38, 1.0, 0.12, 0.015, 6000, 60, 0.6, 0, 0, 0.248, 0.08),
+    "Bumbo 808 Longo":         (110, 48, 0.06, 1.6, 1.0, 0.0, 0.01, 2000, 40, 0.25, 0, 0, 0.341, 0.05),
+    "Caixa Grave Worship":     (190, 150, 0.04, 0.32, 0.55, 0.85, 0.42, 5500, 900, 0.4, 0, 225, 0.147, 0.45),
+    "Caixa Grave Profunda":    (165, 118, 0.05, 0.48, 0.8, 0.55, 0.36, 3400, 550, 0.3, 0, 178, 0.160, 0.55),
+    "Caixa Grave Larga (sala)": (178, 128, 0.05, 0.52, 0.65, 0.75, 0.62, 4300, 650, 0.35, 0, 196, 0.149, 0.8),
+    "Caixa Grave + Palmas":    (160, 124, 0.05, 0.42, 0.55, 1.0, 0.52, 3800, 750, 0.2, 3, 188, 0.143, 0.6),
+    "Caixa Ampla (rimshot)":   (230, 180, 0.03, 0.2, 0.45, 0.9, 0.3, 8000, 1500, 0.6, 0, 330, 0.141, 0.4),
+    "Palmas Largas":           (0, 0, 0.01, 0.01, 0.0, 1.0, 0.55, 3200, 900, 0.0, 3, 0, 0.218, 0.5),
+    "Palmas + Caixa Worship":  (185, 150, 0.04, 0.3, 0.45, 1.0, 0.5, 4200, 800, 0.3, 3, 230, 0.133, 0.5),
+    "Tom Cinemático":          (125, 78, 0.12, 1.3, 1.0, 0.18, 0.12, 1500, 60, 0.25, 0, 0, 0.332, 0.35),
+    "Tom Grave Cinemático":    (82, 46, 0.18, 2.0, 1.0, 0.22, 0.2, 900, 40, 0.2, 0, 0, 0.348, 0.35),
+    "Chimbal Fechado (synth)": (0, 0, 0.01, 0.01, 0.0, 1.0, 0.045, 14000, 7000, 0.0, 0, 0, 0.198, 0.1),
+    "Chimbal Aberto (synth)":  (0, 0, 0.01, 0.01, 0.0, 1.0, 0.42, 14000, 6500, 0.0, 0, 0, 0.166, 0.15),
+    "Shaker Suave":            (0, 0, 0.01, 0.01, 0.0, 1.0, 0.11, 9000, 4500, 0.0, 0, 0, 0.161, 0.15),
+    "Impacto (Boom + Prato)":  (70, 30, 0.12, 2.6, 1.0, 0.6, 2.2, 9000, 2500, 0.3, 0, 0, 0.223, 0.45),
 }
 DRUM_TYPE_NAMES = list(DRUM_TYPES)
 
 MAX_DRUM_VOICES = 24
-DV_ACTIVE, DV_TYPE, DV_T, DV_VEL, DV_PH, DV_PH2, DV_LP, DV_HP, DV_HPX = range(9)
-DV_SIZE = 9
+DV_ACTIVE, DV_TYPE, DV_T, DV_VEL, DV_PH, DV_PH2, DV_LP, DV_HP, DV_HPX, DV_LP2 = range(10)
+DV_SIZE = 10
 
 
 @njit(**JIT)
@@ -67,6 +70,7 @@ def render_drums(mix, verb_send, n, ev, nev, DV, DT, fs, gain):
         DV[v, DV_LP] = 0.0
         DV[v, DV_HP] = 0.0
         DV[v, DV_HPX] = 0.0
+        DV[v, DV_LP2] = 0.0
     inv = 1.0 / fs
     for v in range(DV.shape[0]):
         if DV[v, DV_ACTIVE] < 0.5:
@@ -75,6 +79,7 @@ def render_drums(mix, verb_send, n, ev, nev, DV, DT, fs, gain):
         f0, f1, fdec, adec = p[P_F0], p[P_F1], p[P_FDEC], p[P_ADEC]
         tone_l, noise_l, ndec = p[P_TONE], p[P_NOISE], p[P_NDEC]
         lpc = 1.0 - math.exp(-TWO_PI * p[P_NLP] * inv)
+        dark = p[P_NLP] < 5000.0              # ruído escuro: passa-baixa de 2ª ordem
         hpc = 1.0 - math.exp(-TWO_PI * p[P_NHP] * inv)
         click, bursts, body = p[P_CLICK], p[P_BURSTS], p[P_BODY]
         amp = p[P_LEVEL] * DV[v, DV_VEL] * gain
@@ -84,6 +89,7 @@ def render_drums(mix, verb_send, n, ev, nev, DV, DT, fs, gain):
         ph2 = DV[v, DV_PH2]
         lp = DV[v, DV_LP]
         hp = DV[v, DV_HP]
+        lp2 = DV[v, DV_LP2]
         end = 6.0 * max(adec, ndec) + 0.05
         for i in range(n):
             tt = t * inv
@@ -102,8 +108,13 @@ def render_drums(mix, verb_send, n, ev, nev, DV, DT, fs, gain):
             if noise_l > 0.0 or click > 0.0:
                 w = np.random.random() * 2.0 - 1.0
                 lp += (w - lp) * lpc                  # passa-baixa
-                hp += (lp - hp) * hpc                 # passa-alta = lp - (lp suavizado)
-                nz = lp - hp
+                if dark:
+                    lp2 += (lp - lp2) * lpc
+                    src = lp2 * 1.6
+                else:
+                    src = lp
+                hp += (src - hp) * hpc                # passa-alta = src - (src suavizado)
+                nz = src - hp
                 if bursts > 0.0:                      # palmas: rajadas rápidas + cauda
                     env = 0.0
                     for b in range(int(bursts)):
@@ -129,6 +140,7 @@ def render_drums(mix, verb_send, n, ev, nev, DV, DT, fs, gain):
         DV[v, DV_PH2] = ph2
         DV[v, DV_LP] = lp
         DV[v, DV_HP] = hp
+        DV[v, DV_LP2] = lp2
 
 
 class DrumSynth:

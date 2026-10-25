@@ -139,7 +139,9 @@ PAD_SOUNDS = (
     + _kit_sounds("Bumbos", "Bumbo 2", 35, ("Acústico", "Power", "Standard", "808/909"))
     + [PadSound("Bumbo de Orquestra", "Bumbos", "sf2", 8, 116, 36, True),
        PadSound("Taiko", "Bumbos", "sf2", 0, 116, 40, True)]
-    + [_synth("Caixas e palmas", n) for n in ("Caixa Grave Worship", "Caixa Ampla (rimshot)",
+    + [_synth("Caixas e palmas", n) for n in ("Caixa Grave Profunda", "Caixa Grave Larga (sala)",
+                                              "Caixa Grave + Palmas", "Caixa Grave Worship",
+                                              "Caixa Ampla (rimshot)",
                                               "Palmas Largas", "Palmas + Caixa Worship")]
     + _kit_sounds("Caixas e palmas", "Caixa", 38, _ALL_KITS + ("Vassourinha",))
     + _kit_sounds("Caixas e palmas", "Caixa 2", 40, ("Acústico", "Power", "Eletrônico", "808/909", "Vassourinha"))
@@ -175,12 +177,15 @@ PAD_SOUNDS = (
 PAD_SOUND_BY_NAME = {s.name: s for s in PAD_SOUNDS}
 PAD_CATEGORIES = list(dict.fromkeys(s.cat for s in PAD_SOUNDS))
 PAD_PRESETS = {
-    "Worship Moderno": ["Bumbo Sub Worship", "Caixa Grave Worship", "Palmas + Caixa Worship",
+    "Worship Moderno": ["Bumbo Sub Worship", "Caixa Grave Profunda", "Caixa Grave + Palmas",
                         "Chimbal fechado — Power", "Chimbal aberto — Power", "Prato de ataque — Acústico",
                         "Tom Cinemático", "Swell (prato reverso)"],
     "Worship Acústico": ["Bumbo — Acústico", "Caixa — Acústico", "Aro (rim) — Acústico", "Shaker Suave",
                          "Chimbal fechado — Acústico", "Chimbal aberto — Acústico",
                          "Prato de condução — Acústico", "Pandeirola — Standard"],
+    "Worship Sala Grande": ["Bumbo Boom Cinemático", "Caixa Grave Larga (sala)", "Caixa Grave + Palmas",
+                            "Chimbal fechado — Acústico", "Chimbal aberto — Acústico",
+                            "Prato de ataque — Acústico", "Tom Grave Cinemático", "Swell (prato reverso)"],
     "Cinemático / Intro": ["Bumbo Boom Cinemático", "Tom Grave Cinemático", "Tom Cinemático", "Taiko",
                            "Impacto (Boom + Prato)", "Swell (prato reverso)", "Tímpano", "Sino de Igreja"],
     "Balada Pop": ["Bumbo Punch (pop)", "Caixa — Power", "Palmas — 808/909", "Chimbal fechado — Standard",
