@@ -48,8 +48,9 @@ Todos os timbres usados são **gratuitos e de licença livre**, e o AmpSim é **
 
 **Você precisa de:** Windows 10 ou 11, ~1,5 GB livres e internet só na instalação.
 
-1. Baixe este projeto (botão *Code → Download ZIP* ou `git clone`) e coloque numa pasta de
-   **caminho curto**, por exemplo `C:\AmpSim`.
+1. Baixe o projeto em **https://github.com/MarcelinoJunior/ampsim** (botão verde *Code →
+   Download ZIP*) e extraia numa pasta de **caminho curto**, por exemplo `C:\AmpSim`. Quem usa
+   git pode fazer `git clone https://github.com/MarcelinoJunior/ampsim.git C:\AmpSim`.
 2. Dê **duplo-clique em `instalar.bat`**. Ele faz tudo sozinho:
 
    | Passo | O que acontece |
@@ -77,6 +78,20 @@ winget install -e --id MichaelTippach.ASIO4ALL
 .venv\Scripts\python -m ampsim
 ```
 </details>
+
+### Atualizações
+
+O AmpSim se atualiza sozinho. Ao abrir, ele confere o GitHub em segundo plano; se houver versão
+nova, baixa e instala sem parar o som. Depois aparece o botão **Reiniciar para atualizar** na
+barra de cima. A sessão é salva e o programa abre de novo já na versão nova.
+
+- **Baixado em ZIP:** os arquivos do programa são trocados. A pasta `.venv` (bibliotecas) e a
+  `third_party` (timbres) ficam como estão.
+- **Instalado com git clone:** usa `git pull` só para avançar (fast-forward). Uma cópia com
+  mudanças suas não é tocada.
+- **Bibliotecas:** se a versão nova pedir bibliotecas novas, elas são instaladas no `.venv`.
+
+Para desligar, ou para verificar na hora, use **Configurações → Atualizações**.
 
 ## Primeiro uso: escolhendo a placa de som
 
