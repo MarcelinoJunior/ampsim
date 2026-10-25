@@ -6,7 +6,7 @@ O atualizador lê este arquivo no GitHub para dizer qual versão chegou.
 """
 import re
 
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 CHANNEL = "beta"            # "" quando sair da fase de testes
 
 PROJECT = "AmpSim"

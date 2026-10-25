@@ -599,3 +599,22 @@ def test_screen_instrument_matches_settings_box(win):
     assert win.dock.device.currentText() == "M-VAVE SMK-25"
     win.pad_view.set_device("Teclado simples")
     assert win.dock.device.currentText() == "Teclado simples"
+
+
+@needs_sf
+def test_continuous_pad_timbre_buttons(win, app):
+    from ampsim.instruments import CONT_PAD_SOUNDS
+    win.tabs.setCurrentIndex(2)
+    pv = win.pad_view
+    assert list(pv.cont_sound_buttons) == list(CONT_PAD_SOUNDS)
+    QTest.mouseClick(pv.cont_buttons["E"], Qt.LeftButton)          # pad tocando em E
+    QTest.mouseClick(pv.cont_sound_buttons["Pad Cristal"], Qt.LeftButton)
+    assert win.inst.cont_sound == "Pad Cristal"
+    assert win.inst.cont_key == "E"                                  # continua no mesmo tom
+    assert pv.cont_sound_buttons["Pad Cristal"].isChecked()
+    assert sum(b.isChecked() for b in pv.cont_sound_buttons.values()) == 1
+    dock_tile = win.dock.cont_tiles[list(CONT_PAD_SOUNDS).index("Pad Cristal")]
+    assert dock_tile.isChecked()                                     # aba Pads acompanha
+    QTest.mouseClick(win.dock.cont_tiles[0], Qt.LeftButton)          # e o caminho inverso
+    assert pv.cont_sound_buttons[CONT_PAD_SOUNDS[0]].isChecked()
+    win.inst.stop_cont_pad(immediate=True)

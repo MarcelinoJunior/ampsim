@@ -87,6 +87,10 @@ QPushButton#tab:checked {{ background: {accent_soft}; color: white; font-weight:
 QPushButton#power:checked {{ background: #1d5e3b; border-color: {green}; }}
 QPushButton#quit, QPushButton#danger {{ font-weight: 600; }}
 QPushButton::menu-indicator {{ width: 0; image: none; }}
+QPushButton#chip {{ background: {card}; border: 1px solid {border2}; border-radius: 11px; padding: 0 6px;
+    font-size: 8.5pt; color: {dim}; }}
+QPushButton#chip:hover {{ color: {text}; border-color: #3a5687; }}
+QPushButton#chip:checked {{ background: {accent}; border-color: {accent}; color: white; font-weight: 600; }}
 QPushButton#version {{ background: {accent_soft}; border: 1px solid {accent}; border-radius: 8px;
     padding: 0px 7px; font-size: 8pt; font-weight: 600; color: #cfe0ff; }}
 QPushButton#version:hover {{ background: {accent}; color: white; }}

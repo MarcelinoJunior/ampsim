@@ -24,6 +24,7 @@ from .theme import ACCENT, C
 from .widgets import ArtTile, Knob, PianoWidget, ToggleSwitch
 
 SPLIT_NOTES = list(range(36, 73))
+CONT_SHORT = {"Cordas Lentas": "Cordas", "Pad Orquestra": "Orquestra", "Coral": "Coral"}
 FLATS = {"C#": "Db", "D#": "Eb", "F#": "Gb", "G#": "Ab", "A#": "Bb"}
 SIMPLE = "Teclado simples"
 QUICK = "Atalhos rápidos (qualquer teclado)"        # nome antigo, tratado como teclado simples
@@ -441,7 +442,7 @@ class PadPianoView(QWidget):
         card.setObjectName("card")
         lay = QVBoxLayout(card)
         lay.setContentsMargins(10, 6, 10, 8)
-        lay.setSpacing(6)
+        lay.setSpacing(5)
         head = QHBoxLayout()
         self.cont_title = _label("Pad contínuo", "section")
         head.addWidget(self.cont_title, 1)
@@ -473,10 +474,10 @@ class PadPianoView(QWidget):
             if sharp:
                 flat = FLATS[key]
                 b = QPushButton(f"{key}\n{flat}")
-                b.setFixedSize(44, 40)
+                b.setFixedSize(44, 34)
             else:
                 b = QPushButton(key)
-                b.setFixedSize(44, 54)
+                b.setFixedSize(44, 44)
             b.setFocusPolicy(Qt.NoFocus)
             b.setProperty("sharp", sharp)
             b.setToolTip(f"Pad contínuo em {key}" + (f" / {FLATS[key]}" if sharp else "") +
@@ -491,7 +492,27 @@ class PadPianoView(QWidget):
             else:
                 grid.addWidget(b, 1, 2 * natural_index, 1, 2, Qt.AlignHCenter)
         lay.addLayout(grid)
+        # timbre do pad contínuo: um botão por timbre (o mesmo das telas Pads e do botão direito)
+        sounds = QGridLayout()
+        sounds.setHorizontalSpacing(4)
+        sounds.setVerticalSpacing(4)
+        self.cont_sound_buttons = {}
+        for i, name in enumerate(CONT_PAD_SOUNDS):
+            b = QPushButton(CONT_SHORT.get(name, name.replace("Pad ", "")))
+            b.setObjectName("chip")
+            b.setCheckable(True)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setFixedHeight(22)
+            b.setToolTip(f"Timbre do pad contínuo: {name}")
+            b.clicked.connect(lambda *_, n=name: self._cont_sound(n))
+            self.cont_sound_buttons[name] = b
+            sounds.addWidget(b, i // 5, i % 5)
+        lay.addLayout(sounds)
         return card
+
+    def _cont_sound(self, name):
+        self.inst.set_cont_sound(name)          # se um tom está tocando, troca com fade
+        self.win.refresh_sounds()
 
     def _cont_key(self, key):
         if key == self.inst.cont_key:
@@ -1068,7 +1089,9 @@ class PadPianoView(QWidget):
         self.oct_label.setText("Oitava" if n >= 2 else "Oitava (teclado)")
         self.fx_title.setText(f"Efeitos da Layer {n}" + ("" if on else " (desligada)"))
 
-        self.cont_title.setText(f"Pad contínuo · {inst.cont_sound}")
+        self.cont_title.setText("Pad contínuo")
+        for name, b in self.cont_sound_buttons.items():
+            b.setChecked(name == inst.cont_sound)
         for key, b in self.cont_buttons.items():
             on = key == inst.cont_key
             sharp = b.property("sharp")
