@@ -8,3 +8,4 @@ __pycache__/
 third_party/
 versao.json
 *.novo
+dist/

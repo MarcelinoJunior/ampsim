@@ -2,6 +2,10 @@
 
 Uso: .venv\\Scripts\\python tools\\baixar_extras.py
 
+Primeiro tenta a cópia mantida no GitHub do próprio AmpSim (release "extras-N", conferida por
+SHA-256): assim a instalação não quebra se algum projeto mudar o lugar dos arquivos. Se essa
+cópia falhar, baixa de cada fonte oficial abaixo. O pacote é montado por montar_pacote_extras.py.
+
 - Plugin NAM: https://github.com/sdatkinson/NeuralAmpModelerPlugin (release oficial, MIT)
 - Capturas: https://github.com/pelennor2170/NAM_models (coleção da comunidade, GPL-3.0)
 - FluidSynth: https://github.com/FluidSynth/fluidsynth (motor de SoundFont, LGPL-2.1)
@@ -18,7 +22,12 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEST = ROOT / "third_party"
+DEST = Path(os.environ.get("AMPSIM_EXTRAS_DEST") or ROOT / "third_party")
+MIRROR = "https://github.com/MarcelinoJunior/ampsim/releases/download/extras-1/"
+EXTRAS_ZIP = MIRROR + "ampsim-extras-1.zip"
+EXTRAS_SHA256 = "ee5bc2cb0b97fc6a4baeaa7d1db259dfa0b6be492fc6ae5319dde4b5793e65c4"
+NAM_MIRROR = MIRROR + "NeuralAmpModeler-v0.7.13-win.zip"
+NAM_SHA256 = "8da37afde1f0797c773d6b8709da89bdda40c0e45f67cf3e4d87291e9b5e9da5"
 NAM_VERSION = "v0.7.13"
 NAM_ZIP = (f"https://github.com/sdatkinson/NeuralAmpModelerPlugin/releases/download/"
            f"{NAM_VERSION}/NeuralAmpModeler-{NAM_VERSION}-win.zip")
@@ -62,6 +71,37 @@ soundfonts/GeneralUser-GS.sf2 — S. Christian Collins, GeneralUser GS License v
 """
 
 
+def complete():
+    """Já tem tudo o que o AmpSim usa (FluidSynth, banco de timbres, capturas)?"""
+    fl = list((DEST / "fluidsynth").glob("*/bin/libfluidsynth-3.dll"))
+    return bool(fl) and (DEST / "soundfonts" / "GeneralUser-GS.sf2").exists() and all(
+        (DEST / "nam_models" / name).exists() for name in CAPTURES.values())
+
+
+def install_from_mirror():
+    """Pacote completo da cópia do AmpSim. -> True se instalou."""
+    print("Baixando timbres e motores (cópia do AmpSim no GitHub, ~33 MB)…")
+    try:
+        data = fetch(EXTRAS_ZIP)
+    except OSError as exc:
+        print("  cópia do AmpSim indisponível:", exc)
+        return False
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != EXTRAS_SHA256:
+        print(f"  pacote com conteúdo diferente do esperado ({digest[:12]}…); descartado")
+        return False
+    dest = DEST.resolve()
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        for info in z.infolist():
+            target = (dest / info.filename).resolve()
+            if info.is_dir() or dest not in target.parents:
+                continue                                    # nada fora de third_party/
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(z.read(info))
+    print("  ->", DEST)
+    return True
+
+
 def fetch(url):
     req = urllib.request.Request(url, headers={"User-Agent": "AmpSim"})
     with urllib.request.urlopen(req, timeout=300) as r:
@@ -78,7 +118,21 @@ def install_plugin():
     installer = DEST / "NeuralAmpModeler Installer.exe"
     if not installer.exists():
         print(f"Baixando Neural Amp Modeler {NAM_VERSION}…")
-        with zipfile.ZipFile(io.BytesIO(fetch(NAM_ZIP))) as z:
+        data = None
+        for url in (NAM_MIRROR, NAM_ZIP):                  # cópia do AmpSim, depois a oficial
+            try:
+                data = fetch(url)
+            except OSError as exc:
+                print("  indisponível:", url, exc)
+                continue
+            if hashlib.sha256(data).hexdigest() == NAM_SHA256:
+                break
+            print("  arquivo diferente do esperado:", url)
+            data = None
+        if data is None:
+            print("  não foi possível baixar o plugin NAM agora (opcional)")
+            return
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
             name = next((n for n in z.namelist() if n.lower().endswith("installer.exe")), None)
             if name is None:
                 raise SystemExit("O zip não contém o instalador: " + ", ".join(z.namelist()))
@@ -101,7 +155,7 @@ def install_captures():
 
 def install_fluidsynth():
     out = DEST / "fluidsynth"
-    if (out / "bin").is_dir() and any(f.lower().startswith("libfluidsynth") for f in os.listdir(out / "bin")):
+    if list(out.glob("*/bin/libfluidsynth-3.dll")):          # o zip oficial tem uma pasta da versão
         return
     print(f"Baixando FluidSynth {FLUID_VERSION}…")
     data = fetch(FLUID_ZIP)
@@ -129,13 +183,18 @@ def install_soundfont():
 
 
 def main():
-    DEST.mkdir(exist_ok=True)
-    (DEST / "LEIA-ME.txt").write_text(NOTICE, encoding="utf-8")
-    install_plugin()
+    DEST.mkdir(parents=True, exist_ok=True)
+    if not complete() and not install_from_mirror():
+        print("Usando as fontes oficiais de cada projeto…")
+    # completa o que faltar (ou tudo, se a cópia do AmpSim falhou) pelas fontes oficiais
     install_captures()
     install_fluidsynth()
     install_soundfont()
-    print("Pronto.")
+    if not (DEST / "LEIA-ME.txt").exists():
+        (DEST / "LEIA-ME.txt").write_text(NOTICE, encoding="utf-8")
+    install_plugin()
+    print("Pronto." if complete() else "Faltou algum arquivo: rode de novo com internet.")
+    return 0 if complete() else 1
 
 
 if __name__ == "__main__":
