@@ -12,7 +12,7 @@ import numpy as np
 from numba import njit
 
 from .layout import (
-    A_BIAS, A_BLEND, A_G1, A_G2, A_G3, A_ON, A_OUT, A_PDRIVE, A_SAG, A_SAGCOEF, A_STAGES,
+    A_BIAS, A_BLEND, A_G1, A_G2, A_G3, A_HEAD, A_ON, A_OUT, A_PDRIVE, A_SAG, A_SAGCOEF, A_STAGES,
     BQ_A_BASS, BQ_A_DEPTH, BQ_A_DI, BQ_A_HPF, BQ_A_INTER1, BQ_A_INTER2, BQ_A_MID, BQ_A_PRES,
     BQ_A_TREB, BQ_CAB, BQ_EQ, BQ_NR_HPF, BQ_NR_HUM, BQ_NR_LPF, BQ_OD_HPF, BQ_OD_TONE,
     C_ATT, C_MAKEUP, C_ON, C_REL, C_SLOPE, C_THR_DB,
@@ -33,7 +33,7 @@ from .layout import (
     SY_AATT, SY_ADEC, SY_AREL, SY_ASUS, SY_BEND_RANGE, SY_CUTOFF, SY_DETUNE, SY_FATT,
     SY_FDEC, SY_FENV, SY_FREL, SY_FSUS, SY_KEYTRK, SY_LFODEPTH, SY_LFORATE, SY_MIX2,
     SY_RESO, SY_SEMI2, SY_SUB, SY_VELSENS, SY_VOL, SY_WAVE1, SY_WAVE2,
-    T_INGAIN, T_PANL, T_PANR, T_VOL,
+    T_AMP, T_INGAIN, T_PANL, T_PANR, T_VOL,
     V_ACTIVE, V_AGE, V_ELEVEL, V_ESTAGE, V_FLEVEL, V_FREQ, V_FSTAGE, V_GATE, V_HELD,
     V_IC1, V_IC2, V_NOTE, V_PH1, V_PH2, V_PHS, V_VEL,
 )
@@ -230,6 +230,8 @@ def fx_amp(x, n, D, BQ, Z, ST, h, OSU, OSD, t1, u, di):
     pd = D[A_PDRIVE]
     sag_amt = D[A_SAG]
     sag_c = D[A_SAGCOEF]
+    head = D[A_HEAD]
+    inv_head = 1.0 / head
     out = D[A_OUT]
     blend = D[A_BLEND]
     sag = ST[S_SAG]
@@ -254,7 +256,8 @@ def fx_amp(x, n, D, BQ, Z, ST, h, OSU, OSD, t1, u, di):
         # estágio de potência com "sag" (a fonte cede quando o sinal é alto)
         p = v * pd
         sag += (abs(p) - sag) * sag_c
-        u[m] = math.tanh(p / (1.0 + sag_amt * sag))
+        # head < 1: mesma amplitude em sinal baixo, mas satura bem mais tarde (amp limpo)
+        u[m] = math.tanh(p * head / (1.0 + sag_amt * sag * head)) * inv_head
     downsample_block(u, n, h, OSD[1], ST, S_OSD1, t1)
     for i in range(n):
         y = bq(t1[i], BQ, Z, BQ_A_PRES)
@@ -438,6 +441,8 @@ def process_pre(src, ch, n, D, BQ, Z, ST, H, OSU, OSD, W):
         if abs(v) > peak:
             peak = abs(v)
     ST[S_PEAK_IN] = peak
+    if D[T_AMP] < 0.5:
+        return
 
     if D[NR_ON] > 0.5:
         fx_denoise(x, n, D, BQ, Z, ST)
@@ -457,7 +462,7 @@ def process_post(n, mix, D, BQ, Z, ST, IR, IRH, CHB, DLB, RVB, RVOFF, RVLEN, RVP
     x = W[0]
     L = W[3]
     R = W[4]
-    if D[CAB_ON] > 0.5:
+    if D[CAB_ON] > 0.5 and D[T_AMP] > 0.5:
         fx_cab(x, n, D, BQ, Z, ST, IR, IRH)
     if D[EQ_ON] > 0.5:
         fx_eq(x, n, D, BQ, Z)
@@ -493,6 +498,31 @@ def process_track(src, ch, n, mix, D, BQ, Z, ST, H, OSU, OSD, IR, IRH, CHB, DLB,
     """Cadeia inteira numa chamada (quando não há NAM/VST na trilha)."""
     process_pre(src, ch, n, D, BQ, Z, ST, H, OSU, OSD, W)
     process_post(n, mix, D, BQ, Z, ST, IR, IRH, CHB, DLB, RVB, RVOFF, RVLEN, RVPOS, RVFS, W)
+
+
+@njit(**JIT)
+def mix_soundfont(B, n, mix, synth_out, keys_to_chain, keys_gain, drums_gain):
+    """Soma a saída do FluidSynth. B: linhas 0-1 teclas, 2-3 bateria, 4-7 efeitos das teclas
+    (reverb L/R, chorus L/R), 8-11 efeitos da bateria. Retorna o pico enviado direto à saída."""
+    peak = 0.0
+    for i in range(n):
+        kl = (B[0, i] + B[4, i] + B[6, i]) * keys_gain
+        kr = (B[1, i] + B[5, i] + B[7, i]) * keys_gain
+        dl = (B[2, i] + B[8, i] + B[10, i]) * drums_gain
+        dr = (B[3, i] + B[9, i] + B[11, i]) * drums_gain
+        if keys_to_chain:
+            synth_out[i, 0] += (kl + kr) * 0.5
+            l = dl
+            r = dr
+        else:
+            l = dl + kl
+            r = dr + kr
+        mix[i, 0] += l
+        mix[i, 1] += r
+        a = max(abs(l), abs(r))
+        if a > peak:
+            peak = a
+    return peak
 
 
 @njit(**JIT)
@@ -762,8 +792,10 @@ def warmup(fs=48000.0):
     process_track(src, 0, n, mix, *t.arrays)
     out = np.zeros((n, 2), dtype=np.float32)
     write_output(mix, n, out, 0, 1.0)
+    so = np.zeros((n, 1), dtype=np.float32)
+    mix_soundfont(np.zeros((12, n), dtype=np.float32), n, mix, so, True, 1.0, 1.0)
+    mix_soundfont(np.zeros((12, n), dtype=np.float32), n, mix, so, False, 1.0, 1.0)
     s = SynthDSP(fs)
     ev = np.zeros((4, 3), dtype=np.int32)
     ev[0] = (EV_NOTE_ON, 60, 100)
-    so = np.zeros((n, 1), dtype=np.float32)
     render_synth(so, n, ev, 1, s.SD, s.VS, s.SST, fs)

@@ -16,6 +16,11 @@ QPushButton:hover { background: #353a44; }
 QPushButton#power:checked { background: #2f6b3f; border-color: #3d8a52; }
 QPushButton#quit { background: #5a2a2d; border-color: #7a3a3e; padding: 4px 14px; font-weight: 600; }
 QPushButton#quit:hover { background: #7a3238; }
+QPushButton#seg { padding: 4px 16px; border-radius: 0; }
+QPushButton#seg:checked { background: #47507a; border-color: #6b77b3; color: #ffffff; font-weight: 600; }
+QListWidget { background: #1a1d22; border: 1px solid #30343d; border-radius: 4px; }
+QListWidget::item { padding: 4px 6px; }
+QListWidget::item:selected { background: #47507a; color: #ffffff; }
 QComboBox { background: #2c3038; border: 1px solid #3a3f49; border-radius: 4px; padding: 2px 6px; }
 QComboBox QAbstractItemView { background: #2c3038; selection-background-color: #47507a; }
 QTabWidget::pane { border: none; }

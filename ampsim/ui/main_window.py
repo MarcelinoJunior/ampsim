@@ -1,37 +1,32 @@
 """Janela principal."""
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
-    QTabWidget, QVBoxLayout, QWidget,
+    QSizePolicy, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .. import storage
 from ..audio import devices as dev
 from ..audio.engine import TRACKS
-from ..dsp import layout as Ly
 from ..dsp.params import Param
 from ..midi import winmm
 from ..presets import DEFAULT_PRESET, FACTORY
 from .audio_dialog import AudioDialog
 from .keyboard import PcKeyboard
+from .keys_page import InstrumentBridge
 from .panels import TrackPage
 from .widgets import Knob, Meter, PianoWidget
 
 ACCENTS = {"guitar": "#e8a33d", "bass": "#4fb3a9", "pads": "#9b7bff"}
-TITLES = {"guitar": "Guitarra", "bass": "Baixo", "pads": "Pads"}
+TITLES = {"guitar": "Guitarra", "bass": "Baixo", "pads": "Teclas && Pads"}
 NO_MIDI = "(nenhum)"
-
-
-class MidiBridge(QObject):
-    """Leva mensagens MIDI da thread do winmm para a UI (só para desenhar o piano)."""
-    note = Signal(int, bool)
 
 
 class MainWindow(QMainWindow):
     def __init__(self, engine):
         super().__init__()
         self.engine = engine
-        self.setWindowTitle("AmpSim — Guitarra · Baixo · Pads")
+        self.setWindowTitle("AmpSim — Guitarra · Baixo · Teclas & Pads")
         self.resize(1400, 900)
 
         central = QWidget()
@@ -55,9 +50,22 @@ class MainWindow(QMainWindow):
         self.kbd.noteOff.connect(self._note_off)
         self.kbd.changed.connect(self._update_kbd_label)
 
-        self.midi_bridge = MidiBridge()
-        self.midi_bridge.note.connect(self.piano.set_active)
-        self.midi = winmm.MidiInput(self._on_midi) if winmm.available else None
+        # avisos do roteador de teclas/pads (podem vir da thread de MIDI) -> interface
+        inst = engine.instruments
+        self.inst_bridge = InstrumentBridge()
+        kv = self.pages["pads"].keys_view
+        self.inst_bridge.pad.connect(lambda i, v: kv.ctrl.flash_pad(i))
+        self.inst_bridge.key.connect(self._show_key)
+        self.inst_bridge.knob.connect(lambda i, v: kv.ctrl.set_knob(i, v))
+        self.inst_bridge.changed.connect(kv.refresh)
+        self.inst_bridge.learn.connect(kv.refresh)
+        inst.on_pad = self.inst_bridge.pad.emit
+        inst.on_key = self.inst_bridge.key.emit
+        inst.on_knob = self.inst_bridge.knob.emit
+        inst.on_change = self.inst_bridge.changed.emit
+        inst.on_learn = self.inst_bridge.learn.emit
+        self.tabs.currentChanged.connect(self._tab_changed)
+        self.midi = winmm.MidiInput(inst.handle_midi) if winmm.available else None
 
         self._restore_state()
         self._update_kbd_label()
@@ -111,6 +119,8 @@ class MainWindow(QMainWindow):
     def _build_keyboard_bar(self):
         box = QFrame()
         box.setObjectName("kbdbar")
+        self.kbd_box = box
+        box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         lay = QVBoxLayout(box)
         lay.setContentsMargins(8, 4, 8, 6)
         row = QHBoxLayout()
@@ -140,7 +150,7 @@ class MainWindow(QMainWindow):
         row.addWidget(panic)
         lay.addLayout(row)
         self.piano = PianoWidget(24, 108)
-        self.piano.setMinimumHeight(76)
+        self.piano.setFixedHeight(62)
         self.piano.noteOn.connect(self._note_on)
         self.piano.noteOff.connect(self._note_off)
         lay.addWidget(self.piano)
@@ -148,16 +158,26 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ notas
     def _note_on(self, note, vel):
-        self.engine.note_on(note, vel)
-        self.piano.set_active(note, True)
+        self.engine.instruments.key_on(note, vel)
 
     def _note_off(self, note):
-        self.engine.note_off(note)
-        self.piano.set_active(note, False)
+        self.engine.instruments.key_off(note)
+
+    def _show_key(self, note, on):
+        self.piano.set_active(note, on)
+        self.pages["pads"].keys_view.ctrl.set_key(note, on)
+
+    def _tab_changed(self, index):
+        # na aba Teclas & Pads o controlador desenhado já tem teclado: esconde o piano de baixo
+        self.piano.setVisible(self.tabs.widget(index) is not self.pages["pads"])
+        lay = self.kbd_box.layout()
+        lay.invalidate()
+        lay.activate()
+        self.kbd_box.setMaximumHeight(lay.sizeHint().height())
 
     def _panic(self):
         self.kbd.release_all()
-        self.engine.all_notes_off()
+        self.engine.instruments.all_off()
         self.piano.clear()
 
     def _kbd_toggled(self, on):
@@ -194,26 +214,6 @@ class MainWindow(QMainWindow):
             except RuntimeError as exc:
                 QMessageBox.warning(self, "MIDI", str(exc))
                 self.midi_combo.setCurrentText(NO_MIDI)
-
-    def _on_midi(self, status, d1, d2):
-        """Thread do winmm: manda direto pro motor (menor latência) e avisa a UI."""
-        kind = status & 0xF0
-        e = self.engine
-        if kind == 0x90 and d2 > 0:
-            e.send_event(Ly.EV_NOTE_ON, d1, d2)
-            self.midi_bridge.note.emit(d1, True)
-        elif kind == 0x80 or kind == 0x90:
-            e.send_event(Ly.EV_NOTE_OFF, d1, 0)
-            self.midi_bridge.note.emit(d1, False)
-        elif kind == 0xB0:
-            if d1 == 64:
-                e.send_event(Ly.EV_SUSTAIN, d2)
-            elif d1 == 1:
-                e.send_event(Ly.EV_MOD, d2)
-            elif d1 in (120, 123):
-                e.send_event(Ly.EV_ALL_OFF)
-        elif kind == 0xE0:
-            e.send_event(Ly.EV_BEND, d1 | (d2 << 7))
 
     # ------------------------------------------------------------------ áudio
     def _set_master(self, v):
@@ -305,6 +305,10 @@ class MainWindow(QMainWindow):
                 e.tracks[name].load_state(tracks[name])
             else:
                 self.pages[name].apply_preset_data(FACTORY[name][DEFAULT_PRESET[name]])
+        pads = e.tracks["pads"]
+        if "use_amp" not in tracks.get("pads", {}).get("values", {}).get("track", {}):
+            pads.set_param("track", "use_amp", False)      # teclas limpas por padrão
+        e.instruments.load_state(st.get("instruments"))
         if "synth" in st:
             e.synth.load_state(st["synth"])
         master = st.get("master_db", 0.0)
@@ -316,6 +320,7 @@ class MainWindow(QMainWindow):
         self.kbd_enable.setChecked(kb.get("enabled", True))
         if "tab" in st:
             self.tabs.setCurrentIndex(st["tab"])
+        self._tab_changed(self.tabs.currentIndex())
         self._reload_midi()
         midi_name = st.get("midi_input")
         if midi_name and midi_name in winmm.list_inputs():
@@ -332,6 +337,7 @@ class MainWindow(QMainWindow):
             "input_channel": e.input_channel,
             "tracks": {name: e.tracks[name].get_state() for name in TRACKS},
             "synth": e.synth.get_state(),
+            "instruments": e.instruments.get_state(),
             "master_db": self.master_knob.value(),
             "keyboard": {"octave": self.kbd.octave, "velocity": self.kbd.velocity,
                          "enabled": self.kbd.enabled},

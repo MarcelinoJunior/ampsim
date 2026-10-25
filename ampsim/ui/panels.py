@@ -16,8 +16,8 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QStandardItemModel
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
-    QInputDialog, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
-    QWidget,
+    QInputDialog, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
+    QVBoxLayout, QWidget,
 )
 
 from .. import storage
@@ -554,12 +554,9 @@ class TrackPage(QWidget):
         bl = QVBoxLayout(body)
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(4)
-        self.synth_panel = None
-        if name == "pads":
-            self.synth_panel = SynthPanel(engine, accent)
-            bl.addWidget(self.synth_panel)
         self.rig = AmpRigPanel(self, accent)
         bl.addWidget(self.rig)
+        self.pre_panels = []
         for caption, keys in (("Antes do amp", PRE_AMP), ("Depois do amp", POST_AMP)):
             row = QHBoxLayout()
             row.setSpacing(4)
@@ -567,6 +564,8 @@ class TrackPage(QWidget):
             for key in keys:
                 panel = EffectPanel(EFFECT_BY_KEY[key], accent, self)
                 self.panels.append(panel)
+                if key in PRE_AMP:
+                    self.pre_panels.append(panel)
                 row.addWidget(panel, sum(1 for p in EFFECT_BY_KEY[key].params if not p.is_choice))
             bl.addLayout(row)
         bl.addStretch(1)
@@ -574,7 +573,41 @@ class TrackPage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(body)
-        root.addWidget(scroll, 1)
+
+        self.synth_panel = None
+        self.keys_view = None
+        if name != "pads":
+            root.addWidget(scroll, 1)
+        else:
+            # aba Teclas & Pads: três visões que se alternam (nada de rolagem)
+            from .keys_page import KeysView
+
+            self.keys_view = KeysView(engine, accent)
+            self.synth_panel = SynthPanel(engine, accent)
+            synth_page = QWidget()
+            sl = QVBoxLayout(synth_page)
+            sl.setContentsMargins(0, 0, 0, 0)
+            sl.addWidget(self.synth_panel)
+            sl.addStretch(1)
+            self.stack = QStackedWidget()
+            for w in (self.keys_view, synth_page, scroll):
+                self.stack.addWidget(w)
+            switch = QHBoxLayout()
+            switch.setSpacing(2)
+            self.view_buttons = []
+            for i, text in enumerate(("Controlador e timbres", "Synth AmpSim (pads)",
+                                      "Amplificador e efeitos")):
+                b = QPushButton(text)
+                b.setObjectName("seg")
+                b.setCheckable(True)
+                b.setFocusPolicy(Qt.NoFocus)
+                b.clicked.connect(lambda _, i=i: self.show_view(i))
+                self.view_buttons.append(b)
+                switch.addWidget(b)
+            switch.addStretch(1)
+            root.addLayout(switch)
+            root.addWidget(self.stack, 1)
+            self.show_view(0)
         self.reload_presets()
 
     def _build_header(self, accent):
@@ -585,10 +618,21 @@ class TrackPage(QWidget):
         hl.setSpacing(8)
         self.enabled = QCheckBox("Ativa")
         self.enabled.setFocusPolicy(Qt.NoFocus)
-        self.enabled.toggled.connect(lambda on: self.track().set_param("track", "on", on))
+        self.enabled.toggled.connect(lambda on: self._track_param("on", on))
         hl.addWidget(self.enabled)
+        if self.name == "pads":
+            self.amp_check = QCheckBox("Teclas passam pelo amplificador")
+            self.amp_check.setFocusPolicy(Qt.NoFocus)
+            self.amp_check.setToolTip("Ligado: as teclas (ex.: timbre de guitarra) passam pelo amplificador,\n"
+                                      "gabinete e pedais. Desligado: som limpo do timbre, só com os efeitos.\n"
+                                      "A bateria dos pads nunca passa pelo amplificador.")
+            self.amp_check.toggled.connect(self._amp_toggled)
+            hl.addWidget(self.amp_check)
         self.input_label = _small()
         hl.addWidget(self.input_label)
+        self.mute_label = QLabel("")
+        self.mute_label.setStyleSheet("color: #ff6b6b; font-weight: 600;")
+        hl.addWidget(self.mute_label)
         self._calib = None
         if self.name != "pads":
             self.calib_btn = QPushButton("Calibrar ruído")
@@ -602,7 +646,7 @@ class TrackPage(QWidget):
             if self.name == "pads" and p.key == "input_gain":
                 continue
             k = Knob(p, accent, size="mini")
-            k.valueChanged.connect(lambda v, key=p.key: self.track().set_param("track", key, v))
+            k.valueChanged.connect(lambda v, key=p.key: self._track_param(key, v))
             self.track_knobs[p.key] = k
             hl.addWidget(k)
         meters = QGridLayout()
@@ -630,6 +674,26 @@ class TrackPage(QWidget):
     def track(self):
         return self.engine.tracks[self.name]
 
+    def show_view(self, i):
+        self.stack.setCurrentIndex(i)
+        for j, b in enumerate(self.view_buttons):
+            b.setChecked(j == i)
+
+    def _amp_toggled(self, on):
+        self.track().set_param("track", "use_amp", bool(on))
+        self.engine.instruments.all_off()
+        self.refresh()
+
+    def _track_param(self, key, value):
+        self.track().set_param("track", key, value)
+        self._update_mute_label()
+
+    def _update_mute_label(self):
+        v = self.track().values["track"]
+        muted = v["volume"] <= -59.9 or not v["on"]
+        self.mute_label.setText("⚠ trilha muda (volume no mínimo)" if v["volume"] <= -59.9 and v["on"]
+                                else ("⚠ trilha desligada" if muted else ""))
+
     def refresh(self):
         v = self.track().values["track"]
         self.enabled.blockSignals(True)
@@ -637,14 +701,28 @@ class TrackPage(QWidget):
         self.enabled.blockSignals(False)
         for key, k in self.track_knobs.items():
             k.setValue(v[key])
+        self._update_mute_label()
         self.rig.refresh()
         for p in self.panels:
             p.refresh()
+        use_amp = v.get("use_amp", True)
+        self.rig.setEnabled(use_amp)
+        for p in self.pre_panels:
+            p.setEnabled(use_amp)
+        if self.name == "pads":
+            self.amp_check.blockSignals(True)
+            self.amp_check.setChecked(use_amp)
+            self.amp_check.blockSignals(False)
         if self.synth_panel:
             self.synth_panel.refresh()
+        if self.keys_view:
+            self.keys_view.refresh()
 
     def update_meters(self):
         pin, pout = self.track().meters()
+        if self.name == "pads":          # teclas/bateria que saem direto (sem a trilha)
+            pout = max(pout, self.engine.sf_peak)
+            self.engine.sf_peak = 0.0
         self.m_in.push(pin)
         self.m_out.push(pout)
         if self._calib is not None:

@@ -25,6 +25,7 @@ def default_values():
         vals[e.key]["on"] = False
     vals["track"] = {p.key: p.default for p in TRACK_PARAMS}
     vals["track"]["on"] = True
+    vals["track"]["use_amp"] = True   # False: pula amp/gabinete/pedais de entrada (aba Teclas)
     vals["nam"]["file"] = ""          # nome da captura (sem .nam)
     vals["vst"]["path"] = ""          # caminho do .vst3
     vals["vst"]["state"] = ""         # estado do plugin (base64)
@@ -102,6 +103,8 @@ class TrackDSP:
 
     # ------------------------------------------------------------------ NAM e VST3
     def external_active(self):
+        if not self.values["track"].get("use_amp", True):
+            return False
         return ((self.nam is not None and self.values["nam"]["on"])
                 or (self.vst is not None and self.values["vst"]["on"] and not self.vst.error))
 
@@ -244,6 +247,7 @@ class TrackDSP:
 
     def _upd_track(self, v, D, fs):
         D[Ly.T_ON] = 1.0 if v["on"] else 0.0
+        D[Ly.T_AMP] = 1.0 if v.get("use_amp", True) else 0.0
         D[Ly.T_INGAIN] = db(v["input_gain"])
         D[Ly.T_VOL] = db(v["volume"]) if v["volume"] > -59.9 else 0.0
         p = (v["pan"] + 100.0) / 200.0 * (math.pi / 2)        # pan de potência constante
@@ -307,6 +311,7 @@ class TrackDSP:
         D[Ly.A_PDRIVE] = pd
         D[Ly.A_OUT] = 0.55 / (0.6 + 0.4 * pd)
         D[Ly.A_SAG] = m["sag"]
+        D[Ly.A_HEAD] = m.get("head", 1.0)
         D[Ly.A_SAGCOEF] = onepole_coef(fso, 0.015)
         D[Ly.A_BLEND] = v["blend"] / 100.0
         self._bq(Ly.BQ_A_HPF, biquad("hp", fso, m["hpf"], q=0.6))

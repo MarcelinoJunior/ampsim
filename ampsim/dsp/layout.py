@@ -30,6 +30,8 @@ T_VOL, T_PANL, T_PANR, T_ON, T_INGAIN = range(47, 52)
 G_DET = 52                       # coeficiente de release do detector do gate
 A_SAGCOEF = 53                   # coeficiente do envelope de "sag" (taxa 4x)
 NR_ON, NR_HUM, NR_DYN, NR_THR, NR_ATT, NR_REL, NR_FMIN, NR_FMAX, NR_HPF, NR_LPF = range(54, 64)
+A_HEAD = 65                      # folga do estágio de potência (1 = satura cedo)
+T_AMP = 64                       # 0 = trilha sem amp/gabinete/pedais de entrada (só efeitos)
 D_SIZE = 80
 
 # ---------------------------------------------------------------- slots de biquad (BQ/Z)

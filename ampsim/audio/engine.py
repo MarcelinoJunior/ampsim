@@ -6,9 +6,12 @@ import numpy as np
 from . import devices as dev
 from .devices import sd
 from ..dsp import layout as Ly
-from ..dsp.kernels import process_post, process_pre, process_track, render_synth, write_output
+from ..dsp.kernels import (
+    mix_soundfont, process_post, process_pre, process_track, render_synth, write_output,
+)
 from ..dsp.synth import SynthDSP
 from ..dsp.track import TrackDSP
+from ..instruments import Instruments
 
 TRACKS = ("guitar", "bass", "pads")
 INPUT_TRACKS = ("guitar", "bass")
@@ -30,6 +33,10 @@ class AudioEngine:
         self._mix = np.zeros((Ly.MAX_BLOCK, 2))
         self._synth_out = np.zeros((Ly.MAX_BLOCK, 1), dtype=np.float32)
         self._ev = np.zeros((256, 3), dtype=np.int32)
+        self.sf_peak = 0.0
+        self.out_offset = 0
+        self.instruments = Instruments(self)
+        self.instruments.start(self.fs, Ly.MAX_BLOCK)
 
     # ------------------------------------------------------------------ eventos do synth
     def send_event(self, kind, a=0, b=0):
@@ -123,6 +130,7 @@ class AudioEngine:
             s = SynthDSP(self.fs)
             s.load_state(self.synth.get_state())
             self.synth = s
+            self.instruments.start(self.fs, Ly.MAX_BLOCK)
         else:
             for t in self.tracks.values():
                 t.reset_dsp_state()
@@ -156,6 +164,15 @@ class AudioEngine:
         render_synth(self._synth_out, frames, self._ev, self._drain_events(), s.SD, s.VS, s.SST,
                      self.fs)
         t = tracks["pads"]
+        inst = self.instruments
+        sf = inst.sf
+        if sf is not None:
+            sf.render(frames)
+            to_chain = t.D[Ly.T_AMP] > 0.5 and t.D[Ly.T_ON] > 0.5
+            pk = mix_soundfont(sf.buf, frames, mix, self._synth_out, to_chain, inst.keys_gain(),
+                               inst.drums_gain())
+            if pk > self.sf_peak:
+                self.sf_peak = pk
         if t.D[Ly.T_ON] > 0.5:
             self._run_track(t, self._synth_out, 0, frames, mix)
         write_output(mix, frames, outdata, self.out_offset, self.master)

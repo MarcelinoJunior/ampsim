@@ -1,5 +1,6 @@
 """Widgets desenhados à mão: knob, medidor de nível, botão LED e teclado de piano."""
 import math
+import time
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF, QRadialGradient
@@ -12,6 +13,8 @@ DIM = QColor("#7d828d")
 
 
 def fmt_value(p, v):
+    if p.key == "volume" and p.unit == "dB" and v <= p.lo + 0.05:
+        return "mudo"
     if p.is_choice:
         return p.choices[int(round(v))]
     if p.unit == "Hz" and v >= 1000:
@@ -118,7 +121,16 @@ class Knob(QWidget):
     def mouseDoubleClickEvent(self, e):
         self.setValue(self.p.default, emit=True)
 
+    def enterEvent(self, e):
+        self._hover_since = time.monotonic()
+        super().enterEvent(e)
+
     def wheelEvent(self, e):
+        # a roda só mexe no knob se o mouse parou nele: rolar a tela passando por cima
+        # de um knob não altera o valor sem querer
+        if time.monotonic() - getattr(self, "_hover_since", 0.0) < 0.4:
+            e.ignore()
+            return
         steps = e.angleDelta().y() / 120.0
         if self.p.step:
             self.setValue(self._value + steps * self.p.step, emit=True)

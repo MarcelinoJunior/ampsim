@@ -99,6 +99,37 @@ Redutor de Ruído → Noise Gate → Compressor → Overdrive → Amplificador �
 - Cada efeito tem LED liga/desliga. Os presets de fábrica são marcados com ★; use
   **Salvar…** para criar os seus.
 
+## Teclas & Pads (controlador MIDI)
+
+A aba **Teclas & Pads** mostra o controlador na tela (layout do M-VAVE SMK-25: 25 teclas,
+8 pads, 8 knobs e 8 botões). Tudo nele é clicável, e acende quando você toca no aparelho.
+
+- **Timbres prontos para louvor**: Piano + Pad, Piano + Cordas, Rhodes + Pad, Pad + Cordas,
+  Baixo | Piano (divisão em C3: baixo na mão esquerda), Baixo Synth | Rhodes, Órgão + Pad,
+  Violão, Guitarra Limpa e o Pad do synth do AmpSim.
+- **Teclas / Camada 2**: escolha qualquer um dos ~45 timbres (pianos, Rhodes, órgãos, pads,
+  cordas, baixos, violões, guitarras, sinos) e uma segunda camada **sobreposta** ou na
+  **mão esquerda** (divisão do teclado, com nota ajustável).
+- **Pads**: tocam bateria — bumbo, caixa, aro, palmas, chimbal, pratos, toms, shaker,
+  pandeirola… — escolhida pad a pad, com 7 kits (Acústico, Power, Eletrônico, 808/909,
+  Vassourinha…). A bateria sai sempre limpa, em estéreo.
+- **Knobs e botões**: cada um recebe uma função (volume das teclas, da camada 2 e da bateria,
+  reverb, chorus, brilho, release, master; timbre/kit anterior e próximo, liga/desliga
+  camada 2, pânico).
+- **Mapear meu controlador…**: assistente que pede "toque o PAD 1", "gire o KNOB 1",
+  "aperte o botão PLAY"… e aprende o que o seu controlador envia (com **Pular** e **Parar**).
+  Sem mapear, os pads esperam as notas 36–43 no canal 10.
+- **Teclas passam pelo amplificador** (no topo da aba): desligado, o timbre sai limpo, com
+  reverb/chorus próprios; ligado, as teclas passam pelo amplificador, gabinete e pedais da
+  aba (útil para o timbre de guitarra).
+- As visões **Synth AmpSim** e **Amplificador e efeitos** ficam em botões no topo da aba.
+
+Conecte o controlador pelo **USB** e escolha-o em **MIDI:** na barra de baixo (o MIDI por
+Bluetooth não aparece nessa lista do Windows).
+
+Os timbres vêm do banco **GeneralUser GS** tocado pelo **FluidSynth**, ambos baixados por
+`toolsaixar_extras.py`.
+
 ## Capturas NAM e plugins (extras do GitHub)
 
 ```bat
@@ -106,6 +137,9 @@ Redutor de Ruído → Noise Gate → Compressor → Overdrive → Amplificador �
 ```
 
 Baixa para `third_party/` (fora do git):
+
+- **FluidSynth** (motor dos timbres das teclas e pads, LGPL-2.1; hash SHA-256 conferido) e o
+  banco **GeneralUser GS** (~260 timbres e 13 kits de bateria, licença livre).
 
 - **9 capturas gratuitas** da coleção [pelennor2170/NAM_models](https://github.com/pelennor2170/NAM_models)
   (GPL-3.0): Fender Twin Reverb, Vox AC15 Top Boost, Marshall JCM2000 Crunch, Marshall
@@ -168,11 +202,12 @@ O teste de desempenho imprime quanto da janela de 64 amostras o DSP completo con
 ## Licenças de terceiros
 
 `pedalboard` (Spotify) é GPL-3.0; as capturas NAM incluídas pelo script são GPL-3.0; o
-plugin Neural Amp Modeler é MIT.
+plugin Neural Amp Modeler é MIT; FluidSynth é LGPL-2.1 (carregado como DLL); GeneralUser GS
+usa a licença própria do autor (uso livre, inclusive comercial).
 
 ## Marcas registradas
 
-Fender, Marshall, Mesa/Boogie, Vox, Ampeg, Orange, EVH, Soldano, Tech 21 e demais nomes de
+Fender, Marshall, Mesa/Boogie, Vox, Ampeg, Orange, EVH, Soldano, Tech 21, M-VAVE e demais nomes de
 equipamentos citados são marcas registradas de seus respectivos titulares. O AmpSim não é
 afiliado, patrocinado nem endossado por nenhum deles. Os nomes aparecem apenas para
 identificar o estilo de timbre que cada modelo busca ou o equipamento real capturado (NAM).
