@@ -53,6 +53,16 @@ SKINS = {
     "ac": Skin("#1d1714", "#5d3f26", "#c79a52", "diamond", "#c98a4b", "#8a5426",
                "#fff3dc", "#f0d9b5", "#efe6d2", "#5a3a1c", "#f6e7c9", "#3a2a1a",
                "#e2c27a", "Georgia", False, True),
+    # fontes de amp que não são modelos internos
+    "nam": Skin("#101317", "#192028", "#27313c", "mesh", "#2a323c", "#1a1f26",
+                "#e6edf3", "#8b98a5", "#0f1215", "#3a4450", "#4fb3ff", "#4fb3ff",
+                "#8fd6ff", "Segoe UI Semibold", False, False),
+    "vst": Skin("#121016", "#1d1925", "#2d2738", "mesh", "#2d2836", "#1c1923",
+                "#ece6f5", "#9a90aa", "#100e14", "#433a52", "#b48cff", "#b48cff",
+                "#cdb3ff", "Segoe UI Semibold", False, False),
+    "di": Skin("#16181c", "#1c1f24", "#262a30", "mesh", "#23262c", "#1a1c20",
+               "#d8dae0", "#7d828d", "#2f333c", "#3a3e48", "#e8a33d", "#d8dae0",
+               "#9aa0aa", "Segoe UI Semibold", False, False),
 }
 
 

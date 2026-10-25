@@ -29,13 +29,24 @@ def fmt_value(p, v):
     return f"{s} {p.unit}".strip()
 
 
+# geometria por tamanho: (largura, altura, raio, centro y, y do rótulo, y do valor)
+KNOB_SIZES = {
+    "normal": (66, 84, 20.0, 26, 50, 65),
+    "small": (58, 68, 15.0, 19, 37, 51),
+}
+
+
 class Knob(QWidget):
-    """Arraste vertical (Shift = fino), roda do mouse, duplo-clique volta ao padrão."""
+    """Arraste vertical (Shift = fino), roda do mouse, duplo-clique volta ao padrão.
+
+    size: "normal", "small" (pedais) ou "mini" (uma linha: knob à esquerda, texto à direita).
+    """
 
     valueChanged = Signal(float)
 
-    def __init__(self, param, accent="#e8a33d", parent=None):
+    def __init__(self, param, accent="#e8a33d", parent=None, size="normal"):
         super().__init__(parent)
+        self.size_mode = size
         self.p = param
         self.accent = QColor(accent)
         self.cap = QColor("#2f333c")
@@ -46,7 +57,11 @@ class Knob(QWidget):
         self._value = param.default
         self._drag = None
         self.setFocusPolicy(Qt.NoFocus)
-        self.setFixedSize(66, 84)
+        if size == "mini":
+            self.setFixedSize(112, 30)
+        else:
+            w, h = KNOB_SIZES[size][:2]
+            self.setFixedSize(w, h)
         self.setCursor(Qt.SizeVerCursor)
         self.setToolTip(f"{param.label}\nArraste para cima/baixo (Shift = ajuste fino)\n"
                         "Roda do mouse ajusta · duplo-clique restaura o padrão")
@@ -111,31 +126,44 @@ class Knob(QWidget):
         qp = QPainter(self)
         qp.setRenderHint(QPainter.Antialiasing)
         w = self.width()
-        r = 20.0
-        c = QPointF(w / 2, 26)
+        if self.size_mode == "mini":
+            r, c, ly, vy = 11.0, QPointF(14, 15), None, None
+        else:
+            _, _, r, cy, ly, vy = KNOB_SIZES[self.size_mode]
+            c = QPointF(w / 2, cy)
+        thick = 4 if r >= 18 else 3
         rect = QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r)
-        qp.setPen(QPen(self.ring, 4, Qt.SolidLine, Qt.RoundCap))
+        qp.setPen(QPen(self.ring, thick, Qt.SolidLine, Qt.RoundCap))
         qp.drawArc(rect, 225 * 16, -270 * 16)
         t = self._to_norm(self._value)
-        qp.setPen(QPen(self.accent, 4, Qt.SolidLine, Qt.RoundCap))
+        qp.setPen(QPen(self.accent, thick, Qt.SolidLine, Qt.RoundCap))
         if self.p.lo < 0 < self.p.hi and not self.p.log:      # bipolar: arco a partir do centro
             t0 = self._to_norm(0.0)
             qp.drawArc(rect, int((225 - 270 * t0) * 16), int(-270 * (t - t0) * 16))
         else:
             qp.drawArc(rect, 225 * 16, int(-270 * t * 16))
+        inner = r - (6 if r >= 18 else 4.5)
         qp.setPen(Qt.NoPen)
         qp.setBrush(self.cap)
-        qp.drawEllipse(c, r - 6, r - 6)
+        qp.drawEllipse(c, inner, inner)
         ang = math.radians(225 - 270 * t)
-        qp.setPen(QPen(self.pointer, 2.5, Qt.SolidLine, Qt.RoundCap))
-        qp.drawLine(c, QPointF(c.x() + (r - 8) * math.cos(ang), c.y() - (r - 8) * math.sin(ang)))
+        qp.setPen(QPen(self.pointer, 2.5 if r >= 18 else 2, Qt.SolidLine, Qt.RoundCap))
+        tip = inner - 2
+        qp.drawLine(c, QPointF(c.x() + tip * math.cos(ang), c.y() - tip * math.sin(ang)))
         f = QFont(self.font())
-        f.setPointSizeF(8)
+        f.setPointSizeF(8 if self.size_mode == "normal" else 7.5)
         qp.setFont(f)
+        if self.size_mode == "mini":
+            qp.setPen(self.text)
+            qp.drawText(QRectF(30, 0, w - 30, 15), Qt.AlignLeft | Qt.AlignVCenter, self.p.label)
+            qp.setPen(self.dim)
+            qp.drawText(QRectF(30, 14, w - 30, 15), Qt.AlignLeft | Qt.AlignVCenter,
+                        fmt_value(self.p, self._value))
+            return
         qp.setPen(self.text)
-        qp.drawText(QRectF(0, 50, w, 16), Qt.AlignCenter, self.p.label)
+        qp.drawText(QRectF(0, ly, w, 15), Qt.AlignCenter, self.p.label)
         qp.setPen(self.dim)
-        qp.drawText(QRectF(0, 65, w, 16), Qt.AlignCenter, fmt_value(self.p, self._value))
+        qp.drawText(QRectF(0, vy, w, 15), Qt.AlignCenter, fmt_value(self.p, self._value))
 
 
 class LedButton(QAbstractButton):
@@ -161,12 +189,16 @@ class LedButton(QAbstractButton):
 
 
 class Meter(QWidget):
-    """Medidor de pico vertical em dB com retenção (decai suavemente)."""
+    """Medidor de pico em dB com retenção (decai suavemente). Vertical ou horizontal."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, horizontal=False):
         super().__init__(parent)
-        self.setFixedWidth(10)
-        self.setMinimumHeight(60)
+        self.horizontal = horizontal
+        if horizontal:
+            self.setFixedSize(90, 6)
+        else:
+            self.setFixedWidth(10)
+            self.setMinimumHeight(60)
         self.level = 0.0
         self.clip_hold = 0
 
@@ -184,8 +216,14 @@ class Meter(QWidget):
         qp = QPainter(self)
         h, w = self.height(), self.width()
         qp.fillRect(0, 0, w, h, QColor("#0e0f12"))
-        fill = int((h - 4) * self.level)
         color = QColor("#4cc26a") if self.level < 0.85 else QColor("#e6c23a")
+        if self.horizontal:
+            fill = int((w - 6) * self.level)
+            qp.fillRect(0, 1, fill, h - 2, color)
+            if self.clip_hold:
+                qp.fillRect(w - 5, 0, 5, h, QColor("#e5484d"))
+            return
+        fill = int((h - 4) * self.level)
         qp.fillRect(1, h - fill, w - 2, fill, color)
         if self.clip_hold:
             qp.fillRect(0, 0, w, 4, QColor("#e5484d"))
