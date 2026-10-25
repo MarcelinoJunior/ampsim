@@ -3,6 +3,9 @@ QWidget { background: #16181d; color: #d8dae0; font-family: 'Segoe UI'; font-siz
 QFrame#topbar, QFrame#kbdbar, QFrame#trackhead { background: #1d2026; border: 1px solid #2c3038; border-radius: 6px; }
 QFrame#effect { background: #22252c; border: 1px solid #30343d; border-radius: 8px; }
 QFrame#effect QWidget, QFrame#topbar QWidget, QFrame#kbdbar QWidget, QFrame#trackhead QWidget { background: transparent; }
+QFrame#amppanel { background: transparent; border: none; }
+QFrame#amppanel QWidget { background: transparent; }
+QFrame#amppanel QComboBox { background: rgba(20, 20, 22, 210); border: 1px solid rgba(0, 0, 0, 160); color: #f0f0f0; }
 QLabel#apptitle { font-size: 15pt; font-weight: 600; color: #f0f0f0; }
 QLabel#fxtitle { font-size: 10pt; font-weight: 600; }
 QLabel#small { color: #8a8f99; font-size: 8pt; }

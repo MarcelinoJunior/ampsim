@@ -38,6 +38,11 @@ class Knob(QWidget):
         super().__init__(parent)
         self.p = param
         self.accent = QColor(accent)
+        self.cap = QColor("#2f333c")
+        self.ring = QColor("#3a3e48")
+        self.text = TEXT
+        self.dim = DIM
+        self.pointer = TEXT
         self._value = param.default
         self._drag = None
         self.setFocusPolicy(Qt.NoFocus)
@@ -45,6 +50,11 @@ class Knob(QWidget):
         self.setCursor(Qt.SizeVerCursor)
         self.setToolTip(f"{param.label}\nArraste para cima/baixo (Shift = ajuste fino)\n"
                         "Roda do mouse ajusta · duplo-clique restaura o padrão")
+
+    def set_skin(self, accent, cap, ring, text, dim, pointer):
+        self.accent, self.cap, self.ring = QColor(accent), QColor(cap), QColor(ring)
+        self.text, self.dim, self.pointer = QColor(text), QColor(dim), QColor(pointer)
+        self.update()
 
     # mapeamento valor <-> posição 0..1
     def _to_norm(self, v):
@@ -104,7 +114,7 @@ class Knob(QWidget):
         r = 20.0
         c = QPointF(w / 2, 26)
         rect = QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r)
-        qp.setPen(QPen(QColor("#3a3e48"), 4, Qt.SolidLine, Qt.RoundCap))
+        qp.setPen(QPen(self.ring, 4, Qt.SolidLine, Qt.RoundCap))
         qp.drawArc(rect, 225 * 16, -270 * 16)
         t = self._to_norm(self._value)
         qp.setPen(QPen(self.accent, 4, Qt.SolidLine, Qt.RoundCap))
@@ -114,17 +124,17 @@ class Knob(QWidget):
         else:
             qp.drawArc(rect, 225 * 16, int(-270 * t * 16))
         qp.setPen(Qt.NoPen)
-        qp.setBrush(QColor("#2f333c"))
+        qp.setBrush(self.cap)
         qp.drawEllipse(c, r - 6, r - 6)
         ang = math.radians(225 - 270 * t)
-        qp.setPen(QPen(TEXT, 2.5, Qt.SolidLine, Qt.RoundCap))
+        qp.setPen(QPen(self.pointer, 2.5, Qt.SolidLine, Qt.RoundCap))
         qp.drawLine(c, QPointF(c.x() + (r - 8) * math.cos(ang), c.y() - (r - 8) * math.sin(ang)))
         f = QFont(self.font())
         f.setPointSizeF(8)
         qp.setFont(f)
-        qp.setPen(TEXT)
+        qp.setPen(self.text)
         qp.drawText(QRectF(0, 50, w, 16), Qt.AlignCenter, self.p.label)
-        qp.setPen(DIM)
+        qp.setPen(self.dim)
         qp.drawText(QRectF(0, 65, w, 16), Qt.AlignCenter, fmt_value(self.p, self._value))
 
 

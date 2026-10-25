@@ -6,7 +6,7 @@ import numpy as np
 from . import devices as dev
 from .devices import sd
 from ..dsp import layout as Ly
-from ..dsp.kernels import process_track, render_synth, write_output
+from ..dsp.kernels import process_post, process_pre, process_track, render_synth, write_output
 from ..dsp.synth import SynthDSP
 from ..dsp.track import TrackDSP
 
@@ -151,14 +151,23 @@ class AudioEngine:
                 t = tracks[name]
                 ch = self.input_channel[name]
                 if t.D[Ly.T_ON] > 0.5 and ch < n_in:
-                    process_track(indata, ch, frames, mix, *t.arrays)
+                    self._run_track(t, indata, ch, frames, mix)
         s = self.synth
         render_synth(self._synth_out, frames, self._ev, self._drain_events(), s.SD, s.VS, s.SST,
                      self.fs)
         t = tracks["pads"]
         if t.D[Ly.T_ON] > 0.5:
-            process_track(self._synth_out, 0, frames, mix, *t.arrays)
+            self._run_track(t, self._synth_out, 0, frames, mix)
         write_output(mix, frames, outdata, self.out_offset, self.master)
+
+    @staticmethod
+    def _run_track(t, src, ch, frames, mix):
+        if t.external_active():
+            process_pre(src, ch, frames, *t.pre_arrays)
+            t.run_external(t.W[0], frames)
+            process_post(frames, mix, *t.post_arrays)
+        else:
+            process_track(src, ch, frames, mix, *t.arrays)
 
     def _duplex_cb(self, indata, outdata, frames, time_info, status):
         if status:

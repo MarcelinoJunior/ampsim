@@ -4,6 +4,9 @@ import os
 import sys
 
 os.environ.setdefault("SD_ENABLE_ASIO", "1")      # precisa vir antes de importar sounddevice
+# BLAS (usado pelas capturas NAM) em uma thread só: blocos pequenos não ganham com threads e
+# acordar threads extras dentro do callback causa picos de latência.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 
 def _raise_priority():

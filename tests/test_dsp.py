@@ -20,12 +20,19 @@ def compiled():
 
 
 def run(track, signal, block=BLOCK):
+    from ampsim.dsp.kernels import process_post, process_pre
+
     n = len(signal)
     src = signal.astype(np.float32).reshape(-1, 1)
     out = np.zeros((n, 2))
     mix = np.zeros((block, 2))
     for i in range(0, n - block + 1, block):
-        process_track(src[i:i + block], 0, block, mix, *track.arrays)
+        if track.external_active():
+            process_pre(src[i:i + block], 0, block, *track.pre_arrays)
+            track.run_external(track.W[0], block)
+            process_post(block, mix, *track.post_arrays)
+        else:
+            process_track(src[i:i + block], 0, block, mix, *track.arrays)
         out[i:i + block] = mix
         mix[:] = 0
     return out
@@ -202,3 +209,94 @@ def test_hum_notch():
     hum = 0.1 * (np.sin(2 * np.pi * 60 * tt) + 0.5 * np.sin(2 * np.pi * 180 * tt))
     y = run(t, hum)[int(FS):, 0]
     assert _rms_db(y) < _rms_db(hum) - 25
+
+
+# --------------------------------------------------------------------------- NAM / cadeia dividida
+def test_pre_post_equals_full_chain():
+    from ampsim.dsp.kernels import process_post, process_pre
+
+    a, b = TrackDSP(FS), TrackDSP(FS)
+    for t in (a, b):
+        for e in EFFECTS:
+            t.set_on(e.key, True)
+    x = guitar_signal(0.3).astype(np.float32).reshape(-1, 1)
+    mix_a = np.zeros((BLOCK, 2))
+    mix_b = np.zeros((BLOCK, 2))
+    for i in range(0, len(x) - BLOCK + 1, BLOCK):
+        process_track(x[i:i + BLOCK], 0, BLOCK, mix_a, *a.arrays)
+        process_pre(x[i:i + BLOCK], 0, BLOCK, *b.pre_arrays)
+        process_post(BLOCK, mix_b, *b.post_arrays)
+    assert np.allclose(mix_a, mix_b)
+
+
+def _captures():
+    from ampsim.dsp.nam import list_captures
+
+    return list_captures()
+
+
+@pytest.mark.skipif(not _captures(), reason="capturas não baixadas (tools/baixar_extras.py)")
+def test_nam_captures_load_and_behave():
+    from ampsim.dsp.nam import NamModel
+
+    t = np.arange(int(FS * 0.5)) / FS
+    x = 0.1 * np.sin(2 * np.pi * 220 * t)
+    for name, path in _captures().items():
+        m = NamModel(path)
+        y = x.copy()
+        for i in range(0, len(y) - BLOCK + 1, BLOCK):
+            m.process(y[i:i + BLOCK], BLOCK)
+        seg = y[len(y) // 2:]
+        assert np.all(np.isfinite(seg)), name
+        assert 1e-4 < np.sqrt(np.mean(seg ** 2)) < 2.0, name
+    # amp limpo: a saída precisa seguir a entrada (pesos na ordem certa)
+    clean = NamModel(_captures()["Fender Twin Reverb (limpo)"])
+    y = x.copy()
+    for i in range(0, len(y) - BLOCK + 1, BLOCK):
+        clean.process(y[i:i + BLOCK], BLOCK)
+    spec = np.abs(np.fft.rfft(y[len(y) // 2:]))
+    f = np.fft.rfftfreq(len(y) - len(y) // 2, 1 / FS)
+    fund = spec[np.abs(f - 220) < 5].max()
+    assert spec[np.abs(f - 440) < 5].max() < fund * 0.05
+
+
+@pytest.mark.skipif(not _captures(), reason="capturas não baixadas (tools/baixar_extras.py)")
+def test_nam_in_track_and_realtime_budget():
+    from ampsim.dsp.kernels import process_post, process_pre
+
+    t = TrackDSP(FS)
+    t.set_nam_file("Marshall JCM900 Lead")
+    t.set_on("nam", True)
+    t.set_on("cab", True)
+    assert t.nam is not None and t.external_active()
+    src = (np.random.default_rng(1).standard_normal((BLOCK, 1)) * 0.1).astype(np.float32)
+    mix = np.zeros((BLOCK, 2))
+    iters = 400
+    t0 = time.perf_counter()
+    for _ in range(iters):
+        process_pre(src, 0, BLOCK, *t.pre_arrays)
+        t.run_external(t.W[0], BLOCK)
+        process_post(BLOCK, mix, *t.post_arrays)
+    per_block = (time.perf_counter() - t0) / iters
+    print(f"\nNAM na trilha: {100 * per_block / (BLOCK / FS):.0f}% da janela de {BLOCK} amostras")
+    assert np.all(np.isfinite(mix))
+    assert per_block < (BLOCK / FS) * 0.5
+
+
+def test_factory_presets_load():
+    from ampsim.presets import FACTORY
+
+    for kind in ("guitar", "bass", "pads"):
+        for name, data in FACTORY[kind].items():
+            t = TrackDSP(FS)
+            t.load_state(data)
+            if data["values"].get("nam", {}).get("file") and _captures():
+                assert t.nam is not None, name
+            y = run(t, guitar_signal(0.2))
+            assert np.all(np.isfinite(y)), name
+
+
+def test_vst_bad_path_is_reported():
+    t = TrackDSP(FS)
+    assert t.load_vst(r"C:\nao\existe.vst3") is False
+    assert t.vst is None and t.vst_error

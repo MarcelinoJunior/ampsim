@@ -421,17 +421,15 @@ def fx_reverb(L, R, n, D, RVB, RVOFF, RVLEN, RVPOS, RVFS):
 
 
 # ======================================================================= trilha completa
+# A cadeia é dividida em duas metades para que a captura NAM e o plugin VST3 (que rodam
+# fora deste kernel) entrem entre o amplificador e o gabinete. O sinal mono fica em W[0].
 @njit(**JIT)
-def process_track(src, ch, n, mix, D, BQ, Z, ST, H, OSU, OSD, IR, IRH, CHB, DLB,
-                  RVB, RVOFF, RVLEN, RVPOS, RVFS, W):
-    """Processa `n` amostras do canal `ch` de `src` e soma o resultado estéreo em `mix`."""
+def process_pre(src, ch, n, D, BQ, Z, ST, H, OSU, OSD, W):
+    """Entrada -> redutor de ruído -> gate -> compressor -> overdrive -> amp."""
     x = W[0]
     t1 = W[1]
     u = W[2]
-    L = W[3]
-    R = W[4]
     di = W[5]
-
     ingain = D[T_INGAIN]
     peak = ST[S_PEAK_IN]
     for i in range(n):
@@ -451,6 +449,14 @@ def process_track(src, ch, n, mix, D, BQ, Z, ST, H, OSU, OSD, IR, IRH, CHB, DLB,
         fx_overdrive(x, n, D, BQ, Z, ST, H, OSU, OSD, t1, u)
     if D[A_ON] > 0.5:
         fx_amp(x, n, D, BQ, Z, ST, H, OSU, OSD, t1, u, di)
+
+
+@njit(**JIT)
+def process_post(n, mix, D, BQ, Z, ST, IR, IRH, CHB, DLB, RVB, RVOFF, RVLEN, RVPOS, RVFS, W):
+    """Gabinete -> EQ -> chorus -> delay -> reverb -> volume/pan, somando em `mix`."""
+    x = W[0]
+    L = W[3]
+    R = W[4]
     if D[CAB_ON] > 0.5:
         fx_cab(x, n, D, BQ, Z, ST, IR, IRH)
     if D[EQ_ON] > 0.5:
@@ -479,6 +485,14 @@ def process_track(src, ch, n, mix, D, BQ, Z, ST, H, OSU, OSD, IR, IRH, CHB, DLB,
             peak = a
     ST[S_PEAK_OUT] = peak
     flush_denormals(Z)
+
+
+@njit(**JIT)
+def process_track(src, ch, n, mix, D, BQ, Z, ST, H, OSU, OSD, IR, IRH, CHB, DLB,
+                  RVB, RVOFF, RVLEN, RVPOS, RVFS, W):
+    """Cadeia inteira numa chamada (quando não há NAM/VST na trilha)."""
+    process_pre(src, ch, n, D, BQ, Z, ST, H, OSU, OSD, W)
+    process_post(n, mix, D, BQ, Z, ST, IR, IRH, CHB, DLB, RVB, RVOFF, RVLEN, RVPOS, RVFS, W)
 
 
 @njit(**JIT)
@@ -742,6 +756,8 @@ def warmup(fs=48000.0):
     src[:, 0] = 0.1
     mix = np.zeros((n, 2), dtype=np.float64)
     process_track(src, 0, n, mix, *t.arrays)
+    process_pre(src, 0, n, *t.pre_arrays)
+    process_post(n, mix, *t.post_arrays)
     t.set_cab_ir(np.array([1.0, 0.5, 0.25]))
     process_track(src, 0, n, mix, *t.arrays)
     out = np.zeros((n, 2), dtype=np.float32)

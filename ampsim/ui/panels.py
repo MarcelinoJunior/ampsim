@@ -1,17 +1,21 @@
 """Painéis de efeito, painel do synth e página de cada trilha."""
 import math
 import os
+import shutil
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel,
-    QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
+    QInputDialog, QLabel, QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from .. import storage
-from ..dsp.params import CAB_IR_INDEX, EFFECTS, SYNTH_GROUPS, TRACK_PARAMS
+from ..audio import vst
+from ..dsp.nam import list_captures
+from ..dsp.params import AMP_MODELS, CAB_IR_INDEX, EFFECTS, SYNTH_GROUPS, TRACK_PARAMS
 from ..dsp.synth import SYNTH_PRESETS
 from ..presets import FACTORY
+from .amp_skins import SKINS, paint_face
 from .widgets import Knob, LedButton, Meter
 
 KNOBS_PER_ROW = 4
@@ -55,6 +59,8 @@ class EffectPanel(QFrame):
         head.addWidget(title)
         head.addStretch(1)
         lay.addLayout(head)
+        self.title_label = title
+        self._before_grid(lay)
 
         grid = QGridLayout()
         grid.setSpacing(2)
@@ -76,8 +82,14 @@ class EffectPanel(QFrame):
             if col == KNOBS_PER_ROW:
                 row, col = row + 1, 0
         lay.addLayout(grid)
+        self._after_grid(lay)
+        lay.addStretch(1)
 
-        if eff.key == "cab":
+    def _before_grid(self, lay):
+        pass
+
+    def _after_grid(self, lay):
+        if self.eff.key == "cab":
             irrow = QHBoxLayout()
             btn = QPushButton("Carregar IR…")
             btn.setFocusPolicy(Qt.NoFocus)
@@ -88,7 +100,6 @@ class EffectPanel(QFrame):
             irrow.addWidget(btn)
             irrow.addWidget(self.ir_label, 1)
             lay.addLayout(irrow)
-        lay.addStretch(1)
 
     def track(self):
         return self.page.track()
@@ -130,6 +141,209 @@ class EffectPanel(QFrame):
             if t.ir_error:
                 txt = f"erro: {t.ir_error}"
             self.ir_label.setText(txt)
+
+
+class AmpPanel(EffectPanel):
+    """Amplificador com fachada própria por modelo (tecido, logo e painel)."""
+
+    def __init__(self, eff, accent, page):
+        super().__init__(eff, accent, page)
+        self.setObjectName("amppanel")
+        self.setMinimumHeight(330)
+
+    def _before_grid(self, lay):
+        self.grille = QWidget()
+        self.grille.setFixedHeight(78)
+        lay.addWidget(self.grille)
+
+    def _model(self):
+        return AMP_MODELS[int(round(self.track().values["amp"]["model"]))]
+
+    def apply_skin(self):
+        s = SKINS[self._model()["skin"]]
+        for w in self.controls.values():
+            if isinstance(w, Knob):
+                w.set_skin(s.accent, s.knob_cap, s.knob_ring, s.text, s.dim, s.pointer)
+        for lab in self.findChildren(QLabel):
+            if lab is not self.title_label:
+                lab.setObjectName("ampface")          # sai da regra QLabel#small do tema
+                lab.setStyleSheet(f"QLabel {{ color: {s.text}; font-weight: 600; }}")
+        self.update()
+
+    def _changed(self, key, value):
+        super()._changed(key, value)
+        if key == "model":
+            self.apply_skin()
+
+    def refresh(self):
+        super().refresh()
+        self.apply_skin()
+
+    def paintEvent(self, _):
+        m = self._model()
+        paint_face(self, m["skin"], m["name"], self.grille.geometry())
+
+
+class NamPanel(EffectPanel):
+    """Captura Neural Amp Modeler: escolhe o arquivo .nam (amp real capturado)."""
+
+    NONE = "(nenhuma)"
+
+    def _after_grid(self, lay):
+        self.combo = QComboBox()
+        self.combo.setFocusPolicy(Qt.NoFocus)
+        self.combo.activated.connect(self._chosen)
+        lay.addWidget(self.combo)
+        row = QHBoxLayout()
+        add = QPushButton("Adicionar captura…")
+        add.setFocusPolicy(Qt.NoFocus)
+        add.setToolTip("Copia um arquivo .nam (ex.: baixado do ToneHunt) para a sua pasta de capturas")
+        add.clicked.connect(self._add)
+        row.addWidget(add)
+        row.addStretch(1)
+        lay.addLayout(row)
+        self.status = QLabel("")
+        self.status.setObjectName("small")
+        self.status.setWordWrap(True)
+        lay.addWidget(self.status)
+        self._fill()
+
+    def _fill(self):
+        self.combo.blockSignals(True)
+        self.combo.clear()
+        self.combo.addItem(self.NONE)
+        self.combo.addItems(list(list_captures()))
+        self.combo.blockSignals(False)
+
+    def _chosen(self, _):
+        name = self.combo.currentText()
+        name = "" if name == self.NONE else name
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            t = self.track()
+            t.set_nam_file(name)
+            if name and not t.values["nam"]["on"]:
+                t.set_on("nam", True)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.refresh()
+
+    def _add(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Adicionar captura NAM", "", "Capturas NAM (*.nam)")
+        if not path:
+            return
+        dest = storage.APP_DIR / "nam"
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dest / os.path.basename(path))
+        self._fill()
+        self.combo.setCurrentText(os.path.splitext(os.path.basename(path))[0])
+        self._chosen(0)
+
+    def refresh(self):
+        super().refresh()
+        t = self.track()
+        name = t.values["nam"]["file"]
+        if name and self.combo.findText(name) < 0:
+            self._fill()
+        self.combo.setCurrentText(name or self.NONE)
+        if t.nam_error:
+            self.status.setText(t.nam_error)
+        elif t.nam is not None:
+            self.status.setText("Dica: desligue o Amplificador ao lado; a captura já é o amp.")
+        else:
+            self.status.setText(f"{len(list_captures())} capturas disponíveis")
+
+
+class VstPanel(EffectPanel):
+    """Slot para um plugin VST3 de efeito (amp sim, pedal, reverb...)."""
+
+    OTHER = "Outro arquivo .vst3…"
+
+    def _after_grid(self, lay):
+        self.combo = QComboBox()
+        self.combo.setFocusPolicy(Qt.NoFocus)
+        self.combo.activated.connect(self._chosen)
+        lay.addWidget(self.combo)
+        row = QHBoxLayout()
+        self.edit_btn = QPushButton("Abrir editor")
+        self.edit_btn.setFocusPolicy(Qt.NoFocus)
+        self.edit_btn.clicked.connect(self._edit)
+        row.addWidget(self.edit_btn)
+        rm = QPushButton("Remover")
+        rm.setFocusPolicy(Qt.NoFocus)
+        rm.clicked.connect(lambda: self._load(""))
+        row.addWidget(rm)
+        row.addStretch(1)
+        lay.addLayout(row)
+        self.status = QLabel("")
+        self.status.setObjectName("small")
+        self.status.setWordWrap(True)
+        lay.addWidget(self.status)
+        self._fill()
+
+    def _fill(self):
+        self.combo.blockSignals(True)
+        self.combo.clear()
+        self.combo.addItem("(nenhum)", "")
+        for path in vst.find_plugins():
+            self.combo.addItem(os.path.splitext(os.path.basename(path))[0], path)
+        self.combo.addItem(self.OTHER, None)
+        self.combo.blockSignals(False)
+
+    def _chosen(self, _):
+        path = self.combo.currentData()
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Escolher plugin VST3", vst.SYSTEM_VST3_DIR,
+                                                  "Plugins VST3 (*.vst3)")
+            if not path:
+                self.refresh()
+                return
+        self._load(path)
+
+    def _load(self, path):
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            t = self.track()
+            ok = t.load_vst(path)
+            if ok and path:
+                t.set_on("vst", True)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.refresh()
+
+    def _edit(self):
+        t = self.track()
+        if t.vst is None:
+            return
+        self.status.setText("Editor aberto — feche a janela do plugin para voltar ao AmpSim.")
+        QApplication.processEvents()
+        t.vst.show_editor()
+        t.get_state()                    # guarda o novo estado do plugin
+        self.refresh()
+
+    def refresh(self):
+        super().refresh()
+        t = self.track()
+        path = t.values["vst"]["path"]
+        i = self.combo.findData(path) if path else 0
+        if path and i < 0:
+            self.combo.insertItem(1, os.path.splitext(os.path.basename(path))[0], path)
+            i = 1
+        self.combo.setCurrentIndex(max(i, 0))
+        self.edit_btn.setEnabled(t.vst is not None)
+        if not vst.available():
+            self.status.setText("Instale o pacote 'pedalboard' para usar plugins VST3.")
+        elif t.vst_error:
+            self.status.setText(f"Erro: {t.vst_error}")
+        elif t.vst is not None and t.vst.error:
+            self.status.setText(f"Plugin desativado após erro: {t.vst.error}")
+        elif t.vst is not None:
+            self.status.setText(f"{t.vst.name} · {t.vst.channels} canal(is)")
+        else:
+            self.status.setText("Plugins em " + vst.SYSTEM_VST3_DIR)
+
+
+PANEL_CLASSES = {"amp": AmpPanel, "nam": NamPanel, "vst": VstPanel}
 
 
 class SynthPanel(QFrame):
@@ -271,15 +485,18 @@ class TrackPage(QWidget):
             bl.addWidget(self.synth_panel)
         grid = QGridLayout()
         grid.setSpacing(6)
-        layout_rows = (("denoise", "gate", "comp", "overdrive", "amp"),
+        layout_rows = (("denoise", "gate", "comp", "overdrive"),
+                       ("amp", "nam", "vst"),
                        ("cab", "eq", "chorus", "delay", "reverb"))
         by_key = {e.key: e for e in EFFECTS}
         for r, keys in enumerate(layout_rows):
-            for c, key in enumerate(keys):
-                panel = EffectPanel(by_key[key], accent, self)
+            col = 0
+            for key in keys:
+                panel = PANEL_CLASSES.get(key, EffectPanel)(by_key[key], accent, self)
                 self.panels.append(panel)
                 span = 2 if key == "amp" else 1
-                grid.addWidget(panel, r, c, 1, span)
+                grid.addWidget(panel, r, col, 1, span)
+                col += span
         bl.addLayout(grid)
         bl.addStretch(1)
         scroll = QScrollArea()

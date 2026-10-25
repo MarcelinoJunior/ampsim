@@ -25,6 +25,9 @@ def default_values():
         vals[e.key]["on"] = False
     vals["track"] = {p.key: p.default for p in TRACK_PARAMS}
     vals["track"]["on"] = True
+    vals["nam"]["file"] = ""          # nome da captura (sem .nam)
+    vals["vst"]["path"] = ""          # caminho do .vst3
+    vals["vst"]["state"] = ""         # estado do plugin (base64)
     return vals
 
 
@@ -39,6 +42,12 @@ class TrackDSP:
         self.ir_path = None
         self.ir_error = None
         self._ir_data = None          # IR original (antes de reamostrar) para trocar de fs
+        self.nam = None               # NamModel ativo (trocado atomicamente pela UI)
+        self.nam_error = None
+        self.nam_gain = (1.0, 1.0)
+        self.vst = None               # VstSlot ativo
+        self.vst_error = None
+        self.vst_mix = 1.0
 
         self.D = np.zeros(Ly.D_SIZE)
         self.BQ = np.zeros((Ly.NBQ, 5))
@@ -72,6 +81,9 @@ class TrackDSP:
         self.arrays = (self.D, self.BQ, self.Z, self.ST, OS_KERNEL, self.OSU, self.OSD, self.IR,
                        self.IRH, self.CHB, self.DLB, self.RVB, self.RVOFF, self.RVLEN, self.RVPOS,
                        self.RVFS, self.W)
+        self.pre_arrays = (self.D, self.BQ, self.Z, self.ST, OS_KERNEL, self.OSU, self.OSD, self.W)
+        self.post_arrays = (self.D, self.BQ, self.Z, self.ST, self.IR, self.IRH, self.CHB, self.DLB,
+                            self.RVB, self.RVOFF, self.RVLEN, self.RVPOS, self.RVFS, self.W)
         self.update_all()
 
     # ------------------------------------------------------------------ API pública
@@ -84,7 +96,74 @@ class TrackDSP:
         self._update(effect)
 
     def get_state(self):
+        if self.vst is not None:
+            self.values["vst"]["state"] = self.vst.get_state()
         return {"values": copy.deepcopy(self.values), "ir_path": self.ir_path}
+
+    # ------------------------------------------------------------------ NAM e VST3
+    def external_active(self):
+        return ((self.nam is not None and self.values["nam"]["on"])
+                or (self.vst is not None and self.values["vst"]["on"] and not self.vst.error))
+
+    def run_external(self, x, n):
+        """Thread de áudio: captura NAM e plugin VST3 entre o amp e o gabinete."""
+        nam = self.nam
+        if nam is not None and self.values["nam"]["on"]:
+            gin, gout = self.nam_gain
+            x[:n] *= gin
+            nam.process(x, n)
+            x[:n] *= gout
+        vst = self.vst
+        if vst is not None and self.values["vst"]["on"]:
+            vst.process(x, n, self.vst_mix)
+
+    def set_nam_file(self, name):
+        self.values["nam"]["file"] = name or ""
+        self._load_nam()
+
+    def _load_nam(self):
+        from .nam import NamError, NamModel, list_captures
+
+        name = self.values["nam"]["file"]
+        if not name:
+            self.nam, self.nam_error = None, None
+            return
+        if self.nam is not None and self.nam.name == name:
+            return
+        path = list_captures().get(name)
+        if path is None:
+            self.nam = None
+            self.nam_error = "captura não encontrada (rode tools/baixar_extras.py)"
+            return
+        try:
+            model = NamModel(path, Ly.MAX_BLOCK)
+        except (OSError, ValueError, KeyError, NamError) as exc:
+            self.nam, self.nam_error = None, f"erro ao ler a captura: {exc}"
+            return
+        self.nam_error = None
+        if abs(model.sample_rate - self.fs) > 1:
+            self.nam_error = (f"captura feita a {model.sample_rate} Hz; use {model.sample_rate} Hz "
+                              "no ⚙ Áudio para o timbre exato")
+        self.nam = model
+
+    def load_vst(self, path, state=""):
+        from ..audio.vst import VstSlot
+
+        self.vst = None
+        self.values["vst"]["path"] = path or ""
+        self.values["vst"]["state"] = state or ""
+        if not path:
+            self.vst_error = None
+            return True
+        try:
+            slot = VstSlot(path, self.fs, Ly.MAX_BLOCK)
+            slot.set_state(state)
+        except Exception as exc:  # noqa: BLE001 - qualquer erro do plugin/pedalboard
+            self.vst_error = str(exc)
+            return False
+        self.vst_error = None
+        self.vst = slot
+        return True
 
     def load_state(self, state):
         vals = default_values()
@@ -95,6 +174,11 @@ class TrackDSP:
         path = state.get("ir_path")
         if path and path != self.ir_path:
             self.load_ir_file(path)
+        vst = vals["vst"]
+        if vst["path"] != (self.vst.path if self.vst else ""):
+            self.load_vst(vst["path"], vst["state"])
+        elif self.vst is not None and vst["state"]:
+            self.vst.set_state(vst["state"])
         self.update_all()
 
     def load_ir_file(self, path):
@@ -129,6 +213,11 @@ class TrackDSP:
             a[:] = 0
         self.RVPOS[:] = 0
         self.ST[Ly.S_DL_LEN] = dl_len
+        if self.nam is not None:
+            self.nam.reset()
+        if self.vst is not None:
+            self.vst.plugin.reset()
+            self.vst.error = None
 
     # ------------------------------------------------------------------ cálculo de coeficientes
     def update_all(self):
@@ -145,6 +234,13 @@ class TrackDSP:
         if effect in ON_SLOT:
             D[ON_SLOT[effect]] = 1.0 if v["on"] else 0.0
         getattr(self, "_upd_" + effect)(v, D, fs)
+
+    def _upd_nam(self, v, D, fs):
+        self.nam_gain = (db(v["input"]), db(v["output"]))
+        self._load_nam()
+
+    def _upd_vst(self, v, D, fs):
+        self.vst_mix = v["mix"] / 100.0
 
     def _upd_track(self, v, D, fs):
         D[Ly.T_ON] = 1.0 if v["on"] else 0.0

@@ -59,7 +59,8 @@ Dicas:
 ## Cadeia de efeitos (igual para as três trilhas)
 
 ```
-Redutor de Ruído → Noise Gate → Compressor → Overdrive → Amplificador → Gabinete → EQ 5 bandas
+Redutor de Ruído → Noise Gate → Compressor → Overdrive → Amplificador → Captura NAM
+           → Plugin VST3 → Gabinete → EQ 5 bandas
            → Chorus (estéreo) → Delay (ping-pong opcional) → Reverb → Volume/Pan
 ```
 
@@ -69,14 +70,52 @@ Redutor de Ruído → Noise Gate → Compressor → Overdrive → Amplificador �
   mede o chiado da entrada por 2 s e ajusta os limiares do Gate e do Redutor de Ruído.
   Entradas de microfone de placas USB simples costumam ter bastante chiado: com distorção ele
   vira um "zunido" agudo se o gate ficar abaixo do ruído.
-- **Amplificador**: 5 modelos — Clean (americano), Crunch (britânico), Lead (hi-gain),
-  Baixo Clean (valvulado) e Baixo Drive. Gain, Graves, Médios, Agudos, Presença, Master e
-  **Blend DI** (mistura sinal limpo — útil no baixo para manter o grave).
-  A distorção roda com oversampling 4x para reduzir aliasing.
+- **Amplificador**: 7 modelos inspirados em clássicos, cada um com fachada própria (tecido,
+  logo e painel desenhados no estilo do original, sem marcas):
+
+  | Modelo | Estilo de | Uso |
+  |---|---|---|
+  | Blackface Twin | Fender Twin Reverb | limpo cristalino |
+  | Brit Plexi | Marshall Super Lead 1959 | crunch clássico |
+  | Brit 800 | Marshall JCM800 2203 | rock / solo |
+  | AC Top Boost | Vox AC30 Top Boost | brilho "chime" |
+  | Recto Modern | Mesa/Boogie Dual Rectifier | hi-gain moderno |
+  | SVT Classic | Ampeg SVT | baixo valvulado |
+  | Bass Drive | pré-amps de baixo modernos | baixo com drive |
+
+  Gain, Graves, Médios, Agudos, Presença, Master e **Blend DI** (mistura sinal limpo — útil
+  no baixo para manter o grave). A distorção roda com oversampling 4x.
+- **Captura NAM (amp real)**: roda capturas do [Neural Amp Modeler](https://github.com/sdatkinson/NeuralAmpModelerPlugin)
+  (`.nam`, arquitetura WaveNet) **direto no AmpSim, em código nativo** — sem precisar do
+  plugin. Cada captura é o "DNA" de um amplificador real medido por alguém; o volume é
+  normalizado automaticamente. Use com o Amplificador desligado e o Gabinete ligado (as
+  capturas incluídas são só do amp, sem falante). Custa ~9% de CPU com buffer de 64.
+- **Plugin VST3**: carrega qualquer plugin de efeito VST3 (amp sims, pedais, reverbs) da
+  pasta `C:\Program Files\Common Files\VST3`, com **Abrir editor** para a interface do
+  plugin e **Mix** seco/molhado. O estado do plugin é salvo nos presets.
 - **Gabinete**: 6 modelos (3 de guitarra, 3 de baixo) ou **IR em .wav** (convolução direta,
   latência zero, até 2048 amostras). Aceita WAV PCM 16/24/32 bits e float.
 - Cada efeito tem LED liga/desliga. Os presets de fábrica são marcados com ★; use
   **Salvar…** para criar os seus.
+
+## Capturas NAM e plugins (extras do GitHub)
+
+```bat
+.venv\Scripts\python tools\baixar_extras.py
+```
+
+Baixa para `third_party/` (fora do git):
+
+- **9 capturas gratuitas** da coleção [pelennor2170/NAM_models](https://github.com/pelennor2170/NAM_models)
+  (GPL-3.0): Fender Twin Reverb, Vox AC15 Top Boost, Marshall JCM2000 Crunch, Marshall
+  JCM900 Lead, Mesa Boogie Mark IV, EVH 5150, Soldano SLO, Orange Rockerverb e o pré de
+  baixo Tech21 dUg DP3X. Os presets "NAM · …" de guitarra e baixo usam essas capturas.
+- **Instalador do plugin Neural Amp Modeler** (MIT). Ele é opcional — o AmpSim já roda as
+  capturas sozinho — e serve para quem quiser usar o plugin oficial no slot VST3. O
+  instalador não é assinado digitalmente; execute-o só se confiar na fonte (release oficial).
+
+Para usar outras capturas (ex.: do site ToneHunt), clique em **Adicionar captura…** no
+painel NAM: o arquivo é copiado para `%APPDATA%\AmpSim\nam`.
 
 ## Controles
 
@@ -106,6 +145,9 @@ ampsim/
   audio/devices.py   APIs/dispositivos (PortAudio), painel ASIO
   audio/engine.py    stream duplex e callback em tempo real
   dsp/kernels.py     DSP em Numba: efeitos, amp, gabinete, synth
+  dsp/nam.py         inferência nativa de capturas Neural Amp Modeler (WaveNet + BLAS)
+  audio/vst.py       slot de plugin VST3 (pedalboard)
+  ui/amp_skins.py    fachadas dos amplificadores
   dsp/track.py       knobs → coeficientes de cada trilha
   dsp/synth.py       parâmetros e sons do synth de pads
   dsp/params.py      faixas/padrões dos parâmetros, modelos de amp e gabinete
@@ -116,6 +158,12 @@ tests/test_dsp.py    testes offline (estabilidade, IR vs. numpy, orçamento de C
 
 Testes: `.venv\Scripts\pip install pytest` e `.venv\Scripts\python -m pytest -s`.
 O teste de desempenho imprime quanto da janela de 64 amostras o DSP completo consome.
+
+## Licenças de terceiros
+
+`pedalboard` (Spotify) é GPL-3.0; as capturas NAM incluídas pelo script são GPL-3.0; o
+plugin Neural Amp Modeler é MIT. Os nomes de equipamentos citados identificam o estilo ou o
+equipamento capturado e pertencem aos seus donos; não há afiliação.
 
 ## Próximos passos sugeridos
 

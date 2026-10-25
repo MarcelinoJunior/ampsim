@@ -27,22 +27,30 @@ class EffectDef:
 
 
 # --------------------------------------------------------------------- amplificadores
+# Modelos inspirados em amplificadores clássicos (nomes próprios, sem marcas). A ordem dos
+# cinco primeiros é mantida para compatibilidade com sessões e presets já salvos.
 AMP_MODELS = (
-    dict(name="Clean (americano)", stages=1, gain_db=(0, 28), bias=0.05, hpf=60, inter1=11000,
-         inter2=9000, bass_f=110, mid_f=500, mid_q=0.7, mid_off=-3.0, treb_f=2800, pres_f=4500,
-         depth=(90, 2.0), sag=0.4),
-    dict(name="Crunch (britânico)", stages=2, gain_db=(6, 44), bias=0.2, hpf=90, inter1=7000,
-         inter2=6500, bass_f=120, mid_f=750, mid_q=0.8, mid_off=1.5, treb_f=3200, pres_f=4000,
-         depth=(100, 2.5), sag=0.6),
-    dict(name="Lead (hi-gain)", stages=3, gain_db=(14, 58), bias=0.3, hpf=150, inter1=6000,
-         inter2=5200, bass_f=120, mid_f=850, mid_q=0.9, mid_off=0.0, treb_f=3500, pres_f=3800,
-         depth=(95, 3.0), sag=0.3),
-    dict(name="Baixo Clean (valvulado)", stages=1, gain_db=(0, 26), bias=0.08, hpf=28, inter1=9000,
-         inter2=8000, bass_f=70, mid_f=500, mid_q=0.7, mid_off=0.0, treb_f=2500, pres_f=5000,
-         depth=(55, 2.0), sag=0.5),
-    dict(name="Baixo Drive", stages=2, gain_db=(6, 42), bias=0.2, hpf=35, inter1=5000,
-         inter2=4500, bass_f=80, mid_f=650, mid_q=0.8, mid_off=1.0, treb_f=2600, pres_f=4500,
-         depth=(60, 2.5), sag=0.5),
+    dict(name="Blackface Twin", inspired="Fender Twin Reverb", skin="blackface",
+         stages=1, gain_db=(0, 28), bias=0.05, hpf=60, inter1=11000, inter2=9000, bass_f=100,
+         mid_f=450, mid_q=0.6, mid_off=-4.0, treb_f=2600, pres_f=5000, depth=(90, 2.0), sag=0.35),
+    dict(name="Brit Plexi", inspired="Marshall Super Lead 1959", skin="plexi",
+         stages=2, gain_db=(4, 40), bias=0.2, hpf=80, inter1=7500, inter2=6500, bass_f=120,
+         mid_f=650, mid_q=0.7, mid_off=2.5, treb_f=2800, pres_f=3800, depth=(100, 2.0), sag=0.7),
+    dict(name="Recto Modern", inspired="Mesa/Boogie Dual Rectifier", skin="recto",
+         stages=3, gain_db=(16, 60), bias=0.3, hpf=160, inter1=5500, inter2=5000, bass_f=100,
+         mid_f=700, mid_q=0.9, mid_off=-3.0, treb_f=3200, pres_f=4000, depth=(85, 4.0), sag=0.25),
+    dict(name="SVT Classic", inspired="Ampeg SVT", skin="svt",
+         stages=1, gain_db=(0, 26), bias=0.1, hpf=28, inter1=8000, inter2=8000, bass_f=60,
+         mid_f=500, mid_q=0.7, mid_off=0.0, treb_f=2500, pres_f=5000, depth=(55, 2.5), sag=0.5),
+    dict(name="Bass Drive", inspired="pré-amps de baixo modernos (B7K)", skin="bassdrive",
+         stages=2, gain_db=(6, 42), bias=0.2, hpf=35, inter1=5000, inter2=4500, bass_f=80,
+         mid_f=1000, mid_q=0.8, mid_off=2.0, treb_f=2600, pres_f=4500, depth=(60, 2.5), sag=0.3),
+    dict(name="Brit 800", inspired="Marshall JCM800 2203", skin="jcm800",
+         stages=2, gain_db=(10, 48), bias=0.25, hpf=110, inter1=6500, inter2=6000, bass_f=120,
+         mid_f=750, mid_q=0.8, mid_off=3.0, treb_f=3200, pres_f=3600, depth=(100, 2.5), sag=0.5),
+    dict(name="AC Top Boost", inspired="Vox AC30 Top Boost", skin="ac",
+         stages=2, gain_db=(0, 34), bias=0.12, hpf=90, inter1=9000, inter2=8000, bass_f=140,
+         mid_f=900, mid_q=0.6, mid_off=-2.0, treb_f=3000, pres_f=2500, depth=(110, 1.0), sag=0.6),
 )
 
 # --------------------------------------------------------------------- gabinetes
@@ -97,7 +105,8 @@ EFFECTS = (
         Param("level", "Nível", 0, 10, 5),
     )),
     EffectDef("amp", "Amplificador", (
-        Param("model", "Modelo", 0, len(AMP_MODELS) - 1, 0, choices=tuple(m["name"] for m in AMP_MODELS)),
+        Param("model", "Modelo", 0, len(AMP_MODELS) - 1, 0,
+              choices=tuple(f'{m["name"]}  (estilo {m["inspired"]})' for m in AMP_MODELS)),
         Param("gain", "Gain", 0, 10, 4),
         Param("bass", "Graves", 0, 10, 5),
         Param("mid", "Médios", 0, 10, 5),
@@ -105,6 +114,13 @@ EFFECTS = (
         Param("presence", "Presença", 0, 10, 5),
         Param("master", "Master", 0, 10, 5),
         Param("blend", "Blend DI", 0, 100, 0, "%"),
+    )),
+    EffectDef("nam", "Captura NAM (amp real)", (
+        Param("input", "Entrada", -24, 24, 0, "dB"),
+        Param("output", "Saída", -24, 24, 0, "dB"),
+    )),
+    EffectDef("vst", "Plugin VST3", (
+        Param("mix", "Mix", 0, 100, 100, "%"),
     )),
     EffectDef("cab", "Gabinete", (
         Param("model", "Gabinete", 0, len(CAB_CHOICES) - 1, 0, choices=CAB_CHOICES),

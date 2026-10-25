@@ -5,3 +5,4 @@ __pycache__/
 *.nbc
 .pytest_cache/
 *.tmp
+third_party/
