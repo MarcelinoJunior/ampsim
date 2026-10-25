@@ -10,13 +10,32 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 
 def _raise_priority():
-    """Prioridade alta para o processo (as threads de áudio do driver já usam MMCSS)."""
+    """Prioridade alta para o processo e nada de economia de energia quando a janela perde o foco.
+
+    O Windows 11 rebaixa processos em segundo plano (EcoQoS/"power throttling": núcleos de
+    eficiência e clock menor) e o relógio do sistema volta a 15,6 ms; para áudio em tempo real
+    isso vira som picotado sempre que outra janela fica na frente.
+    """
     if sys.platform == "win32":
         import ctypes
 
         HIGH_PRIORITY_CLASS = 0x80
         k32 = ctypes.windll.kernel32
-        k32.SetPriorityClass(k32.GetCurrentProcess(), HIGH_PRIORITY_CLASS)
+        proc = k32.GetCurrentProcess()
+        k32.SetPriorityClass(proc, HIGH_PRIORITY_CLASS)
+
+        class _Throttle(ctypes.Structure):
+            _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong),
+                        ("StateMask", ctypes.c_ulong)]
+
+        ProcessPowerThrottling = 4
+        EXECUTION_SPEED, IGNORE_TIMER_RESOLUTION = 0x1, 0x4
+        st = _Throttle(1, EXECUTION_SPEED | IGNORE_TIMER_RESOLUTION, 0)   # controlar e desligar
+        try:
+            k32.SetProcessInformation(proc, ProcessPowerThrottling, ctypes.byref(st), ctypes.sizeof(st))
+            ctypes.windll.winmm.timeBeginPeriod(1)
+        except (AttributeError, OSError):
+            pass
 
 
 def _install_error_log():

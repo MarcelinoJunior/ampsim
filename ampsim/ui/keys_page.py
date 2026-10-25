@@ -3,7 +3,8 @@ from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QFont, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSizePolicy, QSpinBox, QTreeWidget,
+    QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSizePolicy, QSpinBox, QStackedWidget,
+    QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -14,6 +15,7 @@ from ..instruments import (
 from .controller import MODELS, TRADEMARKS, ControllerWidget
 
 SPLIT_NOTES = list(range(36, 73))
+QUICK = "Atalhos rápidos (qualquer teclado)"
 
 
 class InstrumentBridge(QObject):
@@ -23,6 +25,8 @@ class InstrumentBridge(QObject):
     knob = Signal(int, int)
     changed = Signal()
     learn = Signal()
+    monitor = Signal(str, int, int, int)     # atividade MIDI (diálogo de mapeamento)
+    control = Signal(str, int)               # função acionada por controle mapeado
 
 
 def _combo(items=(), width=None):
@@ -126,6 +130,7 @@ class KeysView(QWidget):
         super().__init__()
         self.engine = engine
         self.inst = engine.instruments
+        self.bridge = InstrumentBridge()
         self._updating = False
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -133,7 +138,9 @@ class KeysView(QWidget):
 
         top = QHBoxLayout()
         top.setSpacing(6)
-        left = QVBoxLayout()
+        drawn = QWidget()
+        left = QVBoxLayout(drawn)
+        left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(0)
         self.ctrl = ControllerWidget()
         self.ctrl.set_model(self.inst.device)
@@ -142,10 +149,18 @@ class KeysView(QWidget):
         tm.setObjectName("small")
         tm.setAlignment(Qt.AlignCenter)
         left.addWidget(tm)
-        top.addLayout(left, 1)
+        from .quick_panel import QuickPanel
+
+        self.quick = QuickPanel(engine, self.bridge, accent)
+        self.left_stack = QStackedWidget()
+        self.left_stack.addWidget(drawn)
+        self.left_stack.addWidget(self.quick)
+        top.addWidget(self.left_stack, 1)
         top.addWidget(self._build_sounds())
         root.addLayout(top, 1)
-        root.addWidget(self._build_mapping())
+        self.mapping_box = self._build_mapping()
+        root.addWidget(self.mapping_box)
+        self._show_device()
 
         c = self.ctrl
         c.padPressed.connect(lambda i, v: self.inst.pad_hit(i, v))
@@ -165,7 +180,7 @@ class KeysView(QWidget):
         lay.setSpacing(4)
         dev = QHBoxLayout()
         dev.addWidget(QLabel("Instrumento na tela:"))
-        self.device = _combo(list(MODELS))
+        self.device = _combo(list(MODELS) + [QUICK])
         self.device.activated.connect(self._device_changed)
         dev.addWidget(self.device, 1)
         lay.addLayout(dev)
@@ -252,7 +267,16 @@ class KeysView(QWidget):
 
     def _device_changed(self, _):
         self.inst.device = self.device.currentText()
-        self.ctrl.set_model(self.inst.device)
+        self._show_device()
+
+    def _show_device(self):
+        quick = self.inst.device == QUICK
+        self.left_stack.setCurrentIndex(1 if quick else 0)
+        self.mapping_box.setVisible(not quick)
+        if not quick:
+            self.ctrl.set_model(self.inst.device)
+        else:
+            self.quick.refresh()
 
     def _ready_clicked(self, it):
         name = it.data(Qt.UserRole)
@@ -490,7 +514,12 @@ class KeysView(QWidget):
         c.knob_labels = list(inst.knob_funcs)
         c.button_labels = list(inst.button_funcs)
         self.on_learn()
+        quick = self.inst.device == QUICK
+        if (self.left_stack.currentIndex() == 1) != quick or (not quick and c.model_name != self.inst.device):
+            self._show_device()                 # instrumento salvo na sessão: atualiza o desenho
         c.update()
+        if quick:
+            self.quick.refresh()
 
 
 def _short(text, n):

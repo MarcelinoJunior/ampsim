@@ -1,230 +1,214 @@
-# AmpSim
+# AmpSim — o canivete suíço de som para comunidades
 
-Simulador de amplificador de guitarra e baixo + synth de pads, rodando localmente no Windows
-com baixa latência (ASIO, WASAPI exclusivo ou WDM-KS).
+**Amplificador de guitarra e baixo, pads de louvor, pianos, órgãos e bateria nos pads — tudo
+gratuito, rodando no computador que você já tem.**
 
-- **Guitarra** e **Baixo**: cada um com sua entrada da placa de som e cadeia completa de efeitos.
-- **Pads**: synth polifônico (16 vozes) tocado pelo **mouse** (teclado na tela), pelo
-  **teclado do PC** ou por **teclado MIDI**, passando pela mesma cadeia de efeitos.
-- As três trilhas tocam ao mesmo tempo e são mixadas na saída escolhida.
+O AmpSim nasceu para ajudar **igrejas, ministérios de louvor, projetos sociais, escolas de
+música e bandas com orçamento apertado**. Em vez de pedaleiras, amplificadores, módulos de
+som e assinaturas de bibliotecas caras, um notebook com uma placa de som simples (ou até a
+entrada de microfone USB mais barata) e um teclado controlador de entrada já resolvem:
 
-## Como rodar
+- 🎸 **Guitarra e baixo** com amplificadores inspirados nos clássicos, capturas de amplificadores
+  reais (Neural Amp Modeler), gabinetes, pedais e efeitos.
+- 🎹 **Pad/Piano**: pianos, Rhodes, órgãos com rotação (Leslie), cordas, pads espaciais com
+  Shimmer, baixo pulsante no BPM — com **camada** e **divisão de teclado** (baixo na mão esquerda).
+- 🥁 **Pads de bateria worship**: bumbos sub, caixas graves, palmas, chimbais, swells; e
+  **pad contínuo** no tom da música (aquele "tapete" que segura o louvor).
+- 🎛️ **Funciona com qualquer teclado MIDI**: mapeie knobs, faders e botões em segundos,
+  vendo na tela qual controle físico você está mexendo.
 
-Requisitos: Windows 10/11 e Python 3.11+ no PATH.
+Todos os timbres usados são **gratuitos e de licença livre**. A licença do código do
+AmpSim ainda será definida (veja o final deste arquivo).
+
+![Pad/Piano com o controlador na tela](docs/img/pad-piano.png)
+
+---
+
+## Sumário
+
+1. [Instalação (passo a passo)](#instalação-passo-a-passo)
+2. [Primeiro uso: escolhendo a placa de som](#primeiro-uso-escolhendo-a-placa-de-som)
+3. [Guitarra e Baixo](#guitarra-e-baixo)
+4. [Pad/Piano](#padpiano)
+5. [Mapeando o seu controlador MIDI](#mapeando-o-seu-controlador-midi)
+6. [Latência: dicas para tocar sem atraso](#latência-dicas-para-tocar-sem-atraso)
+7. [Problemas comuns](#problemas-comuns)
+8. [Para quem quer mexer no código](#para-quem-quer-mexer-no-código)
+9. [Licenças, créditos e marcas](#licenças-créditos-e-marcas)
+
+---
+
+## Instalação (passo a passo)
+
+**Você precisa de:** Windows 10 ou 11, ~1,5 GB livres e internet só na instalação.
+
+1. Baixe este projeto (botão *Code → Download ZIP* ou `git clone`) e coloque numa pasta de
+   **caminho curto**, por exemplo `C:\AmpSim`.
+2. Dê **duplo-clique em `instalar.bat`**. Ele faz tudo sozinho:
+
+   | Passo | O que acontece |
+   |---|---|
+   | 1 | Instala o **Python 3.13** pelo `winget` (se você ainda não tiver Python 3.11+) |
+   | 2 | Cria o ambiente `.venv` e instala as bibliotecas do `requirements.txt` |
+   | 3 | Baixa os timbres e motores gratuitos (~45 MB): FluidSynth, banco GeneralUser GS e capturas NAM |
+   | 4 | Pergunta se quer instalar um **driver ASIO gratuito**: ASIO4ALL ou FlexASIO (pelo `winget`) |
+   | 5 | Prepara o DSP (≈30 s, só na primeira vez) e cria o atalho **AmpSim** na Área de Trabalho |
+
+3. Abra pelo atalho **AmpSim** (ou `run.bat`).
+
+> Tudo é baixado das **fontes oficiais** (python.org via winget, GitHub dos projetos, autores
+> dos drivers). Nenhum instalador de terceiros fica guardado neste repositório.
+
+<details>
+<summary>Instalação manual (sem o instalador)</summary>
 
 ```bat
-run.bat
-```
-
-Na primeira vez o `run.bat` cria o ambiente `.venv`, instala as dependências e compila o DSP
-(leva ~20 s; depois fica em cache). Depois clique em **⚙ Áudio…**.
-
-**Atalho na Área de Trabalho:** rode `criar_atalho.ps1` (botão direito → *Executar com o
-PowerShell*) para criar o ícone **AmpSim**, que abre o app sem janela de console.
-Para fechar, use o botão **⏻ Sair** no canto superior direito: ele salva a sessão, desliga o
-áudio e encerra o programa. Erros inesperados ficam em `%APPDATA%\AmpSim\error.log`.
-
-> Mantenha a pasta num caminho curto (ex.: `C:\Github\ampsim`). O PySide6 tem arquivos com
-> nomes longos e a instalação falha em caminhos muito profundos.
-
-Manualmente:
-
-```bat
+winget install -e --id Python.Python.3.13
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python tools\baixar_extras.py
+winget install -e --id MichaelTippach.ASIO4ALL
 .venv\Scripts\python -m ampsim
 ```
+</details>
 
-## Latência: qual driver usar
+## Primeiro uso: escolhendo a placa de som
 
-| API | Quando usar |
+1. Clique em **⚙ Áudio…** no topo.
+2. **API de áudio**: use **ASIO** (menor atraso). Sem ASIO, use **Windows WASAPI** com
+   "modo exclusivo", ou **WDM-KS**.
+3. Escolha a **Entrada** (onde a guitarra/baixo está plugada) e a **Saída** (fone/caixa).
+4. **Canal da guitarra / do baixo**: em placas com uma entrada só, use *Entrada 1* nos dois e
+   deixe ativa só a trilha que estiver usando.
+5. **Buffer**: comece com **128**. Se ouvir estalos, suba para 256; se quiser menos atraso,
+   tente 64.
+6. Clique em **Aplicar e iniciar**.
+
+Com **ASIO4ALL**, abra **Painel do driver ASIO…** e, na chave inglesa, ligue a entrada e a
+saída da sua placa (e desligue as outras). Se a saída aparecer como "Not Connected", nada sai
+no fone — é só ligá-la no painel.
+
+## Guitarra e Baixo
+
+![Aba Guitarra](docs/img/guitarra.png)
+
+- **Amplificador** (seletor único no topo): 7 modelos inspirados em clássicos (Blackface Twin,
+  Brit Plexi, Brit 800, AC Top Boost, Recto Modern, SVT Classic, Bass Drive), **capturas NAM**
+  de amplificadores reais, **plugins VST3** ou "sem amplificador".
+- **Gabinete**: 6 modelos ou um **IR em .wav**.
+- **Antes do amp**: Redutor de Ruído (anti-hum 60 Hz, anti-chiado), Noise Gate, Compressor,
+  Overdrive. **Depois do amp**: EQ, Chorus, Delay, Reverb.
+- **Calibrar ruído**: abafe as cordas e clique — o app mede o chiado da sua entrada e ajusta
+  o gate sozinho (essencial em entradas de microfone USB simples).
+- **Presets** de fábrica (★) e os seus (**Salvar…**).
+
+## Pad/Piano
+
+Escolha em **Instrumento na tela** o que aparece desenhado:
+
+| Opção | Para quem |
 |---|---|
-| **ASIO** | Melhor opção. Use o driver da sua interface; sem interface, **ASIO4ALL** ou **FlexASIO**. |
-| WASAPI (exclusivo) | Boa alternativa sem ASIO. Marque "modo exclusivo". |
-| WDM-KS | Latência baixa, mas alguns drivers são instáveis. |
-| DirectSound / MME | Só como último recurso (latência alta). |
+| **M-VAVE SMK-25** | controlador de 25 teclas com 8 pads e 8 knobs |
+| **Yamaha PSR-E473** | teclado de 61 teclas |
+| **Roland VR-730** | teclado de 73 teclas |
+| **Atalhos rápidos** | **qualquer teclado**: ele só toca as notas, e os efeitos ficam em knobs e botões grandes na tela, mapeáveis |
 
-Dicas:
+![Atalhos rápidos](docs/img/atalhos-rapidos.png)
 
-- O suporte a ASIO vem do PortAudio incluído no pacote `sounddevice` (ativado por
-  `SD_ENABLE_ASIO=1`, que o app já define).
-- No ASIO, o tamanho real do buffer costuma ser definido pelo driver: use o botão
-  **Painel do driver ASIO…** (no ASIO4ALL, comece com 64–128 amostras).
-- Com ASIO, entrada e saída precisam ser o mesmo driver (limitação do ASIO).
-- A barra superior mostra a latência informada pelo driver, a carga de CPU do callback e o
-  número de falhas (dropouts). Se aparecerem falhas, aumente o buffer.
-- O app roda com prioridade alta e o DSP é compilado para código nativo (Numba), sem
-  alocação de memória dentro do callback de áudio.
+**Timbres prontos** (lista à direita), por exemplo:
 
-## Cadeia de efeitos (igual para as três trilhas)
+- *Teclados 61/73 teclas*: Piano de Concerto, Piano + Pad (culto), Pad | Piano, Cordas | Piano,
+  Órgão Gospel (rotação), Órgão Rock (drive + rotação rápida), Rhodes com Delay…
+- *Espaciais (worship)*: Pad Celestial (Shimmer), Céu Aberto, Coral Etéreo, Piano Ambient…
+- *Baixo na mão esquerda*: Baixo | Piano, **Baixo Pulsante | Pad (BPM)**…
 
-```
-Redutor de Ruído → Noise Gate → Compressor → Overdrive → Amplificador → Captura NAM
-           → Plugin VST3 → Gabinete → EQ 5 bandas
-           → Chorus (estéreo) → Delay (ping-pong opcional) → Reverb → Volume/Pan
-```
+**Efeitos das teclas**: Reverb, Chorus, **Shimmer**, **Rotação** (Leslie lenta/rápida),
+**Drive**, **Delay** (tempo livre ou no BPM: 1/4, 1/8, 1/8 pontuada…), Ataque, Release, Brilho
+e **Sensibilidade ao toque**.
 
-- **Redutor de Ruído**: anti-hum (notches em 50/60 Hz e harmônicos), anti-chiado (filtro
-  que fecha os agudos quando você não está tocando), corte de graves e de agudos.
-- **Calibrar ruído** (cabeçalho das trilhas Guitarra/Baixo): abafe as cordas e clique; o app
-  mede o chiado da entrada por 2 s e ajusta os limiares do Gate e do Redutor de Ruído.
-  Entradas de microfone de placas USB simples costumam ter bastante chiado: com distorção ele
-  vira um "zunido" agudo se o gate ficar abaixo do ruído.
-- **Amplificador**: escolhido num seletor único no topo (modelos AmpSim, capturas NAM,
-  plugins VST3 ou sem amp). Cada amp aparece com a fachada no estilo do original: tecido,
-  painel, knobs (top hat, chicken head, saia numerada...), jacks, luz piloto e chaves:
+**BPM da música + Tap**: o Baixo Pulsante e o delay no tempo seguem o andamento — digite ou
+clique *Tap* no ritmo.
 
-  | Modelo | Estilo de | Uso |
-  |---|---|---|
-  | Blackface Twin | Fender Twin Reverb | limpo cristalino |
-  | Brit Plexi | Marshall Super Lead 1959 | crunch clássico |
-  | Brit 800 | Marshall JCM800 2203 | rock / solo |
-  | AC Top Boost | Vox AC30 Top Boost | brilho "chime" |
-  | Recto Modern | Mesa/Boogie Dual Rectifier | hi-gain moderno |
-  | SVT Classic | Ampeg SVT | baixo valvulado |
-  | Bass Drive | pré-amps de baixo modernos | baixo com drive |
+**Pads de bateria (banco A)**: botão direito num pad para escolher entre ~100 sons (com busca
+e prévia). Presets: Worship Moderno, Worship Sala Grande, Acústico, Cinemático, Balada Pop…
 
-  Gain, Graves, Médios, Agudos, Presença, Master e **Blend DI** (mistura sinal limpo — útil
-  no baixo para manter o grave). A distorção roda com oversampling 4x.
-- **Captura NAM (amp real)**: roda capturas do [Neural Amp Modeler](https://github.com/sdatkinson/NeuralAmpModelerPlugin)
-  (`.nam`, arquitetura WaveNet) **direto no AmpSim, em código nativo** — sem precisar do
-  plugin. Cada captura é o "DNA" de um amplificador real medido por alguém; o volume é
-  normalizado automaticamente. Use com o Amplificador desligado e o Gabinete ligado (as
-  capturas incluídas são só do amp, sem falante). Custa ~9% de CPU com buffer de 64.
-- **Plugin VST3**: carrega qualquer plugin de efeito VST3 (amp sims, pedais, reverbs) da
-  pasta `C:\Program Files\Common Files\VST3`, com **Abrir editor** para a interface do
-  plugin e **Mix** seco/molhado. O estado do plugin é salvo nos presets.
-- **Gabinete**: 6 modelos (3 de guitarra, 3 de baixo) ou **IR em .wav** (convolução direta,
-  latência zero, até 2048 amostras). Aceita WAV PCM 16/24/32 bits e float.
-- Cada efeito tem LED liga/desliga. Os presets de fábrica são marcados com ★; use
-  **Salvar…** para criar os seus.
+**Pad contínuo (banco B)**: cada pad liga o "tapete" no tom (C, D, E…); trocar de tom faz
+transição suave; *Parar* encerra com fade.
 
-## Pad/Piano (controlador MIDI)
+**Teclado do PC** também toca: `A W S E D F T G Y H U J K O L P Ç` (Z/X oitava, C/V força).
 
-A aba **Pad/Piano** mostra o instrumento na tela — escolha entre **M-VAVE SMK-25** (25 teclas,
-8 pads, 8 knobs, 8 botões), **Yamaha PSR-E473** (61 teclas) e **Roland VR-730** (73 teclas).
-Tudo nele é clicável, acende quando você toca no aparelho, e o **botão direito** em um pad,
-knob, botão ou tecla abre a escolha do som ou da função.
+## Mapeando o seu controlador MIDI
 
-- **Timbres prontos para louvor**: Piano + Pad, Piano + Cordas, Rhodes + Pad, Pad + Cordas,
-  Baixo | Piano (divisão em C3: baixo na mão esquerda), Baixo Synth | Rhodes, Órgão + Pad,
-  Violão, Guitarra Limpa e o Pad do synth do AmpSim.
-- **Teclas / Camada 2**: escolha qualquer um dos ~45 timbres (pianos, Rhodes, órgãos, pads,
-  cordas, baixos, violões, guitarras, sinos) e uma segunda camada **sobreposta** ou na
-  **mão esquerda** (divisão do teclado, com nota ajustável).
-- **Pads**: tocam bateria — bumbo, caixa, aro, palmas, chimbal, pratos, toms, shaker,
-  pandeirola… — escolhida pad a pad, com 7 kits (Acústico, Power, Eletrônico, 808/909,
-  Vassourinha…). A bateria sai sempre limpa, em estéreo.
-- **Knobs e botões**: cada um recebe uma função (volume das teclas, da camada 2 e da bateria,
-  reverb, chorus, brilho, release, master; timbre/kit anterior e próximo, liga/desliga
-  camada 2, pânico).
-- **Mapear meu controlador…**: assistente que pede "toque o PAD 1", "gire o KNOB 1",
-  "aperte o botão PLAY"… e aprende o que o seu controlador envia (com **Pular** e **Parar**).
-  Sem mapear, os pads esperam as notas 36–43 no canal 10.
-- **BPM da música + Tap**: o **Baixo Pulsante** (synth bass que "vai e volta" no tempo, efeito
-  sidechain) segue o BPM — digite o andamento ou clique **Tap** no ritmo (também dá para pôr o
-  Tap num botão do controlador). O pulso recomeça na primeira nota tocada, para cair no tempo.
-  No painel *Synth AmpSim* ajuste divisão (1/4, 1/8, 1/8 pontuada, 1/16), forma (pulso, ondas,
-  gate) e quanto o pulso abre o filtro. Timbre pronto: **Baixo Pulsante | Pad (BPM)**.
-- **Teclas passam pelo amplificador** (no topo da aba): desligado, o timbre sai limpo, com
-  reverb/chorus próprios; ligado, as teclas passam pelo amplificador, gabinete e pedais da
-  aba (útil para o timbre de guitarra).
-- As visões **Synth AmpSim** e **Amplificador e efeitos** ficam em botões no topo da aba.
+1. Conecte o teclado pelo **USB** e escolha-o em **MIDI:** (barra de baixo).
+2. **SMK-25**: clique em **Mapear meu controlador…** e siga os pedidos ("toque o PAD 1",
+   "gire o KNOB 1"…). Botão direito em qualquer knob/botão desenhado troca a função dele.
+3. **Qualquer outro teclado**: escolha **Atalhos rápidos** e, em qualquer controle da tela,
+   clique com o **botão direito → Mapear controle físico…**. Abre um **medidor ao vivo** que
+   mostra cada knob/fader/botão que você mexe; o último movido fica selecionado — confirme e
+   pronto.
 
-Conecte o controlador pelo **USB** e escolha-o em **MIDI:** na barra de baixo (o MIDI por
-Bluetooth não aparece nessa lista do Windows).
+## Latência: dicas para tocar sem atraso
 
-Os timbres vêm do banco **GeneralUser GS** tocado pelo **FluidSynth**, ambos baixados por
-`toolsaixar_extras.py`.
+- Prefira **ASIO**; feche outros programas de áudio (no ASIO só um programa usa a placa).
+- Buffer 64–128 a 48 kHz dá ~3–6 ms por trecho. A barra do topo mostra a latência real,
+  a carga de CPU e as **falhas** (estalos). Se houver falhas, aumente o buffer.
+- Notebook na tomada e no modo de energia "Melhor desempenho".
 
-## Capturas NAM e plugins (extras do GitHub)
+## Problemas comuns
 
-```bat
-.venv\Scripts\python tools\baixar_extras.py
-```
+| Sintoma | O que fazer |
+|---|---|
+| Não sai som da guitarra | Veja o **Volume** da trilha (se aparecer "mudo", dê duplo-clique no knob) e se o medidor **in** se mexe |
+| Zumbido/chiado agudo | **Calibrar ruído**; abaixe o ganho de entrada; ligue o Redutor de Ruído |
+| "Dispositivo indisponível" | Feche outros programas de áudio; no ASIO4ALL, ligue a saída da placa no painel |
+| Teclado do PC não toca | Marque "Teclado do PC toca os pads" e deixe a janela do AmpSim em primeiro plano |
+| Estalos | Aumente o buffer; verifique o contador de falhas no topo |
+| Erro inesperado | Veja `%APPDATA%\AmpSim\error.log` |
 
-Baixa para `third_party/` (fora do git):
+## Para quem quer mexer no código
 
-- **FluidSynth** (motor dos timbres das teclas e pads, LGPL-2.1; hash SHA-256 conferido) e o
-  banco **GeneralUser GS** (~260 timbres e 13 kits de bateria, licença livre).
-
-- **9 capturas gratuitas** da coleção [pelennor2170/NAM_models](https://github.com/pelennor2170/NAM_models)
-  (GPL-3.0): Fender Twin Reverb, Vox AC15 Top Boost, Marshall JCM2000 Crunch, Marshall
-  JCM900 Lead, Mesa Boogie Mark IV, EVH 5150, Soldano SLO, Orange Rockerverb e o pré de
-  baixo Tech21 dUg DP3X. Os presets "NAM · …" de guitarra e baixo usam essas capturas.
-- **Instalador do plugin Neural Amp Modeler** (MIT). Ele é opcional — o AmpSim já roda as
-  capturas sozinho — e serve para quem quiser usar o plugin oficial no slot VST3. O
-  instalador não é assinado digitalmente; execute-o só se confiar na fonte (release oficial).
-
-Com o plugin instalado, escolha **NeuralAmpModeler** no painel *Plugin VST3*, clique em
-**Abrir editor** e carregue um `.nam` (ex.: os de `third_party\nam_models`) e, se quiser, uma
-IR de gabinete. Feche a janela do plugin para voltar ao AmpSim — o som não para enquanto ela
-está aberta, e o que você escolheu fica salvo no preset.
-
-Para usar outras capturas (ex.: do site ToneHunt), clique em **Adicionar captura…** no
-painel NAM: o arquivo é copiado para `%APPDATA%\AmpSim\nam`.
-
-## Controles
-
-**Knobs**: arraste para cima/baixo (Shift = ajuste fino), roda do mouse, duplo-clique volta ao padrão.
-
-**Teclado do PC → pads** (funciona em ABNT2 e US, usa a posição física das teclas):
-
-```
- W E   T Y U   O P          ← teclas pretas
-A S D F G H J K L Ç         ← teclas brancas (A = Dó)
-Z / X = oitava −/+     C / V = velocidade −/+
-```
-
-**MIDI**: escolha a entrada na barra inferior. Suporta note on/off com velocidade, sustain
-(CC64), pitch bend, mod wheel (CC1 → LFO do filtro) e all notes off. **Pânico** solta todas as notas.
-
-## Onde ficam os dados
-
-`%APPDATA%\AmpSim\state.json` (última sessão, dispositivos, knobs) e
-`%APPDATA%\AmpSim\presets\<guitar|bass|pads>\*.json`.
-
-## Estrutura
+Python 3.11+ com **Numba** (DSP compilado para código nativo), **PySide6** (interface),
+**sounddevice/PortAudio** (ASIO/WASAPI/WDM-KS), **FluidSynth** (timbres SoundFont),
+**SciPy/BLAS** (capturas NAM) e **pedalboard** (plugins VST3).
 
 ```
 ampsim/
-  __main__.py        entrada (prioridade, splash, compilação do DSP)
-  audio/devices.py   APIs/dispositivos (PortAudio), painel ASIO
-  audio/engine.py    stream duplex e callback em tempo real
-  dsp/kernels.py     DSP em Numba: efeitos, amp, gabinete, synth
-  dsp/nam.py         inferência nativa de capturas Neural Amp Modeler (WaveNet + BLAS)
-  audio/vst.py       slot de plugin VST3 (pedalboard)
-  ui/amp_skins.py    fachadas dos amplificadores
-  dsp/track.py       knobs → coeficientes de cada trilha
-  dsp/synth.py       parâmetros e sons do synth de pads
-  dsp/params.py      faixas/padrões dos parâmetros, modelos de amp e gabinete
-  midi/winmm.py      entrada MIDI nativa do Windows (ctypes, sem dependências)
-  ui/                interface PySide6 (knobs, piano, painéis, diálogo de áudio)
-tests/test_dsp.py    testes offline (estabilidade, IR vs. numpy, orçamento de CPU)
+  audio/      motor de áudio, dispositivos, FluidSynth, VST3
+  dsp/        amplificadores, efeitos, NAM, synth, bateria worship, efeitos das teclas
+  midi/       entrada MIDI nativa do Windows
+  ui/         interface (instrumentos desenhados, atalhos rápidos, painéis)
+  instruments.py   timbres, pads, mapeamento do controlador
+tools/        baixar_extras.py (timbres gratuitos), make_icon.py
+tests/        testes automáticos (DSP, estabilidade, cliques, latência de CPU)
 ```
 
-Testes: `.venv\Scripts\pip install pytest` e `.venv\Scripts\python -m pytest -s`.
-O teste de desempenho imprime quanto da janela de 64 amostras o DSP completo consome.
+Testes: `.venv\Scripts\pip install pytest` e `.venv\Scripts\python -m pytest`.
 
-## Licenças de terceiros
+Contribuições são bem-vindas — especialmente **novos timbres gratuitos**, presets de louvor
+e traduções.
 
-`pedalboard` (Spotify) é GPL-3.0; as capturas NAM incluídas pelo script são GPL-3.0; o
-plugin Neural Amp Modeler é MIT; FluidSynth é LGPL-2.1 (carregado como DLL); GeneralUser GS
-usa a licença própria do autor (uso livre, inclusive comercial).
+## Licenças, créditos e marcas
 
-## Marcas registradas
+**Código do AmpSim:** licença ainda não definida. Como o projeto usa `pedalboard` e capturas
+GPL-3.0, a escolha natural é a **GPL-3.0**.
 
-Fender, Marshall, Mesa/Boogie, Vox, Ampeg, Orange, EVH, Soldano, Tech 21, M-VAVE, Yamaha, Roland e demais nomes de
-equipamentos citados são marcas registradas de seus respectivos titulares. O AmpSim não é
-afiliado, patrocinado nem endossado por nenhum deles. Os nomes aparecem apenas para
-identificar o estilo de timbre que cada modelo busca ou o equipamento real capturado (NAM).
-As fachadas são desenhos próprios, com os nomes escritos em fontes comuns, e não reproduzem
-logotipos oficiais. Os instrumentos desenhados na aba Pad/Piano (M-VAVE SMK-25, Yamaha PSR-E473,
-Roland V-Combo VR-730) são uma homenagem aos originais: marcas, logotipos e imagens pertencem aos
-respectivos titulares. Cada tela exibe esse aviso.
+Componentes de terceiros (baixados pelo instalador, fora do repositório):
 
-## Próximos passos sugeridos
+| Componente | Licença |
+|---|---|
+| [FluidSynth](https://github.com/FluidSynth/fluidsynth) | LGPL-2.1 (carregado como DLL) |
+| [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) — S. Christian Collins | licença própria, uso livre inclusive comercial |
+| [Capturas NAM](https://github.com/pelennor2170/NAM_models) | GPL-3.0 |
+| [Neural Amp Modeler](https://github.com/sdatkinson/NeuralAmpModelerPlugin) (plugin, opcional) | MIT |
+| [pedalboard](https://github.com/spotify/pedalboard) (Spotify) | GPL-3.0 |
+| [sounddevice](https://github.com/spatialaudio/python-sounddevice) / PortAudio | MIT |
+| ASIO4ALL / FlexASIO (opcionais) | freeware / MIT |
 
-- MIDI learn (mapear knobs para controladores MIDI) e troca de preset por Program Change.
-- Pads com samples (.wav) além do synth.
-- Afinador, looper e gravação da saída.
+### Marcas registradas
+
+Fender, Marshall, Mesa/Boogie, Vox, Ampeg, Orange, EVH, Soldano, Tech 21, M-VAVE, Yamaha,
+Roland e demais nomes de equipamentos citados são marcas de seus respectivos titulares. O
+AmpSim **não é afiliado, patrocinado nem endossado** por nenhum deles. Os nomes servem apenas
+para identificar o estilo de timbre ou o equipamento capturado. As fachadas e os instrumentos
+desenhados são **homenagens** aos originais, feitas do zero, sem reproduzir logotipos ou fotos
+oficiais; marcas, logotipos e imagens pertencem aos titulares. Cada tela exibe esse aviso.

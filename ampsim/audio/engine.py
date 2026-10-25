@@ -1,16 +1,18 @@
 """Motor de áudio: abre o stream PortAudio e roda o DSP no callback."""
 from collections import deque
+from threading import get_ident
 
 import numpy as np
 
 from . import devices as dev
-from .devices import sd
+from .devices import promote_audio_thread, sd
 from ..dsp import layout as Ly
 from ..dsp.kernels import (
     mix_soundfont, process_post, process_pre, process_track, render_synth, write_output,
 )
 from ..dsp.synth import SynthDSP
 from ..dsp.track import TrackDSP
+from ..dsp.keysfx import KeysFX, add_stereo
 from ..dsp.worship import DrumSynth, ShimmerDSP, render_drums
 from ..instruments import Instruments
 
@@ -29,6 +31,7 @@ class AudioEngine:
         self.stream = None
         self.n_in = 0
         self.xruns = 0
+        self._rt_thread = None          # thread do driver já registrada no MMCSS
         self.last_error = None
         self._events = deque()
         self._mix = np.zeros((Ly.MAX_BLOCK, 2))
@@ -148,6 +151,9 @@ class AudioEngine:
         self.drums = DrumSynth(self.fs)
         self.shimmer = ShimmerDSP(self.fs, room=0.93, damp=0.25)
         self.drumverb = ShimmerDSP(self.fs, room=0.84, damp=0.35)
+        self.keys_fx = KeysFX(self.fs, Ly.MAX_BLOCK)
+        if hasattr(self, "instruments"):
+            self.instruments.apply_fx()
 
     # ------------------------------------------------------------------ callbacks (tempo real)
     def _drain_events(self):
@@ -183,8 +189,12 @@ class AudioEngine:
         if sf is not None:
             sf.render(frames)
             to_chain = t.D[Ly.T_AMP] > 0.5 and t.D[Ly.T_ON] > 0.5
-            pk = mix_soundfont(sf.buf, frames, mix, self._synth_out, shim, to_chain, inst.keys_gain(),
-                               inst.drums_gain(), inst.pad_gain(), shimmer, 0.7)
+            kfx = self.keys_fx
+            pk = mix_soundfont(sf.buf, frames, mix, self._synth_out, shim, kfx.KB, to_chain,
+                               inst.keys_gain(), inst.drums_gain(), inst.pad_gain(), shimmer, 0.7)
+            if not to_chain:
+                kfx.process(frames)
+                pk = max(pk, add_stereo(mix, kfx.KB, frames))
             if pk > self.sf_peak:
                 self.sf_peak = pk
             if shimmer > 0.0 or inst.cont_key is not None or inst._cp:
@@ -215,11 +225,15 @@ class AudioEngine:
             process_track(src, ch, frames, mix, *t.arrays)
 
     def _duplex_cb(self, indata, outdata, frames, time_info, status):
+        if self._rt_thread != get_ident():
+            self._rt_thread = promote_audio_thread()
         if status:
             self.xruns += 1
         self._render(indata, outdata, frames)
 
     def _output_cb(self, outdata, frames, time_info, status):
+        if self._rt_thread != get_ident():
+            self._rt_thread = promote_audio_thread()
         if status:
             self.xruns += 1
         self._render(None, outdata, frames)

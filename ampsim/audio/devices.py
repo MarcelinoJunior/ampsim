@@ -1,5 +1,6 @@
 """Enumeração de APIs de áudio e dispositivos via PortAudio (sounddevice)."""
 import os
+import sys
 from dataclasses import asdict, dataclass
 
 # O DLL do PortAudio com ASIO só é carregado se a variável existir ANTES do import.
@@ -116,3 +117,32 @@ def show_asio_panel(device_index):
     err = fn(device_index, None)
     if err != 0:
         raise RuntimeError(f"PortAudio retornou erro {err}")
+
+
+def promote_audio_thread():
+    """Registra a thread atual (a do driver, que chama o callback) no MMCSS "Pro Audio".
+
+    WASAPI já faz isso, mas muitos drivers ASIO não: sem MMCSS a thread de áudio disputa a CPU
+    com as outras janelas e perde o "empurrão" de primeiro plano quando o AmpSim sai de foco.
+    Devolve o id da thread para o chamador não repetir a chamada.
+    """
+    import threading
+
+    if sys.platform == "win32":
+        import ctypes
+
+        try:
+            avrt = ctypes.windll.avrt
+            idx = ctypes.c_ulong(0)
+            avrt.AvSetMmThreadCharacteristicsW.restype = ctypes.c_void_p
+            h = avrt.AvSetMmThreadCharacteristicsW("Pro Audio", ctypes.byref(idx))
+            if h:
+                AVRT_PRIORITY_CRITICAL = 2
+                avrt.AvSetMmThreadPriority(ctypes.c_void_p(h), AVRT_PRIORITY_CRITICAL)
+            else:
+                THREAD_PRIORITY_TIME_CRITICAL = 15
+                k32 = ctypes.windll.kernel32
+                k32.SetThreadPriority(k32.GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL)
+        except (AttributeError, OSError):
+            pass
+    return threading.get_ident()

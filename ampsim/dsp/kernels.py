@@ -502,7 +502,7 @@ def process_track(src, ch, n, mix, D, BQ, Z, ST, H, OSU, OSD, IR, IRH, CHB, DLB,
 
 
 @njit(**JIT)
-def mix_soundfont(B, n, mix, synth_out, shim, to_chain, keys_gain, drums_gain, pad_gain,
+def mix_soundfont(B, n, mix, synth_out, shim, kb, to_chain, keys_gain, drums_gain, pad_gain,
                   keys_shim, pad_shim):
     """Soma a saída do FluidSynth (4 grupos; ver audio/soundfont.py) e monta o envio do Shimmer.
 
@@ -518,13 +518,15 @@ def mix_soundfont(B, n, mix, synth_out, shim, to_chain, keys_gain, drums_gain, p
         pl = (B[4, i] + B[16, i] + B[18, i]) * pad_gain
         pr = (B[5, i] + B[17, i] + B[19, i]) * pad_gain
         send = (pl + pr) * 0.5 * pad_shim
+        l = dl + pl
+        r = dr + pr
         if to_chain:
             synth_out[i, 0] += (kl + kr) * 0.5
-            l = dl + pl
-            r = dr + pr
-        else:
-            l = dl + kl + pl
-            r = dr + kr + pr
+            kb[i, 0] = 0.0
+            kb[i, 1] = 0.0
+        else:                                   # teclas vão para os efeitos das teclas (kb)
+            kb[i, 0] = kl
+            kb[i, 1] = kr
             send += (kl + kr) * 0.5 * keys_shim
         shim[i] = send
         mix[i, 0] += l
@@ -863,11 +865,15 @@ def warmup(fs=48000.0):
     write_output(mix, n, out, 0, 1.0)
     so = np.zeros((n, 1), dtype=np.float32)
     sh = np.zeros(n)
+    kb = np.zeros((n, 2))
     for chain in (True, False):
-        mix_soundfont(np.zeros((24, n), dtype=np.float32), n, mix, so, sh, chain, 1.0, 1.0, 1.0, 0.5, 0.5)
+        mix_soundfont(np.zeros((24, n), dtype=np.float32), n, mix, so, sh, kb, chain, 1.0, 1.0, 1.0,
+                      0.5, 0.5)
+    from .keysfx import warmup as warmup_keysfx
     from .worship import warmup as warmup_worship
 
     warmup_worship(fs)
+    warmup_keysfx(fs)
     s = SynthDSP(fs)
     ev = np.zeros((4, 3), dtype=np.int32)
     ev[0] = (EV_NOTE_ON, 60, 100)

@@ -21,7 +21,10 @@ WHITE_STEPS = (0, 2, 4, 5, 7, 9, 11)
 BUTTON_SHORT = {"Nenhuma": "—", "Tap tempo (BPM)": "tap", "Timbre anterior": "◀ timbre", "Próximo timbre": "timbre ▶",
                 "Preset de pads anterior": "◀ pads", "Próximo preset de pads": "pads ▶",
                 "Liga/desliga camada 2": "camada 2", "Parar pad contínuo": "para pad",
-                "Banco de pads A/B (tela)": "banco A/B", "Pânico (soltar notas)": "pânico"}
+                "Banco de pads A/B (tela)": "banco A/B", "Pânico (soltar notas)": "pânico",
+                "Rotação lenta/rápida": "rotação", "Rotação liga/desliga": "rot. on", "Delay liga/desliga": "delay",
+                "Drive liga/desliga": "drive", "Sustain (segurar)": "sustain", "Oitava −": "oit −",
+                "Oitava +": "oit +"}
 
 
 def _r(x, y, w, h):
@@ -50,44 +53,33 @@ def _smk25():
 def _psr_e473():
     names = ("START", "SYNC", "INTRO", "FILL", "VOICE", "STYLE", "SPLIT", "DUAL")
     return dict(
-        name="Yamaha PSR-E473", size=(1400, 480), body=("#2a2b2f", "#161719"), outline="#000000",
-        dark=True, wood=False,
-        display=dict(rect=_r(560, 36, 250, 128), bg="#a8c8e4", fg="#0f2742", fg2="#24476e",
+        name="Yamaha PSR-E473", style="psr", size=(1400, 600), dark=True,
+        display=dict(rect=_r(600, 64, 200, 118), bg="#a7c0d1", fg="#10283f", fg2="#24476e",
                      font="Segoe UI"),
-        knobs=[(7, QPointF(318, 214), 17), (0, QPointF(420, 170), 21), (1, QPointF(490, 170), 21)],
-        knob_names={7: "MASTER VOL.", 0: "KNOB A", 1: "KNOB B"},
-        buttons=[(i, _r(930 + (i % 4) * 46, 46 + (i // 4) * 46, 40, 32), names[i]) for i in range(8)],
-        pads=[(i, _r(1140 + i * 62, 230, 54, 28)) for i in range(4)],
-        pad_style="flat", pad_caption=QPointF(1140, 214),
-        keys=(_r(92, 272, 1290, 196), 36, 61),
-        wheel=_r(30, 300, 42, 130),
-        speakers=[_r(22, 18, 240, 180), _r(1138, 18, 240, 180)],
-        dial=(QPointF(872, 104), 38),
-        oct=[(-1, _r(300, 120, 52, 22), "TRANS−"), (1, _r(356, 120, 52, 22), "TRANS+")],
-        texts=[(_r(530, 2, 310, 32), "YAMAHA", 21, True, "#e9ecef", Qt.AlignCenter, "Arial Black", 135),
-               (_r(20, 236, 300, 30), "PSR-E473", 21, True, "#d9dde1", Qt.AlignLeft, "Arial", 100),
-               (_r(300, 40, 230, 16), "LIVE CONTROL", 10, True, "#aeb3b9", Qt.AlignCenter)],
+        knobs=[(7, QPointF(96, 336), 22), (0, QPointF(452, 108), 22), (1, QPointF(530, 108), 22)],
+        knob_names={7: "MASTER VOLUME", 0: "KNOB A", 1: "KNOB B"}, knob_ring="#3aa0ff",
+        buttons=[(i, _r(352 + i * 62, 316, 54, 30), names[i]) for i in range(8)], button_led=True,
+        pads=[(i, _r(1078 + i * 70, 312, 60, 36)) for i in range(4)],
+        pad_style="flat", pad_caption=QPointF(1078, 292),
+        keys=(_r(104, 384, 1276, 206), 36, 61),
+        oct=[(-1, _r(160, 318, 52, 26), "TRANS−"), (1, _r(216, 318, 52, 26), "TRANS+")],
     )
 
 
 def _vr730():
     names = ("LEAKAGE", "PERC", "VIBRATO", "ROTARY", "SPLIT", "LAYER", "SCENE", "WRITE")
     return dict(
-        name="Roland VR-730", size=(1500, 440), body=("#1d1d1f", "#0e0e10"), outline="#000000",
-        dark=True, wood=True,
-        display=dict(rect=_r(660, 40, 230, 108), bg="#1d4f9a", fg="#ffffff", fg2="#bcd3f5",
+        name="Roland VR-730", style="vr", size=(1600, 460), dark=True,
+        display=dict(rect=_r(800, 46, 222, 104), bg="#1e5bb0", fg="#ffffff", fg2="#c6dbff",
                      font="Segoe UI"),
-        knobs=[(i, QPointF(72 + (i % 4) * 68, 66 + (i // 4) * 88), 18) for i in range(8)],
-        buttons=[(i, _r(1000 + (i % 4) * 52, 46 + (i // 4) * 50, 46, 34), names[i]) for i in range(8)],
-        pads=[(i, _r(1228 + (i % 4) * 60, 46 + (i // 4) * 54, 52, 40)) for i in range(8)],
-        pad_style="reg", pad_caption=QPointF(1228, 22),
-        keys=(_r(70, 238, 1385, 192), 28, 73),
-        drawbars=_r(350, 26, 270, 190),
-        dial=(QPointF(950, 96), 40),
-        oct=[(-1, _r(30, 238, 34, 22), "−"), (1, _r(30, 266, 34, 22), "+")],
-        texts=[(_r(32, 0, 220, 30), "Roland", 24, True, "#f2f2f2", Qt.AlignLeft, "Arial Black", 96, True),
-               (_r(660, 160, 230, 24), "V-Combo VR-730", 15, True, "#e8e8e8", Qt.AlignCenter),
-               (_r(350, 4, 270, 18), "HARMONIC BARS", 10, True, "#aeb3b9", Qt.AlignCenter)],
+        knobs=[(i, QPointF(250 + (i % 4) * 62, 72 + (i // 4) * 82), 19) for i in range(8)],
+        knob_skirt=True,
+        buttons=[(i, _r(1124 + (i % 4) * 54, 48 + (i // 4) * 58, 48, 36), names[i]) for i in range(8)],
+        button_led=True,
+        pads=[(i, _r(1356 + (i % 4) * 52, 54 + (i // 4) * 58, 44, 40)) for i in range(8)],
+        pad_style="reg", pad_caption=QPointF(1356, 26),
+        keys=(_r(112, 262, 1452, 190), 28, 73),
+        oct=[(-1, _r(40, 380, 54, 24), "OCT −"), (1, _r(40, 410, 54, 24), "OCT +")],
     )
 
 
@@ -302,106 +294,119 @@ class ControllerWidget(QWidget):
         ink = QColor("#d9dde1") if dark else QColor("#2b2f35")
         sub = QColor("#9aa0a8") if dark else QColor("#555b63")
 
-        body = QPainterPath()
-        body.addRoundedRect(QRectF(0, 0, vw, vh), 16, 16)
-        g = QLinearGradient(0, 0, 0, vh)
-        g.setColorAt(0, QColor(m["body"][0]))
-        g.setColorAt(1, QColor(m["body"][1]))
-        qp.fillPath(body, g)
-        qp.setPen(QPen(QColor(m["outline"]), 2))
-        qp.drawPath(body)
-        if m["wood"]:
-            for x in (0, vw - 24):
-                wg = QLinearGradient(x, 0, x + 24, 0)
-                wg.setColorAt(0, QColor("#4a2812"))
-                wg.setColorAt(0.5, QColor("#7a4622"))
-                wg.setColorAt(1, QColor("#4a2812"))
-                qp.fillRect(QRectF(x, 0, 24, vh), wg)
+        style = m.get("style", "smk")
+        if style == "psr":
+            self._decor_psr(qp, vw, vh)
+        elif style == "vr":
+            self._decor_vr(qp, vw, vh)
+        else:
+            body = QPainterPath()
+            body.addRoundedRect(QRectF(0, 0, vw, vh), 16, 16)
+            g = QLinearGradient(0, 0, 0, vh)
+            g.setColorAt(0, QColor(m["body"][0]))
+            g.setColorAt(1, QColor(m["body"][1]))
+            qp.fillPath(body, g)
+            qp.setPen(QPen(QColor(m["outline"]), 2))
+            qp.drawPath(body)
+            if m["wood"]:
+                for x in (0, vw - 24):
+                    wg = QLinearGradient(x, 0, x + 24, 0)
+                    wg.setColorAt(0, QColor("#4a2812"))
+                    wg.setColorAt(0.5, QColor("#7a4622"))
+                    wg.setColorAt(1, QColor("#4a2812"))
+                    qp.fillRect(QRectF(x, 0, 24, vh), wg)
 
-        for r in m.get("speakers", []):                       # alto-falantes (PSR)
-            qp.setPen(Qt.NoPen)
-            qp.setBrush(QColor("#111214"))
-            qp.drawRoundedRect(r, 10, 10)
-            qp.setBrush(QColor("#2e3034"))
-            y = r.top() + 8
-            row = 0
-            while y < r.bottom() - 4:
-                x = r.left() + 8 + (5 if row % 2 else 0)
-                while x < r.right() - 4:
-                    qp.drawEllipse(QPointF(x, y), 1.8, 1.8)
-                    x += 10
-                y += 8
-                row += 1
+            for r in m.get("speakers", []):                       # alto-falantes (PSR)
+                qp.setPen(Qt.NoPen)
+                qp.setBrush(QColor("#111214"))
+                qp.drawRoundedRect(r, 10, 10)
+                qp.setBrush(QColor("#2e3034"))
+                y = r.top() + 8
+                row = 0
+                while y < r.bottom() - 4:
+                    x = r.left() + 8 + (5 if row % 2 else 0)
+                    while x < r.right() - 4:
+                        qp.drawEllipse(QPointF(x, y), 1.8, 1.8)
+                        x += 10
+                    y += 8
+                    row += 1
 
-        if "drawbars" in m:                                    # drawbars (VR-730)
-            r = m["drawbars"]
-            colors = ("#7a4622", "#7a4622", "#f2f2f2", "#f2f2f2", "#111111", "#f2f2f2", "#111111",
-                      "#111111", "#f2f2f2")
-            levels = (8, 8, 8, 0, 0, 0, 0, 0, 0)
-            w = r.width() / 9
-            for j in range(9):
-                x = r.left() + j * w + w / 2
-                qp.setPen(QPen(QColor("#050505"), 6))
-                qp.drawLine(QPointF(x, r.top() + 10), QPointF(x, r.bottom() - 10))
-                hy = r.top() + 12 + (r.height() - 50) * (levels[j] / 8)
+            if "drawbars" in m:                                    # drawbars (VR-730)
+                r = m["drawbars"]
+                colors = ("#7a4622", "#7a4622", "#f2f2f2", "#f2f2f2", "#111111", "#f2f2f2", "#111111",
+                          "#111111", "#f2f2f2")
+                levels = (8, 8, 8, 0, 0, 0, 0, 0, 0)
+                w = r.width() / 9
+                for j in range(9):
+                    x = r.left() + j * w + w / 2
+                    qp.setPen(QPen(QColor("#050505"), 6))
+                    qp.drawLine(QPointF(x, r.top() + 10), QPointF(x, r.bottom() - 10))
+                    hy = r.top() + 12 + (r.height() - 50) * (levels[j] / 8)
+                    qp.setPen(QPen(QColor("#000"), 1))
+                    qp.setBrush(QColor(colors[j]))
+                    qp.drawRoundedRect(QRectF(x - w * 0.36, hy, w * 0.72, 24), 3, 3)
+
+            if "dial" in m:
+                c, rad = m["dial"]
+                dg = QLinearGradient(c.x(), c.y() - rad, c.x(), c.y() + rad)
+                dg.setColorAt(0, QColor("#5a5d63"))
+                dg.setColorAt(1, QColor("#1b1c1f"))
                 qp.setPen(QPen(QColor("#000"), 1))
-                qp.setBrush(QColor(colors[j]))
-                qp.drawRoundedRect(QRectF(x - w * 0.36, hy, w * 0.72, 24), 3, 3)
+                qp.setBrush(dg)
+                qp.drawEllipse(c, rad, rad)
+                qp.setBrush(QColor("#2b2d31"))
+                qp.drawEllipse(c, rad * 0.55, rad * 0.55)
 
-        if "dial" in m:
-            c, rad = m["dial"]
-            dg = QLinearGradient(c.x(), c.y() - rad, c.x(), c.y() + rad)
-            dg.setColorAt(0, QColor("#5a5d63"))
-            dg.setColorAt(1, QColor("#1b1c1f"))
-            qp.setPen(QPen(QColor("#000"), 1))
-            qp.setBrush(dg)
-            qp.drawEllipse(c, rad, rad)
-            qp.setBrush(QColor("#2b2d31"))
-            qp.drawEllipse(c, rad * 0.55, rad * 0.55)
+            if "wheel" in m:                                       # pitch bend (PSR)
+                r = m["wheel"]
+                qp.setPen(QPen(QColor("#000"), 1))
+                qp.setBrush(QColor("#0d0d0f"))
+                qp.drawRoundedRect(r, 6, 6)
+                qp.setBrush(QColor("#3a3c40"))
+                qp.drawRoundedRect(r.adjusted(8, 10, -8, -10), 4, 4)
+                qp.setFont(self._font(9, True))
+                qp.setPen(sub)
+                qp.drawText(QRectF(r.left() - 10, r.top() - 16, r.width() + 20, 14), Qt.AlignCenter, "PITCH")
 
-        if "wheel" in m:                                       # pitch bend (PSR)
-            r = m["wheel"]
-            qp.setPen(QPen(QColor("#000"), 1))
-            qp.setBrush(QColor("#0d0d0f"))
-            qp.drawRoundedRect(r, 6, 6)
-            qp.setBrush(QColor("#3a3c40"))
-            qp.drawRoundedRect(r.adjusted(8, 10, -8, -10), 4, 4)
-            qp.setFont(self._font(9, True))
-            qp.setPen(sub)
-            qp.drawText(QRectF(r.left() - 10, r.top() - 16, r.width() + 20, 14), Qt.AlignCenter, "PITCH")
+            for r, label in m.get("strips", []):                   # pitch/mod touch (SMK)
+                qp.setFont(self._font(10, True))
+                qp.setPen(sub)
+                qp.drawText(QRectF(r.left() - 6, r.top() - 18, r.width() + 12, 14), Qt.AlignCenter, label)
+                qp.setPen(QPen(QColor("#c6cbd1"), 1))
+                qp.setBrush(QColor("#ffffff"))
+                qp.drawRoundedRect(r, 8, 8)
 
-        for r, label in m.get("strips", []):                   # pitch/mod touch (SMK)
-            qp.setFont(self._font(10, True))
-            qp.setPen(sub)
-            qp.drawText(QRectF(r.left() - 6, r.top() - 18, r.width() + 12, 14), Qt.AlignCenter, label)
-            qp.setPen(QPen(QColor("#c6cbd1"), 1))
-            qp.setBrush(QColor("#ffffff"))
-            qp.drawRoundedRect(r, 8, 8)
+            for d, r, label in m.get("oct", []):
+                qp.setPen(QPen(QColor("#555") if dark else QColor("#b9bec5"), 1))
+                qp.setBrush(QColor("#3a3c40") if dark else QColor("#ffffff"))
+                qp.drawRoundedRect(r, 4, 4)
+                qp.setFont(self._font(10, True))
+                qp.setPen(ink)
+                qp.drawText(r, Qt.AlignCenter, label)
 
-        for d, r, label in m.get("oct", []):
-            qp.setPen(QPen(QColor("#555") if dark else QColor("#b9bec5"), 1))
-            qp.setBrush(QColor("#3a3c40") if dark else QColor("#ffffff"))
-            qp.drawRoundedRect(r, 4, 4)
-            qp.setFont(self._font(10, True))
-            qp.setPen(ink)
-            qp.drawText(r, Qt.AlignCenter, label)
-
-        for t in m.get("texts", []):          # (rect, texto, px, negrito, cor, alinh. [, fonte, espaço, itálico])
-            r, text, px, bold, color, align = t[:6]
-            f = self._font(px, bold, t[6] if len(t) > 6 else "Segoe UI")
-            if len(t) > 7:
-                f.setLetterSpacing(QFont.PercentageSpacing, t[7])
-            if len(t) > 8:
-                f.setItalic(t[8])
-            qp.setFont(f)
-            qp.setPen(QColor(color))
-            qp.drawText(r, align | Qt.AlignVCenter, text)
+            for t in m.get("texts", []):          # (rect, texto, px, negrito, cor, alinh. [, fonte, espaço, itálico])
+                r, text, px, bold, color, align = t[:6]
+                f = self._font(px, bold, t[6] if len(t) > 6 else "Segoe UI")
+                if len(t) > 7:
+                    f.setLetterSpacing(QFont.PercentageSpacing, t[7])
+                if len(t) > 8:
+                    f.setItalic(t[8])
+                qp.setFont(f)
+                qp.setPen(QColor(color))
+                qp.drawText(r, align | Qt.AlignVCenter, text)
 
         # visor
         d = m["display"]
         lcd = d["rect"]
+        if style in ("psr", "vr"):
+            qp.setPen(QPen(QColor("#8a9099"), 2))
+            qp.setBrush(QColor("#08090a"))
+            qp.drawRoundedRect(lcd.adjusted(-10, -10, 10, 10), 8, 8)
+        lg = QLinearGradient(lcd.topLeft(), lcd.bottomLeft())
+        lg.setColorAt(0, QColor(d["bg"]).lighter(112))
+        lg.setColorAt(1, QColor(d["bg"]))
         qp.setPen(QPen(QColor("#111"), 2))
-        qp.setBrush(QColor(d["bg"]))
+        qp.setBrush(lg)
         qp.drawRoundedRect(lcd, 6, 6)
         qp.setFont(self._font(lcd.height() * 0.24, True, d["font"]))
         qp.setPen(QColor(d["fg"]))
@@ -418,8 +423,18 @@ class ControllerWidget(QWidget):
         for i, r, name in m["buttons"]:
             pen = self._blink("buttons", i) or QPen(QColor("#555") if dark else QColor("#b9bec5"), 1)
             qp.setPen(pen)
-            qp.setBrush(QColor("#3a3c40") if dark else (QColor("#dfe8ff") if name == "BT" else QColor("#ffffff")))
+            if dark:
+                bg = QLinearGradient(r.topLeft(), r.bottomLeft())
+                bg.setColorAt(0, QColor("#4a4d53"))
+                bg.setColorAt(1, QColor("#2a2c30"))
+                qp.setBrush(bg)
+            else:
+                qp.setBrush(QColor("#dfe8ff") if name == "BT" else QColor("#ffffff"))
             qp.drawRoundedRect(r, 4, 4)
+            if m.get("button_led"):
+                qp.setPen(Qt.NoPen)
+                qp.setBrush(QColor("#ff3b30") if i % 3 == 0 else QColor("#5a1a18"))
+                qp.drawEllipse(QPointF(r.left() + 6, r.top() + 6), 2.6, 2.6)
             qp.setFont(self._font(9 if len(name) > 5 else 10, True))
             qp.setPen(ink)
             qp.drawText(r.adjusted(0, 2, 0, -r.height() * 0.45), Qt.AlignCenter, name)
@@ -436,6 +451,19 @@ class ControllerWidget(QWidget):
                 qp.setPen(pen)
                 qp.setBrush(Qt.NoBrush)
                 qp.drawEllipse(c, rad + 9, rad + 9)
+            if m.get("knob_ring"):
+                glow = QColor(m["knob_ring"])
+                glow.setAlpha(110)
+                qp.setPen(QPen(glow, 5))
+                qp.setBrush(Qt.NoBrush)
+                qp.drawEllipse(c, rad + 4, rad + 4)
+            if m.get("knob_skirt"):
+                sg = QLinearGradient(c.x(), c.y() - rad - 6, c.x(), c.y() + rad + 6)
+                sg.setColorAt(0, QColor("#d9dde1"))
+                sg.setColorAt(1, QColor("#7d838b"))
+                qp.setPen(QPen(QColor("#000"), 1))
+                qp.setBrush(sg)
+                qp.drawEllipse(c, rad + 6, rad + 6)
             kg = QLinearGradient(c.x(), c.y() - rad, c.x(), c.y() + rad)
             kg.setColorAt(0, QColor("#4a4a4a"))
             kg.setColorAt(1, QColor("#0d0d0d"))
@@ -495,17 +523,271 @@ class ControllerWidget(QWidget):
         qp.setFont(self._font(10))
         for note, r, white in keys:
             if white:
-                qp.setPen(QPen(QColor("#9aa0a8"), 1))
-                qp.setBrush(QColor("#7c9cff") if note in self.active else QColor("#fdfdfd"))
-                qp.drawRect(r)
+                wg = QLinearGradient(r.topLeft(), r.bottomLeft())
+                if note in self.active:
+                    wg.setColorAt(0, QColor("#9db4ff"))
+                    wg.setColorAt(1, QColor("#6f8ff5"))
+                else:
+                    wg.setColorAt(0, QColor("#e9eaec"))
+                    wg.setColorAt(0.12, QColor("#fbfbfb"))
+                    wg.setColorAt(1, QColor("#e2e3e6"))
+                qp.setPen(QPen(QColor("#8d939b"), 1))
+                qp.setBrush(wg)
+                qp.drawRoundedRect(r.adjusted(0.5, 0, -0.5, 0), 2, 2)
                 if note % 12 == 0:
                     qp.setPen(QColor("#777"))
                     qp.drawText(r.adjusted(0, 0, 0, -4), Qt.AlignHCenter | Qt.AlignBottom, note_name(note))
         for note, r, white in keys:
             if not white:
+                qp.setPen(Qt.NoPen)
+                qp.setBrush(QColor(0, 0, 0, 70))
+                qp.drawRoundedRect(r.adjusted(1, 0, 3, 3), 2, 2)       # sombra
+                bg = QLinearGradient(r.topLeft(), r.bottomLeft())
+                if note in self.active:
+                    bg.setColorAt(0, QColor("#6f86e0"))
+                    bg.setColorAt(1, QColor("#3e56b8"))
+                else:
+                    bg.setColorAt(0, QColor("#2c2c30"))
+                    bg.setColorAt(0.85, QColor("#0b0b0d"))
+                    bg.setColorAt(1, QColor("#303035"))
                 qp.setPen(QPen(QColor("#000"), 1))
-                qp.setBrush(QColor("#5a73cc") if note in self.active else QColor("#18181b"))
-                qp.drawRect(r)
+                qp.setBrush(bg)
+                qp.drawRoundedRect(r, 2, 2)
+                qp.setPen(QPen(QColor(255, 255, 255, 40), 1))
+                qp.drawLine(QPointF(r.left() + 3, r.top() + 2), QPointF(r.left() + 3, r.bottom() - 8))
+
+
+    # ------------------------------------------------------------------ decoração dos modelos grandes
+    def _small_button(self, qp, r, led=None):
+        g = QLinearGradient(r.topLeft(), r.bottomLeft())
+        g.setColorAt(0, QColor("#46494f"))
+        g.setColorAt(1, QColor("#25272b"))
+        qp.setPen(QPen(QColor("#0b0b0c"), 1))
+        qp.setBrush(g)
+        qp.drawRoundedRect(r, 3, 3)
+        if led:
+            qp.setPen(Qt.NoPen)
+            qp.setBrush(QColor(led))
+            qp.drawEllipse(QPointF(r.left() + 5, r.top() + 5), 2.2, 2.2)
+
+    def _label(self, qp, r, text, px=9, color="#b9bec5", bold=True, align=Qt.AlignCenter):
+        qp.setFont(self._font(px, bold))
+        qp.setPen(QColor(color))
+        qp.drawText(r, align | Qt.AlignVCenter, text)
+
+    def _grille(self, qp, r, radius):
+        path = QPainterPath()
+        path.addRoundedRect(r, radius, radius)
+        g = QLinearGradient(r.topLeft(), r.bottomLeft())
+        g.setColorAt(0, QColor("#1b1c1f"))
+        g.setColorAt(1, QColor("#0c0c0e"))
+        qp.fillPath(path, g)
+        qp.setPen(QPen(QColor("#2f3236"), 2))
+        qp.drawPath(path)
+        qp.save()
+        qp.setClipPath(path)
+        qp.setPen(Qt.NoPen)
+        qp.setBrush(QColor("#33363b"))
+        y = r.top() + 7
+        row = 0
+        while y < r.bottom():
+            x = r.left() + 6 + (4 if row % 2 else 0)
+            while x < r.right():
+                qp.drawEllipse(QPointF(x, y), 1.7, 1.7)
+                x += 8
+            y += 7
+            row += 1
+        hl = QLinearGradient(r.topLeft(), r.bottomLeft())
+        hl.setColorAt(0, QColor(255, 255, 255, 22))
+        hl.setColorAt(0.4, QColor(255, 255, 255, 0))
+        qp.fillPath(path, hl)
+        qp.restore()
+
+    def _dial(self, qp, c, rad):
+        dg = QLinearGradient(c.x(), c.y() - rad, c.x(), c.y() + rad)
+        dg.setColorAt(0, QColor("#6a6e75"))
+        dg.setColorAt(1, QColor("#1a1b1e"))
+        qp.setPen(QPen(QColor("#000"), 1.5))
+        qp.setBrush(dg)
+        qp.drawEllipse(c, rad, rad)
+        qp.setPen(QPen(QColor(255, 255, 255, 35), 1))
+        for k in range(36):
+            a = math.radians(k * 10)
+            qp.drawLine(QPointF(c.x() + (rad - 5) * math.cos(a), c.y() + (rad - 5) * math.sin(a)),
+                        QPointF(c.x() + rad * math.cos(a), c.y() + rad * math.sin(a)))
+        cg = QLinearGradient(c.x(), c.y() - rad, c.x(), c.y() + rad)
+        cg.setColorAt(0, QColor("#2b2d31"))
+        cg.setColorAt(1, QColor("#3d4046"))
+        qp.setBrush(cg)
+        qp.drawEllipse(c, rad * 0.62, rad * 0.62)
+        qp.setBrush(QColor("#111"))
+        qp.drawEllipse(QPointF(c.x() + rad * 0.32, c.y() - rad * 0.22), rad * 0.1, rad * 0.1)
+
+    def _decor_psr(self, qp, vw, vh):
+        """Yamaha PSR-E473: corpo preto com centro elevado, alto-falantes grandes, painel central."""
+        body = QPainterPath()
+        body.moveTo(16, 70)
+        body.quadTo(16, 44, 46, 42)
+        body.lineTo(370, 42)
+        body.cubicTo(400, 42, 400, 6, 440, 6)
+        body.lineTo(960, 6)
+        body.cubicTo(1000, 6, 1000, 42, 1030, 42)
+        body.lineTo(1354, 42)
+        body.quadTo(1384, 44, 1384, 70)
+        body.lineTo(1384, 588)
+        body.quadTo(1384, 598, 1370, 598)
+        body.lineTo(30, 598)
+        body.quadTo(16, 598, 16, 588)
+        body.closeSubpath()
+        g = QLinearGradient(0, 0, 0, vh)
+        g.setColorAt(0, QColor("#2a2b2f"))
+        g.setColorAt(0.5, QColor("#18191c"))
+        g.setColorAt(1, QColor("#101113"))
+        qp.fillPath(body, g)
+        qp.setPen(QPen(QColor("#000"), 2))
+        qp.drawPath(body)
+        qp.setPen(QPen(QColor(255, 255, 255, 30), 1.5))
+        qp.drawLine(QPointF(440, 9), QPointF(960, 9))
+        # alto-falantes
+        self._grille(qp, _r(44, 64, 300, 214), 30)
+        self._grille(qp, _r(1056, 64, 300, 214), 30)
+        # painel central
+        panel = _r(372, 50, 656, 236)
+        qp.setPen(QPen(QColor("#2d2f33"), 1.5))
+        qp.setBrush(QColor("#1c1d20"))
+        qp.drawRoundedRect(panel, 10, 10)
+        f = self._font(26, True, "Arial Black")
+        f.setLetterSpacing(QFont.PercentageSpacing, 140)
+        qp.setFont(f)
+        qp.setPen(QColor("#eceff2"))
+        qp.drawText(_r(560, 12, 280, 40), Qt.AlignCenter, "YAMAHA")
+        self._label(qp, _r(420, 64, 150, 14), "LIVE CONTROL")
+        # botões do lado esquerdo do visor (categorias/funções)
+        for row in range(2):
+            for col in range(4):
+                r = _r(404 + col * 46, 160 + row * 50, 38, 24)
+                self._small_button(qp, r, "#ff3b30" if (row + col) % 3 == 0 else None)
+        for k, t in enumerate(("METRONOME", "TEMPO/TAP", "FUNCTION", "PORTABLE")):
+            self._label(qp, _r(396 + k * 46, 186, 54, 12), t, 7, "#8d939b", False)
+        # botões do lado direito (voz, estilo, música e teclado numérico)
+        for row in range(3):
+            for col in range(4):
+                self._small_button(qp, _r(840 + col * 44, 66 + row * 34, 36, 22))
+        self._label(qp, _r(836, 168, 180, 12), "VOICE   STYLE   SONG   GROOVE", 7, "#8d939b", False)
+        self._dial(qp, QPointF(892, 232), 34)
+        self._label(qp, _r(942, 220, 80, 24), "DIAL", 8, "#8d939b")
+        # faixa inferior: controles de estilo, botão azul e pads de quick sampling
+        qp.setPen(QPen(QColor("#2d2f33"), 1))
+        qp.drawLine(QPointF(40, 298), QPointF(1360, 298))
+        blue = _r(290, 314, 46, 34)
+        bg = QLinearGradient(blue.topLeft(), blue.bottomLeft())
+        bg.setColorAt(0, QColor("#4fb6ff"))
+        bg.setColorAt(1, QColor("#1677d6"))
+        qp.setPen(QPen(QColor("#0b3a66"), 1))
+        qp.setBrush(bg)
+        qp.drawRoundedRect(blue, 4, 4)
+        self._label(qp, _r(270, 350, 86, 12), "MEGA BOOST", 7, "#8d939b", False)
+        self._label(qp, _r(352, 300, 496, 14), "STYLE CONTROL", 8, "#8d939b")
+        self._label(qp, _r(1078, 350, 274, 12), "QUICK SAMPLING", 7, "#8d939b", False)
+        # roda de pitch e nome do modelo
+        wheel = _r(36, 410, 46, 150)
+        qp.setPen(QPen(QColor("#000"), 1))
+        qp.setBrush(QColor("#0a0a0b"))
+        qp.drawRoundedRect(wheel, 8, 8)
+        wg = QLinearGradient(wheel.topLeft(), wheel.bottomLeft())
+        wg.setColorAt(0, QColor("#2a2b2e"))
+        wg.setColorAt(0.5, QColor("#55585e"))
+        wg.setColorAt(1, QColor("#2a2b2e"))
+        qp.setBrush(wg)
+        qp.drawRoundedRect(wheel.adjusted(10, 12, -10, -12), 5, 5)
+        self._label(qp, _r(20, 392, 80, 14), "PITCH BEND", 8, "#8d939b")
+        f = self._font(24, True, "Arial")
+        f.setItalic(True)
+        qp.setFont(f)
+        qp.setPen(QColor("#d9dde1"))
+        qp.drawText(_r(1100, 256, 250, 36), Qt.AlignRight | Qt.AlignVCenter, "PSR-E473")
+
+    def _decor_vr(self, qp, vw, vh):
+        """Roland V-Combo VR-730: laterais de madeira, painel em seções, drawbars e visor azul."""
+        g = QLinearGradient(0, 0, 0, vh)
+        g.setColorAt(0, QColor("#1f1f22"))
+        g.setColorAt(1, QColor("#0b0b0d"))
+        qp.setPen(QPen(QColor("#000"), 2))
+        qp.setBrush(g)
+        qp.drawRect(_r(0, 0, vw, vh))
+        for x in (0, vw - 30):                                  # laterais de madeira
+            wg = QLinearGradient(x, 0, x + 30, 0)
+            wg.setColorAt(0, QColor("#4b2810"))
+            wg.setColorAt(0.5, QColor("#8a5026"))
+            wg.setColorAt(1, QColor("#4b2810"))
+            qp.fillRect(_r(x, 0, 30, vh), wg)
+            qp.setPen(QPen(QColor(40, 18, 6, 90), 1))
+            for k in range(9):
+                qp.drawLine(QPointF(x + 4 + k * 3, 0), QPointF(x + 2 + k * 3.2, vh))
+        # painel superior escovado
+        panel = _r(30, 0, vw - 60, 250)
+        pg = QLinearGradient(panel.topLeft(), panel.bottomLeft())
+        pg.setColorAt(0, QColor("#2a2b2f"))
+        pg.setColorAt(1, QColor("#1a1b1e"))
+        qp.fillRect(panel, pg)
+        qp.setPen(QPen(QColor(255, 255, 255, 10), 1))
+        for y in range(4, 248, 3):
+            qp.drawLine(QPointF(32, y), QPointF(vw - 32, y))
+        qp.setPen(QPen(QColor("#3c3e43"), 1))
+        for x in (210, 486, 776, 1102, 1340):                   # divisões das seções
+            qp.drawLine(QPointF(x, 14), QPointF(x, 236))
+        f = self._font(30, True, "Arial Black")
+        f.setItalic(True)
+        f.setLetterSpacing(QFont.PercentageSpacing, 96)
+        qp.setFont(f)
+        qp.setPen(QColor("#f2f2f2"))
+        qp.drawText(_r(46, 10, 160, 44), Qt.AlignLeft | Qt.AlignVCenter, "Roland")
+        self._dial(qp, QPointF(120, 128), 30)                   # VOLUME
+        self._label(qp, _r(70, 162, 100, 14), "VOLUME", 8, "#9aa0a8")
+        for k in range(2):
+            self._small_button(qp, _r(60 + k * 66, 188, 54, 26), "#ff3b30" if k == 0 else None)
+        self._label(qp, _r(46, 218, 150, 12), "FAVORITE      KEY TRANSPOSE", 7, "#7d838b", False)
+        self._label(qp, _r(220, 14, 256, 14), "ORGAN / EFFECTS", 9, "#aeb3b9")
+        # harmonic bars
+        self._label(qp, _r(496, 14, 270, 14), "HARMONIC BAR", 9, "#aeb3b9")
+        colors = ("#7a4622", "#7a4622", "#f2f2f2", "#f2f2f2", "#111111", "#f2f2f2", "#111111",
+                  "#111111", "#f2f2f2")
+        levels = (8, 8, 8, 4, 0, 0, 0, 2, 0)
+        for j in range(9):
+            x = 512 + j * 28
+            qp.setPen(Qt.NoPen)
+            qp.setBrush(QColor("#050506"))
+            qp.drawRoundedRect(_r(x - 4, 36, 8, 190), 3, 3)
+            hy = 40 + 150 * levels[j] / 8
+            hg = QLinearGradient(x - 11, hy, x + 11, hy)
+            base = QColor(colors[j])
+            hg.setColorAt(0, base.darker(130))
+            hg.setColorAt(0.5, base.lighter(115))
+            hg.setColorAt(1, base.darker(130))
+            qp.setPen(QPen(QColor("#000"), 1))
+            qp.setBrush(hg)
+            qp.drawRoundedRect(_r(x - 11, hy, 22, 34), 3, 3)
+        # centro: visor + dial
+        self._dial(qp, QPointF(1060, 98), 34)
+        f = self._font(15, True, "Arial")
+        qp.setFont(f)
+        qp.setPen(QColor("#e8e8e8"))
+        qp.drawText(_r(790, 168, 240, 24), Qt.AlignCenter, "V-Combo  VR-730")
+        for k in range(4):
+            self._small_button(qp, _r(800 + k * 58, 202, 48, 24), "#ff3b30" if k == 1 else None)
+        self._label(qp, _r(1112, 14, 228, 14), "PART / SCENE", 9, "#aeb3b9")
+        self._label(qp, _r(1348, 10, 230, 14), "REGISTRATION", 9, "#aeb3b9")
+        # alavanca de pitch/modulação
+        lever = _r(44, 280, 46, 80)
+        qp.setPen(QPen(QColor("#000"), 1))
+        qp.setBrush(QColor("#0a0a0b"))
+        qp.drawRoundedRect(lever, 6, 6)
+        lg = QLinearGradient(lever.topLeft(), lever.topRight())
+        lg.setColorAt(0, QColor("#55585e"))
+        lg.setColorAt(1, QColor("#2a2b2e"))
+        qp.setBrush(lg)
+        qp.drawRoundedRect(_r(58, 296, 18, 50), 4, 4)
+        self._label(qp, _r(36, 262, 64, 14), "BENDER", 8, "#8d939b")
 
 
 def _short2(text, n=18):

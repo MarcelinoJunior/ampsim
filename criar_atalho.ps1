@@ -1,4 +1,4 @@
-# Cria (ou recria) o atalho "AmpSim" na Área de Trabalho apontando para esta pasta.
+﻿# Cria (ou recria) o atalho "AmpSim" na Área de Trabalho apontando para esta pasta.
 # Uso: clique com o botão direito > "Executar com o PowerShell", ou:
 #   powershell -ExecutionPolicy Bypass -File criar_atalho.ps1
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path

@@ -13,7 +13,6 @@ from ..midi import winmm
 from ..presets import DEFAULT_PRESET, FACTORY
 from .audio_dialog import AudioDialog
 from .keyboard import PcKeyboard
-from .keys_page import InstrumentBridge
 from .panels import TrackPage
 from .widgets import Knob, Meter, PianoWidget
 
@@ -52,8 +51,8 @@ class MainWindow(QMainWindow):
 
         # avisos do roteador de teclas/pads (podem vir da thread de MIDI) -> interface
         inst = engine.instruments
-        self.inst_bridge = InstrumentBridge()
         kv = self.pages["pads"].keys_view
+        self.inst_bridge = kv.bridge
         self.inst_bridge.pad.connect(lambda i, v: kv.ctrl.flash_pad(i))
         self.inst_bridge.key.connect(self._show_key)
         self.inst_bridge.knob.connect(lambda i, v: kv.ctrl.set_knob(i, v))
@@ -64,6 +63,8 @@ class MainWindow(QMainWindow):
         inst.on_knob = self.inst_bridge.knob.emit
         inst.on_change = self.inst_bridge.changed.emit
         inst.on_learn = self.inst_bridge.learn.emit
+        inst.on_monitor = self.inst_bridge.monitor.emit
+        inst.on_control = self.inst_bridge.control.emit
         self.tabs.currentChanged.connect(self._tab_changed)
         self.midi = winmm.MidiInput(inst.handle_midi) if winmm.available else None
 
@@ -166,6 +167,7 @@ class MainWindow(QMainWindow):
     def _show_key(self, note, on):
         self.piano.set_active(note, on)
         self.pages["pads"].keys_view.ctrl.set_key(note, on)
+        self.pages["pads"].keys_view.quick.show_key(note, on)
 
     def _tab_changed(self, index):
         # na aba Pad/Piano o instrumento desenhado já tem teclado: esconde o piano de baixo

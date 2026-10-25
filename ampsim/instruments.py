@@ -56,6 +56,29 @@ CATEGORIES = list(dict.fromkeys(s.cat for s in SOUNDS))
 
 # timbres prontos (um ou dois sons + efeitos), agrupados para a lista da tela
 READY_GROUPS = (
+    ("Teclados 61/73 teclas", {
+        "Piano de Concerto": dict(sound1="Piano de Cauda", sound2="Cordas Lentas", vol2=40,
+                                  fx=dict(reverb=70, chorus=10)),
+        "Piano + Pad (culto)": dict(sound1="Piano de Cauda", sound2="Pad Halo", vol2=62,
+                                    fx=dict(reverb=85, chorus=20, shimmer=25)),
+        "Pad | Piano (pad na esquerda)": dict(sound1="Piano de Cauda", sound2="Pad Atmosfera", mode2="split",
+                                              split=55, vol2=85, fx=dict(reverb=90, shimmer=35)),
+        "Cordas | Piano (cordas na esquerda)": dict(sound1="Piano Brilhante", sound2="Cordas Lentas",
+                                                    mode2="split", split=55, vol2=90, fx=dict(reverb=80)),
+        "Baixo | Piano (teclado grande)": dict(sound1="Piano de Cauda",
+                                    sound2="Baixo Finger", mode2="split", split=48, vol2=100,
+                                    fx=dict(reverb=75, chorus=15)),
+        "Órgão Gospel (rotação)": dict(sound1="Órgão Hammond", sound2="", fx=dict(
+            reverb=40, chorus=0, rot_on=True, rot_fast=False, rot_mix=100, drive_on=True, drive=25)),
+        "Órgão Rock (drive + rotação rápida)": dict(sound1="Órgão Rock", fx=dict(
+            reverb=35, rot_on=True, rot_fast=True, rot_mix=100, drive_on=True, drive=60)),
+        "Órgão + Piano": dict(sound1="Piano de Cauda", sound2="Órgão Hammond", vol2=55, fx=dict(
+            reverb=60, rot_on=True, rot_mix=50)),
+        "Rhodes com Delay (balada)": dict(sound1="Rhodes", sound2="Pad Quente", vol2=45, fx=dict(
+            reverb=70, chorus=40, delay_on=True, delay_div=3, delay_fb=30, delay_mix=22)),
+        "Piano Brilhante + Synth Pad": dict(sound1="Piano Brilhante", sound2="Pad Polysynth", vol2=55,
+                                           fx=dict(reverb=80, chorus=30, shimmer=20)),
+    }),
     ("Espaciais (worship)", {
         "Pad Celestial (Shimmer)": dict(sound1="Pad Halo", sound2="Pad Vozes", vol2=80,
                                         fx=dict(reverb=110, chorus=40, shimmer=65)),
@@ -212,12 +235,19 @@ KNOB_COUNT = 8
 BUTTONS = ("PLAY", "STOP", "REC", "BT", "ARP", "SC/CH", "KNOB-B", "PAD-B")
 
 KNOB_FUNCS = ("Nenhuma", "Volume teclas", "Volume camada 2", "Volume bateria", "Volume pad contínuo",
-              "Reverb", "Shimmer", "Reverb da bateria", "Chorus", "Brilho", "Release", "Ataque", "Master")
+              "Reverb", "Shimmer", "Reverb da bateria", "Chorus", "Rotação (intensidade)", "Drive",
+              "Delay (mix)", "Tempo do delay", "Repetições do delay", "Brilho", "Release", "Ataque",
+              "Sensibilidade ao toque", "BPM", "Master")
 DEFAULT_KNOB_FUNCS = ["Volume teclas", "Volume camada 2", "Volume bateria", "Volume pad contínuo",
                       "Reverb", "Shimmer", "Brilho", "Master"]
 BUTTON_FUNCS = ("Nenhuma", "Tap tempo (BPM)", "Timbre anterior", "Próximo timbre", "Preset de pads anterior",
                 "Próximo preset de pads", "Liga/desliga camada 2", "Parar pad contínuo",
-                "Banco de pads A/B (tela)", "Pânico (soltar notas)")
+                "Banco de pads A/B (tela)", "Rotação lenta/rápida", "Rotação liga/desliga",
+                "Delay liga/desliga", "Drive liga/desliga", "Sustain (segurar)", "Oitava −", "Oitava +",
+                "Pânico (soltar notas)")
+DEFAULT_FX = dict(drive_on=False, drive=30, rot_on=False, rot_fast=False, rot_mix=100, delay_on=False,
+                  delay_ms=380, delay_div=0, delay_fb=30, delay_mix=25, delay_ping=True)
+DELAY_DIVS = ("ms (livre)", "1/4", "1/8", "1/8 pontuada", "1/16", "1/8 tercina")
 DEFAULT_BUTTON_FUNCS = ["Timbre anterior", "Próximo timbre", "Parar pad contínuo", "Tap tempo (BPM)",
                         "Preset de pads anterior", "Próximo preset de pads", "Liga/desliga camada 2",
                         "Banco de pads A/B (tela)"]
@@ -248,7 +278,7 @@ class Instruments:
         self.pad_keys = list(DEFAULT_PAD_KEYS)
         self.cont_sound = "Pad Halo"
         self.levels = dict(keys=80, drums=85, pad=70, reverb=110, chorus=40, shimmer=65,
-                           drumverb=35, bright=64, release=64, attack=0)
+                           drumverb=35, bright=64, release=64, attack=0, touch=100)
         self.mapping = dict(pads=[[9, n] for n in range(36, 44)],
                             pads_b=[[9, n] for n in range(44, 52)],
                             knobs=[None] * KNOB_COUNT, buttons=[None] * len(BUTTONS))
@@ -259,6 +289,13 @@ class Instruments:
         self.device = "M-VAVE SMK-25"         # instrumento desenhado na tela
         self.bpm = 100
         self._taps = []
+        self.fx = dict(DEFAULT_FX)           # efeitos das teclas (drive, rotação, delay)
+        self.transpose = 0
+        self.sustain = False
+        self.free_map = {}                   # função -> ["cc"|"note", canal, número] (atalhos rápidos)
+        self.capture = False                 # diálogo de mapeamento aberto: só monitora
+        self.on_monitor = lambda kind, ch, num, val: None
+        self.on_control = lambda func, val: None
         self.cont_key = None                 # tom do pad contínuo ativo
         self._cp = {}                        # canal -> [nível atual, alvo, notas]
         self._cp_next = 0
@@ -356,9 +393,17 @@ class Instruments:
         fx = READY[name].get("fx", {})
         self.levels.update(reverb=fx.get("reverb", 45), chorus=fx.get("chorus", 15),
                            shimmer=fx.get("shimmer", 0))
+        self.fx = dict(DEFAULT_FX)
+        self.fx.update({k: v for k, v in fx.items() if k in DEFAULT_FX})
         self.ready = name
         self.apply_all()
+        self.apply_fx()
         self.on_change()
+
+    def apply_fx(self):
+        kfx = getattr(self.engine, "keys_fx", None)
+        if kfx is not None:
+            kfx.configure(self.fx, self.bpm)
 
     def set_sound(self, slot, name):
         self.keys["sound1" if slot == 1 else "sound2"] = name
@@ -426,25 +471,33 @@ class Instruments:
             out.append((s2, CH_KEYS2))
         return out
 
+    def _touch(self, vel):
+        t = self.levels.get("touch", 100) / 100.0
+        return max(1, min(127, round(127 * ((1.0 - t) * 0.82 + t * vel / 127.0))))
+
     def key_on(self, note, vel=100):
-        targets = self._targets(note)
+        if note in self._held:
+            self.key_off(note)
+        vel = self._touch(vel)
+        played = note + self.transpose
+        targets = [(s, ch, played) for s, ch in self._targets(played)]
         self._held[note] = targets
         synth_done = False
-        for s, ch in targets:
+        for s, ch, n in targets:
             if s.src == "synth":
                 if not synth_done:
-                    self.engine.send_event(Ly.EV_NOTE_ON, note, vel)
+                    self.engine.send_event(Ly.EV_NOTE_ON, n, vel)
                     synth_done = True
             elif self.sf:
-                self.sf.noteon(ch, note, vel)
+                self.sf.noteon(ch, n, vel)
         self.on_key(note, True)
 
     def key_off(self, note):
-        for s, ch in self._held.pop(note, []):
+        for s, ch, n in self._held.pop(note, []):
             if s.src == "synth":
-                self.engine.send_event(Ly.EV_NOTE_OFF, note, 0)
+                self.engine.send_event(Ly.EV_NOTE_OFF, n, 0)
             elif self.sf:
-                self.sf.noteoff(ch, note)
+                self.sf.noteoff(ch, n)
         self.on_key(note, False)
 
     def pad_hit(self, i, vel=110):
@@ -578,6 +631,28 @@ class Instruments:
                 self.sf.cc(CH_KEYS2, 7, value)
         elif func == "Master":
             self.engine.master = (value / 127) ** 2 * 2.0
+        elif func in ("Rotação (intensidade)", "Drive", "Delay (mix)", "Tempo do delay",
+                      "Repetições do delay"):
+            fx = self.fx
+            if func == "Rotação (intensidade)":
+                fx["rot_mix"] = pct
+                fx["rot_on"] = pct > 0
+            elif func == "Drive":
+                fx["drive"] = pct
+                fx["drive_on"] = pct > 0
+            elif func == "Delay (mix)":
+                fx["delay_mix"] = pct
+                fx["delay_on"] = pct > 0
+            elif func == "Tempo do delay":
+                fx["delay_ms"] = round(80 + value / 127 * 1120)
+                fx["delay_div"] = 0
+            else:
+                fx["delay_fb"] = pct
+            self.apply_fx()
+        elif func == "Sensibilidade ao toque":
+            lv["touch"] = pct
+        elif func == "BPM":
+            self.set_bpm(60 + value / 127 * 120)
         elif func == "Reverb da bateria":
             lv["drumverb"] = value
             if self.sf:
@@ -595,6 +670,7 @@ class Instruments:
     def set_bpm(self, bpm):
         self.bpm = int(max(40, min(220, round(bpm))))
         self.engine.synth.set_bpm(self.bpm)
+        self.apply_fx()
         self.on_change()
 
     def tap_tempo(self):
@@ -612,8 +688,39 @@ class Instruments:
             self.on_change()
 
     def button(self, i):
-        func = self.button_funcs[i]
-        if func == "Tap tempo (BPM)":
+        self.do_button(self.button_funcs[i])
+
+    def do_button(self, func):
+        fx = self.fx
+        if func == "Rotação lenta/rápida":
+            fx["rot_on"] = True
+            fx["rot_fast"] = not fx["rot_fast"]
+            self.apply_fx()
+            self.on_change()
+        elif func == "Rotação liga/desliga":
+            fx["rot_on"] = not fx["rot_on"]
+            self.apply_fx()
+            self.on_change()
+        elif func == "Delay liga/desliga":
+            fx["delay_on"] = not fx["delay_on"]
+            self.apply_fx()
+            self.on_change()
+        elif func == "Drive liga/desliga":
+            fx["drive_on"] = not fx["drive_on"]
+            self.apply_fx()
+            self.on_change()
+        elif func == "Sustain (segurar)":
+            self.sustain = not self.sustain
+            val = 127 if self.sustain else 0
+            self.engine.send_event(Ly.EV_SUSTAIN, val)
+            if self.sf:
+                for c in (CH_KEYS1, CH_KEYS2):
+                    self.sf.cc(c, 64, val)
+            self.on_change()
+        elif func in ("Oitava −", "Oitava +"):
+            self.transpose = max(-24, min(24, self.transpose + (12 if func.endswith("+") else -12)))
+            self.on_change()
+        elif func == "Tap tempo (BPM)":
             self.tap_tempo()
         elif func == "Timbre anterior":
             self.step_ready(-1)
@@ -642,6 +749,21 @@ class Instruments:
     # ------------------------------------------------------------------ MIDI (thread do winmm)
     def handle_midi(self, status, d1, d2):
         kind, ch = status & 0xF0, status & 0x0F
+        if kind in (0x90, 0xB0) or (kind == 0x80):
+            self.on_monitor("cc" if kind == 0xB0 else "note", ch, d1, d2 if kind != 0x80 else 0)
+        if self.capture:
+            return
+        if kind in (0x90, 0xB0) and self.free_map:
+            key = ["cc" if kind == 0xB0 else "note", ch, d1]
+            for func, k in self.free_map.items():
+                if k == key:
+                    if func in KNOB_FUNCS and kind == 0xB0:
+                        self.apply_knob_func(func, d2)
+                        self.on_control(func, d2)
+                    elif func in BUTTON_FUNCS and d2 > 0:
+                        self.do_button(func)
+                        self.on_control(func, 127)
+                    return
         if self.learn_steps:
             self._learn(kind, ch, d1, d2)
             return
@@ -767,7 +889,7 @@ class Instruments:
                     cont_sound=self.cont_sound, levels=dict(self.levels),
                     mapping={k: list(v) for k, v in self.mapping.items()},
                     knob_funcs=list(self.knob_funcs), button_funcs=list(self.button_funcs),
-                    device=self.device, bpm=self.bpm)
+                    device=self.device, bpm=self.bpm, fx=dict(self.fx), free_map=dict(self.free_map))
 
     def load_state(self, st):
         if not st:
@@ -787,6 +909,11 @@ class Instruments:
             self.pad_keys = list(keys)
         if isinstance(st.get("device"), str):
             self.device = st["device"]
+        if isinstance(st.get("fx"), dict):
+            self.fx.update({k: v for k, v in st["fx"].items() if k in DEFAULT_FX})
+        if isinstance(st.get("free_map"), dict):
+            self.free_map = {k: v for k, v in st["free_map"].items()
+                             if (k in KNOB_FUNCS or k in BUTTON_FUNCS) and isinstance(v, list) and len(v) == 3}
         if isinstance(st.get("bpm"), (int, float)):
             self.bpm = int(st["bpm"])
             self.engine.synth.set_bpm(self.bpm)
@@ -804,3 +931,4 @@ class Instruments:
             if isinstance(v, list) and len(v) == n and all(x in valid for x in v):
                 setattr(self, attr, list(v))
         self.apply_all()
+        self.apply_fx()
