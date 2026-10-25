@@ -3,13 +3,13 @@ from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QFont, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSizePolicy, QTreeWidget,
+    QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSizePolicy, QSpinBox, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..instruments import (
     BUTTON_FUNCS, BUTTONS, CATEGORIES, CONT_PAD_SOUNDS, KNOB_COUNT, KNOB_FUNCS, PAD_B_CHOICES,
-    PAD_CATEGORIES, PAD_COUNT, PAD_PRESETS, PAD_SOUNDS, READY_GROUPS, SOUNDS, note_name,
+    PAD_CATEGORIES, PAD_COUNT, PAD_PRESETS, PAD_SOUNDS, READY, READY_GROUPS, SOUNDS, note_name,
 )
 from .controller import MODELS, TRADEMARKS, ControllerWidget
 
@@ -169,6 +169,22 @@ class KeysView(QWidget):
         self.device.activated.connect(self._device_changed)
         dev.addWidget(self.device, 1)
         lay.addLayout(dev)
+        tempo = QHBoxLayout()
+        tempo.addWidget(QLabel("BPM da música:"))
+        self.bpm = QSpinBox()
+        self.bpm.setRange(40, 220)
+        self.bpm.setFocusPolicy(Qt.ClickFocus)
+        self.bpm.setToolTip("Andamento usado pelo pulso dos timbres sincronizados (ex.: Baixo Pulsante)")
+        self.bpm.valueChanged.connect(lambda v: None if self._updating else self.inst.set_bpm(v))
+        tempo.addWidget(self.bpm)
+        tap = QPushButton("Tap")
+        tap.setFocusPolicy(Qt.NoFocus)
+        tap.setToolTip("Clique no ritmo da música (3-4 vezes): ajusta o BPM e alinha o pulso no tempo.\n"
+                       "Também dá para colocar o Tap num botão do controlador.")
+        tap.clicked.connect(self.inst.tap_tempo)
+        tempo.addWidget(tap)
+        tempo.addStretch(1)
+        lay.addLayout(tempo)
         t = QLabel("Timbres prontos")
         t.setObjectName("fxtitle")
         lay.addWidget(t)
@@ -448,6 +464,7 @@ class KeysView(QWidget):
                 self.split.setCurrentIndex(SPLIT_NOTES.index(k["split"]))
             self.pad_preset.setCurrentText(inst.pad_preset or "(personalizado)")
             self.device.setCurrentText(inst.device)
+            self.bpm.setValue(inst.bpm)
             self.cont_sound.setCurrentText(inst.cont_sound)
             for i, b in enumerate(self.pad_buttons):
                 b.setText(_short(inst.pad_sounds[i], 16))
@@ -463,6 +480,8 @@ class KeysView(QWidget):
         self.sound_status.setText(inst.error or "Botão direito no controlador: escolher sons e funções.")
         c = self.ctrl
         c.display = (inst.display_text(), inst.display_line2())
+        names = list(READY)
+        c.ready_index = names.index(inst.ready) + 1 if inst.ready in names else 0
         c.pad_labels = list(inst.pad_sounds)
         c.pad_keys_b = list(inst.pad_keys)
         c.bank = inst.screen_bank

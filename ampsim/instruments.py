@@ -48,7 +48,8 @@ _SF2 = (
 )
 
 SOUNDS = [Sound(name, cat, "sf2", b, p) for cat, items in _SF2 for name, b, p in items]
-for _preset in ("Pad Quente", "Pad Escuro", "Cordas", "Saw Brilhante", "Órgão", "Sino Suave"):
+for _preset in ("Baixo Pulsante", "Pad Quente", "Pad Escuro", "Cordas", "Saw Brilhante", "Órgão",
+                "Sino Suave"):
     SOUNDS.append(Sound(f"{_preset} (AmpSim)", "Synth AmpSim", "synth", synth_preset=_preset))
 SOUND_BY_NAME = {s.name: s for s in SOUNDS}
 CATEGORIES = list(dict.fromkeys(s.cat for s in SOUNDS))
@@ -81,6 +82,10 @@ READY_GROUPS = (
         "Órgão + Pad": dict(sound1="Órgão Hammond", sound2="Pad Quente", vol2=55),
     }),
     ("Baixo na mão esquerda", {
+        "Baixo Pulsante | Pad (BPM)": dict(sound1="Pad Halo", sound2="Baixo Pulsante (AmpSim)",
+                                           mode2="split", split=48, vol2=100,
+                                           fx=dict(reverb=95, chorus=30, shimmer=35)),
+        "Baixo Pulsante (BPM)": dict(sound1="Baixo Pulsante (AmpSim)"),
         "Baixo | Piano (divisão em C3)": dict(sound1="Piano de Cauda", sound2="Baixo Finger",
                                               mode2="split", split=48, vol2=100),
         "Baixo Synth | Rhodes": dict(sound1="Rhodes", sound2="Baixo Synth", mode2="split", split=48,
@@ -205,10 +210,10 @@ KNOB_FUNCS = ("Nenhuma", "Volume teclas", "Volume camada 2", "Volume bateria", "
               "Reverb", "Shimmer", "Reverb da bateria", "Chorus", "Brilho", "Release", "Ataque", "Master")
 DEFAULT_KNOB_FUNCS = ["Volume teclas", "Volume camada 2", "Volume bateria", "Volume pad contínuo",
                       "Reverb", "Shimmer", "Brilho", "Master"]
-BUTTON_FUNCS = ("Nenhuma", "Timbre anterior", "Próximo timbre", "Preset de pads anterior",
+BUTTON_FUNCS = ("Nenhuma", "Tap tempo (BPM)", "Timbre anterior", "Próximo timbre", "Preset de pads anterior",
                 "Próximo preset de pads", "Liga/desliga camada 2", "Parar pad contínuo",
                 "Banco de pads A/B (tela)", "Pânico (soltar notas)")
-DEFAULT_BUTTON_FUNCS = ["Timbre anterior", "Próximo timbre", "Parar pad contínuo", "Nenhuma",
+DEFAULT_BUTTON_FUNCS = ["Timbre anterior", "Próximo timbre", "Parar pad contínuo", "Tap tempo (BPM)",
                         "Preset de pads anterior", "Próximo preset de pads", "Liga/desliga camada 2",
                         "Banco de pads A/B (tela)"]
 
@@ -247,6 +252,8 @@ class Instruments:
         self.knob_values = [0] * KNOB_COUNT
         self.screen_bank = 0                 # banco mostrado na tela (0 = A, 1 = B)
         self.device = "M-VAVE SMK-25"         # instrumento desenhado na tela
+        self.bpm = 100
+        self._taps = []
         self.cont_key = None                 # tom do pad contínuo ativo
         self._cp = {}                        # canal -> [nível atual, alvo, notas]
         self._cp_next = 0
@@ -579,9 +586,31 @@ class Instruments:
             for ch in chans:
                 self.sf.cc(ch, cc, value)
 
+    # ------------------------------------------------------------------ andamento
+    def set_bpm(self, bpm):
+        self.bpm = int(max(40, min(220, round(bpm))))
+        self.engine.synth.set_bpm(self.bpm)
+        self.on_change()
+
+    def tap_tempo(self):
+        """Bata no ritmo: a média dos últimos toques define o BPM e o pulso recomeça no toque."""
+        now = time.monotonic()
+        if self._taps and now - self._taps[-1] > 2.0:
+            self._taps = []
+        self._taps = (self._taps + [now])[-5:]
+        self.engine.synth.restart_pulse()
+        if len(self._taps) >= 2:
+            gaps = [b - a for a, b in zip(self._taps, self._taps[1:])]
+            gaps.sort()
+            self.set_bpm(60.0 / gaps[len(gaps) // 2])
+        else:
+            self.on_change()
+
     def button(self, i):
         func = self.button_funcs[i]
-        if func == "Timbre anterior":
+        if func == "Tap tempo (BPM)":
+            self.tap_tempo()
+        elif func == "Timbre anterior":
             self.step_ready(-1)
         elif func == "Próximo timbre":
             self.step_ready(1)
@@ -733,7 +762,7 @@ class Instruments:
                     cont_sound=self.cont_sound, levels=dict(self.levels),
                     mapping={k: list(v) for k, v in self.mapping.items()},
                     knob_funcs=list(self.knob_funcs), button_funcs=list(self.button_funcs),
-                    device=self.device)
+                    device=self.device, bpm=self.bpm)
 
     def load_state(self, st):
         if not st:
@@ -753,6 +782,9 @@ class Instruments:
             self.pad_keys = list(keys)
         if isinstance(st.get("device"), str):
             self.device = st["device"]
+        if isinstance(st.get("bpm"), (int, float)):
+            self.bpm = int(st["bpm"])
+            self.engine.synth.set_bpm(self.bpm)
         if st.get("cont_sound") in CONT_PAD_SOUNDS:
             self.cont_sound = st["cont_sound"]
         self.levels.update({k: v for k, v in st.get("levels", {}).items() if k in self.levels})

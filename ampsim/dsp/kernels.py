@@ -29,9 +29,10 @@ from .layout import (
     S_CH_PHASE, S_CH_POS, S_COMP_ENV, S_DL_LEN, S_DL_LP_L, S_DL_LP_R, S_DL_POS,
     S_GATE_ENV, S_GATE_GAIN, S_GATE_OPEN, S_IR_POS, S_OSD0, S_OSD1, S_OSU0, S_OSU1,
     S_NR_ENV, S_NR_IC1, S_NR_IC2, S_PEAK_IN, S_PEAK_OUT, S_SAG,
-    SS_AGE, SS_BEND, SS_LFO, SS_MOD, SS_SUSTAIN,
+    SS_AGE, SS_BEND, SS_LFO, SS_MOD, SS_PULSE, SS_SUSTAIN,
     SY_AATT, SY_ADEC, SY_AREL, SY_ASUS, SY_BEND_RANGE, SY_CUTOFF, SY_DETUNE, SY_FATT,
     SY_FDEC, SY_FENV, SY_FREL, SY_FSUS, SY_KEYTRK, SY_LFODEPTH, SY_LFORATE, SY_MIX2,
+    SY_PULSE_DEPTH, SY_PULSE_FILT, SY_PULSE_RATE, SY_PULSE_RETRIG, SY_PULSE_SHAPE,
     SY_RESO, SY_SEMI2, SY_SUB, SY_VELSENS, SY_VOL, SY_WAVE1, SY_WAVE2,
     T_AMP, T_INGAIN, T_PANL, T_PANR, T_VOL,
     V_ACTIVE, V_AGE, V_ELEVEL, V_ESTAGE, V_FLEVEL, V_FREQ, V_FSTAGE, V_GATE, V_HELD,
@@ -588,7 +589,7 @@ def _release(VS, v):
 
 
 @njit(**JIT)
-def synth_events(ev, nev, VS, SST):
+def synth_events(ev, nev, VS, SST, retrig):
     for e in range(nev):
         kind = ev[e, 0]
         a = ev[e, 1]
@@ -596,6 +597,14 @@ def synth_events(ev, nev, VS, SST):
         if kind == EV_NOTE_ON and b == 0:
             kind = EV_NOTE_OFF
         if kind == EV_NOTE_ON:
+            if retrig:                            # 1ª nota depois de soltar tudo: pulso começa no tempo
+                held = False
+                for k in range(MAX_VOICES):
+                    if VS[k, V_ACTIVE] > 0.5 and (VS[k, V_GATE] > 0.5 or VS[k, V_HELD] > 0.5):
+                        held = True
+                        break
+                if not held:
+                    SST[SS_PULSE] = 0.0
             v = -1
             for k in range(MAX_VOICES):          # mesma nota já soando: reaproveita
                 if VS[k, V_ACTIVE] > 0.5 and int(VS[k, V_NOTE]) == a:
@@ -684,8 +693,19 @@ def _env_step(stage, level, att, dec, sus, rel):
 
 
 @njit(**JIT)
+def pulse_shape(ph, shape):
+    """Envelope rítmico 0..1 dentro de um ciclo do pulso (ph = 0 no tempo)."""
+    if shape == 0:      # "Pulso": cai no tempo e volta subindo (efeito sidechain)
+        return (1.0 - math.exp(-5.0 * ph)) / (1.0 - math.exp(-5.0))
+    if shape == 1:      # "Ondas": vai e volta suave
+        return 0.5 - 0.5 * math.cos(TWO_PI * ph)
+    # "Gate": nota picada (metade do tempo)
+    return (1.0 - math.exp(-ph * 120.0)) / (1.0 + math.exp((ph - 0.5) * 60.0))
+
+
+@njit(**JIT)
 def render_synth(out, n, ev, nev, SD, VS, SST, fs):
-    synth_events(ev, nev, VS, SST)
+    synth_events(ev, nev, VS, SST, SD[SY_PULSE_RETRIG] > 0.5)
     for i in range(n):
         out[i, 0] = 0.0
 
@@ -705,6 +725,11 @@ def render_synth(out, n, ev, nev, SD, VS, SST, fs):
     vol = SD[SY_VOL] * 0.18
     nyq = 0.45 * fs
     inv_fs = 1.0 / fs
+    p_depth = SD[SY_PULSE_DEPTH]
+    p_inc = SD[SY_PULSE_RATE] * inv_fs
+    p_shape = int(SD[SY_PULSE_SHAPE])
+    p_filt = SD[SY_PULSE_FILT]
+    pph0 = SST[SS_PULSE]
 
     lfo_ph0 = SST[SS_LFO]
     for v in range(MAX_VOICES):
@@ -726,6 +751,7 @@ def render_synth(out, n, ev, nev, SD, VS, SST, fs):
         vel = 1.0 - velsens + velsens * VS[v, V_VEL]
         key_oct = keytrk * (VS[v, V_NOTE] - 60.0) / 12.0
         lph = lfo_ph0
+        pph = pph0
         for i in range(n):
             s = osc(ph1, dt1, wave1) * (1.0 - mix2) + osc(ph2, dt2, wave2) * mix2
             if sub > 0.0:
@@ -747,7 +773,16 @@ def render_synth(out, n, ev, nev, SD, VS, SST, fs):
             lph += lfo_inc
             if lph >= 1.0:
                 lph -= 1.0
-            fc = cutoff * math.pow(2.0, fenv * fl + lfo * lfo_depth + key_oct)
+            pmul = 1.0
+            poct = 0.0
+            if p_depth > 0.0:
+                pv = pulse_shape(pph, p_shape)
+                pmul = 1.0 - p_depth * (1.0 - pv)
+                poct = p_filt * (pv - 1.0)
+                pph += p_inc
+                if pph >= 1.0:
+                    pph -= 1.0
+            fc = cutoff * math.pow(2.0, fenv * fl + lfo * lfo_depth + key_oct + poct)
             if fc > nyq:
                 fc = nyq
             elif fc < 20.0:
@@ -762,7 +797,7 @@ def render_synth(out, n, ev, nev, SD, VS, SST, fs):
             v2 = ic2 + a2 * ic1 + a3 * v3
             ic1 = 2.0 * v1 - ic1
             ic2 = 2.0 * v2 - ic2
-            out[i, 0] += v2 * el * vel * vol
+            out[i, 0] += v2 * el * vel * vol * pmul
             if es == 0.0:
                 break
         if es == 0.0:
@@ -780,6 +815,8 @@ def render_synth(out, n, ev, nev, SD, VS, SST, fs):
         VS[v, V_IC2] = ic2 if abs(ic2) > 1e-15 else 0.0
     ph = lfo_ph0 + lfo_inc * n
     SST[SS_LFO] = ph - math.floor(ph)
+    ph = pph0 + p_inc * n
+    SST[SS_PULSE] = ph - math.floor(ph)
 
 
 def warmup(fs=48000.0):

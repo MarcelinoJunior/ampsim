@@ -133,6 +133,7 @@ class AudioEngine:
                 t.load_state(old.get_state())
                 self.tracks[name] = t
             s = SynthDSP(self.fs)
+            s.bpm = self.synth.bpm
             s.load_state(self.synth.get_state())
             self.synth = s
             self.instruments.start(self.fs, Ly.MAX_BLOCK)

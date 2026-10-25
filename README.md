@@ -121,6 +121,11 @@ knob, botão ou tecla abre a escolha do som ou da função.
 - **Mapear meu controlador…**: assistente que pede "toque o PAD 1", "gire o KNOB 1",
   "aperte o botão PLAY"… e aprende o que o seu controlador envia (com **Pular** e **Parar**).
   Sem mapear, os pads esperam as notas 36–43 no canal 10.
+- **BPM da música + Tap**: o **Baixo Pulsante** (synth bass que "vai e volta" no tempo, efeito
+  sidechain) segue o BPM — digite o andamento ou clique **Tap** no ritmo (também dá para pôr o
+  Tap num botão do controlador). O pulso recomeça na primeira nota tocada, para cair no tempo.
+  No painel *Synth AmpSim* ajuste divisão (1/4, 1/8, 1/8 pontuada, 1/16), forma (pulso, ondas,
+  gate) e quanto o pulso abre o filtro. Timbre pronto: **Baixo Pulsante | Pad (BPM)**.
 - **Teclas passam pelo amplificador** (no topo da aba): desligado, o timbre sai limpo, com
   reverb/chorus próprios; ligado, as teclas passam pelo amplificador, gabinete e pedais da
   aba (útil para o timbre de guitarra).
@@ -209,12 +214,14 @@ usa a licença própria do autor (uso livre, inclusive comercial).
 
 ## Marcas registradas
 
-Fender, Marshall, Mesa/Boogie, Vox, Ampeg, Orange, EVH, Soldano, Tech 21, M-VAVE e demais nomes de
+Fender, Marshall, Mesa/Boogie, Vox, Ampeg, Orange, EVH, Soldano, Tech 21, M-VAVE, Yamaha, Roland e demais nomes de
 equipamentos citados são marcas registradas de seus respectivos titulares. O AmpSim não é
 afiliado, patrocinado nem endossado por nenhum deles. Os nomes aparecem apenas para
 identificar o estilo de timbre que cada modelo busca ou o equipamento real capturado (NAM).
 As fachadas são desenhos próprios, com os nomes escritos em fontes comuns, e não reproduzem
-logotipos oficiais. Cada fachada exibe esse aviso na própria tela.
+logotipos oficiais. Os instrumentos desenhados na aba Pad/Piano (M-VAVE SMK-25, Yamaha PSR-E473,
+Roland V-Combo VR-730) são uma homenagem aos originais: marcas, logotipos e imagens pertencem aos
+respectivos titulares. Cada tela exibe esse aviso.
 
 ## Próximos passos sugeridos
 

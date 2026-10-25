@@ -234,3 +234,31 @@ def test_long_worship_session_stays_stable(engine):
     third = len(peaks) // 3
     assert peaks[-third:].max() < 0.9                       # não encosta no limitador
     assert peaks[-third:].max() < peaks[third:2 * third].max() * 1.5   # não cresce sozinho
+
+
+def test_pulse_bass_follows_bpm_and_tap(engine):
+    import time
+
+    import numpy as np
+
+    inst = engine.instruments
+    inst.all_off()
+    inst.set_bpm(120)
+    inst.set_ready("Baixo Pulsante (BPM)")
+    inst.key_on(40, 110)
+    n = 128
+    out = np.zeros((n, 2), np.float32)
+    env = []
+    for _ in range(int(48000 * 4 / n)):
+        engine._render(None, out, n)
+        env.append(float(np.sqrt((out[:, 0] ** 2).mean())))
+    inst.all_off()
+    x = np.array(env[len(env) // 4:])
+    x -= x.mean()
+    ac = np.correlate(x, x, "full")[len(x) - 1:]
+    period = (np.argmax(ac[40:200]) + 40) * n / 48000
+    assert abs(period - 0.25) < 0.02            # 1/8 a 120 BPM
+    for _ in range(4):
+        inst.tap_tempo()
+        time.sleep(0.4)
+    assert abs(inst.bpm - 150) <= 3

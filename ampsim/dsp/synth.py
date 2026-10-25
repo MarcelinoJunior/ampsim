@@ -17,6 +17,11 @@ SYNTH_PRESETS = {
                           f_attack=200, a_attack=80, a_release=900),
     "Sino Suave": dict(wave1=0, wave2=1, semi2=19, mix2=30, detune=0, cutoff=6000, fenv=0,
                        a_attack=2, a_decay=2500, a_sustain=0, a_release=2500, lfo_depth=0),
+    "Baixo Pulsante": dict(wave1=2, wave2=3, semi2=-12, mix2=40, detune=4, sub=70, cutoff=420,
+                           reso=22, fenv=1.6, keytrk=30, f_attack=3, f_decay=220, f_sustain=25,
+                           f_release=150, a_attack=4, a_decay=400, a_sustain=95, a_release=160,
+                           lfo_depth=0, velsens=40, pulse_depth=85, pulse_filt=2.2, pulse_div=1,
+                           pulse_shape=0, pulse_retrig=1),
     "Pad Escuro": dict(wave1=3, wave2=2, semi2=-12, mix2=45, detune=7, sub=30, cutoff=600,
                        reso=35, fenv=1.2, f_attack=2500, a_attack=1500, a_release=3500,
                        lfo_rate=0.15, lfo_depth=0.5),
@@ -27,9 +32,13 @@ def default_synth_values():
     return {p.key: p.default for p in SYNTH_PARAMS}
 
 
+PULSE_DIV = (1.0, 2.0, 4.0 / 3.0, 4.0, 0.5)     # ciclos por tempo: 1/4, 1/8, 1/8 pont., 1/16, 1/2
+
+
 class SynthDSP:
     def __init__(self, fs):
         self.fs = float(fs)
+        self.bpm = 100.0
         self.values = default_synth_values()
         self.SD = np.zeros(Ly.SD_SIZE)
         self.VS = np.zeros((Ly.MAX_VOICES, Ly.VS_SIZE))
@@ -87,6 +96,18 @@ class SynthDSP:
         SD[Ly.SY_VELSENS] = v["velsens"] / 100.0
         SD[Ly.SY_BEND_RANGE] = round(v["bend_range"])
         SD[Ly.SY_VOL] = db(v["volume"])
+        SD[Ly.SY_PULSE_DEPTH] = v["pulse_depth"] / 100.0
+        SD[Ly.SY_PULSE_FILT] = v["pulse_filt"]
+        SD[Ly.SY_PULSE_RATE] = self.bpm / 60.0 * PULSE_DIV[int(round(v["pulse_div"]))]
+        SD[Ly.SY_PULSE_SHAPE] = round(v["pulse_shape"])
+        SD[Ly.SY_PULSE_RETRIG] = round(v["pulse_retrig"])
+
+    def set_bpm(self, bpm):
+        self.bpm = float(bpm)
+        self.update_all()
+
+    def restart_pulse(self):
+        self.SST[Ly.SS_PULSE] = 0.0
 
     def reset_voices(self):
         self.VS[:] = 0

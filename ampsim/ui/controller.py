@@ -12,13 +12,13 @@ import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QSizePolicy, QWidget
+from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from ..instruments import BUTTONS, PAD_COUNT, note_name
 
 WHITE_STEPS = (0, 2, 4, 5, 7, 9, 11)
 
-BUTTON_SHORT = {"Nenhuma": "—", "Timbre anterior": "◀ timbre", "Próximo timbre": "timbre ▶",
+BUTTON_SHORT = {"Nenhuma": "—", "Tap tempo (BPM)": "tap", "Timbre anterior": "◀ timbre", "Próximo timbre": "timbre ▶",
                 "Preset de pads anterior": "◀ pads", "Próximo preset de pads": "pads ▶",
                 "Liga/desliga camada 2": "camada 2", "Parar pad contínuo": "para pad",
                 "Banco de pads A/B (tela)": "banco A/B", "Pânico (soltar notas)": "pânico"}
@@ -42,7 +42,8 @@ def _smk25():
         keys=(_r(20, 292, 960, 128), 48, 25),
         strips=[(_r(30, 32, 46, 200), "PITCH"), (_r(84, 32, 46, 200), "MOD")],
         oct=[(-1, _r(30, 248, 46, 22), "OCT−"), (1, _r(84, 248, 46, 22), "OCT+")],
-        texts=[(_r(590, 256, 390, 28), "SMK-25", 22, True, "#2b2f35", Qt.AlignRight)],
+        texts=[(_r(590, 254, 230, 32), "M-VAVE", 27, True, "#1d2024", Qt.AlignLeft, "Arial Black", 104),
+               (_r(780, 256, 200, 28), "SMK-25", 22, False, "#2b2f35", Qt.AlignRight, "Segoe UI", 100)],
     )
 
 
@@ -63,8 +64,8 @@ def _psr_e473():
         speakers=[_r(22, 18, 240, 180), _r(1138, 18, 240, 180)],
         dial=(QPointF(872, 104), 38),
         oct=[(-1, _r(300, 120, 52, 22), "TRANS−"), (1, _r(356, 120, 52, 22), "TRANS+")],
-        texts=[(_r(560, 6, 250, 26), "YAMAHA", 16, True, "#d9dde1", Qt.AlignCenter),
-               (_r(20, 236, 300, 30), "PSR-E473", 20, True, "#d9dde1", Qt.AlignLeft),
+        texts=[(_r(530, 2, 310, 32), "YAMAHA", 21, True, "#e9ecef", Qt.AlignCenter, "Arial Black", 135),
+               (_r(20, 236, 300, 30), "PSR-E473", 21, True, "#d9dde1", Qt.AlignLeft, "Arial", 100),
                (_r(300, 40, 230, 16), "LIVE CONTROL", 10, True, "#aeb3b9", Qt.AlignCenter)],
     )
 
@@ -84,15 +85,16 @@ def _vr730():
         drawbars=_r(350, 26, 270, 190),
         dial=(QPointF(950, 96), 40),
         oct=[(-1, _r(30, 238, 34, 22), "−"), (1, _r(30, 266, 34, 22), "+")],
-        texts=[(_r(30, 4, 200, 24), "Roland", 18, True, "#e8e8e8", Qt.AlignLeft),
+        texts=[(_r(32, 0, 220, 30), "Roland", 24, True, "#f2f2f2", Qt.AlignLeft, "Arial Black", 96, True),
                (_r(660, 160, 230, 24), "V-Combo VR-730", 15, True, "#e8e8e8", Qt.AlignCenter),
                (_r(350, 4, 270, 18), "HARMONIC BARS", 10, True, "#aeb3b9", Qt.AlignCenter)],
     )
 
 
 MODELS = {"M-VAVE SMK-25": _smk25, "Yamaha PSR-E473": _psr_e473, "Roland VR-730": _vr730}
-TRADEMARKS = ("M-VAVE, Yamaha (PSR-E473) e Roland (V-Combo VR-730) são marcas de seus respectivos "
-              "titulares. Desenho ilustrativo; o AmpSim não é afiliado nem endossado.")
+TRADEMARKS = ("Desenhos em homenagem aos instrumentos originais. M-VAVE (SMK-25), Yamaha (PSR-E473) e "
+              "Roland (V-Combo VR-730), seus logotipos e imagens pertencem aos respectivos titulares; "
+              "o AmpSim não é afiliado nem endossado por eles.")
 
 
 class ControllerWidget(QWidget):
@@ -107,6 +109,8 @@ class ControllerWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(560, 250)
+        self.setMouseTracking(True)
+        self.ready_index = 0
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.display = ("", "")
         self.pad_labels = [""] * PAD_COUNT
@@ -233,6 +237,9 @@ class ControllerWidget(QWidget):
 
     def mouseMoveEvent(self, e):
         v = self._to_virtual(e.position())
+        if self._drag is None and self._mouse is None:
+            self._hover_tip(v, e.globalPosition().toPoint())
+            return
         if self._drag is not None:
             i, y0, val0 = self._drag
             val = int(min(127, max(0, val0 + (y0 - v.y()) * 1.4)))
@@ -245,6 +252,23 @@ class ControllerWidget(QWidget):
                 self.keyOff.emit(self._mouse)
                 self._mouse = hit[1]
                 self.keyOn.emit(self._mouse, 100)
+
+    def _hover_tip(self, v, gpos):
+        hit = self._hit(v)
+        tip = ""
+        if hit:
+            kind, i = hit
+            if kind == "knob":
+                tip = f"Knob {i + 1}: {self.knob_labels[i]}\n(arraste para mudar · botão direito: função)"
+            elif kind == "button":
+                tip = f"{BUTTONS[i]}: {self.button_labels[i]}\n(botão direito: função)"
+            elif kind == "pad":
+                tip = (f"Pad {i + 1} B: {self.pad_keys_b[i]}" if self.bank else
+                       f"Pad {i + 1}: {self.pad_labels[i]}") + "\n(botão direito: trocar)"
+        if tip:
+            QToolTip.showText(gpos, tip, self)
+        else:
+            QToolTip.hideText()
 
     def mouseReleaseEvent(self, e):
         self._drag = None
@@ -362,8 +386,14 @@ class ControllerWidget(QWidget):
             qp.setPen(ink)
             qp.drawText(r, Qt.AlignCenter, label)
 
-        for r, text, px, bold, color, align in m.get("texts", []):
-            qp.setFont(self._font(px, bold))
+        for t in m.get("texts", []):          # (rect, texto, px, negrito, cor, alinh. [, fonte, espaço, itálico])
+            r, text, px, bold, color, align = t[:6]
+            f = self._font(px, bold, t[6] if len(t) > 6 else "Segoe UI")
+            if len(t) > 7:
+                f.setLetterSpacing(QFont.PercentageSpacing, t[7])
+            if len(t) > 8:
+                f.setItalic(t[8])
+            qp.setFont(f)
             qp.setPen(QColor(color))
             qp.drawText(r, align | Qt.AlignVCenter, text)
 
@@ -422,7 +452,7 @@ class ControllerWidget(QWidget):
             func = self.knob_labels[i] if i < len(self.knob_labels) else ""
             txt = f"{label}\n{func}" if label else func
             qp.drawText(QRectF(c.x() - 46, c.y() + rad + 2, 92, 26), Qt.AlignHCenter | Qt.AlignTop,
-                        _short2(txt))
+                        _short2(txt, 18 if rad > 22 else 12))
 
         # pads (banco A = bateria; banco B = tons do pad contínuo)
         cap = m["pad_caption"]

@@ -186,6 +186,13 @@ SYNTH_GROUPS = (
         Param("a_sustain", "Sustain", 0, 100, 85, "%"),
         Param("a_release", "Release", 10, 10000, 1800, "ms", log=True),
     )),
+    ("Pulso no tempo (BPM)", (
+        Param("pulse_depth", "Pulso", 0, 100, 0, "%"),
+        Param("pulse_filt", "Pulso→Filtro", 0, 4, 0, "oct"),
+        Param("pulse_div", "Divisão", 0, 4, 1, choices=("1/4", "1/8", "1/8 pontuada", "1/16", "1/2")),
+        Param("pulse_shape", "Forma", 0, 2, 0, choices=("Pulso (sidechain)", "Ondas (vai e volta)", "Gate (picado)")),
+        Param("pulse_retrig", "Começa na nota", 0, 1, 1, choices=("Não", "Sim")),
+    )),
     ("Modulação / Saída", (
         Param("lfo_rate", "LFO veloc.", 0.05, 10, 0.3, "Hz", log=True),
         Param("lfo_depth", "LFO→Filtro", 0, 2, 0.25, "oct"),
