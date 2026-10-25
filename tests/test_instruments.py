@@ -89,6 +89,7 @@ def test_keys_through_amp_flag(engine):
 
 
 def test_state_roundtrip(engine):
+    engine.instruments.stop_cont_pad(immediate=True)
     inst = engine.instruments
     inst.set_ready("Rhodes + Pad")
     inst.knob_funcs[0] = "Reverb"
@@ -97,3 +98,71 @@ def test_state_roundtrip(engine):
     inst.load_state(st)
     assert inst.ready == "Rhodes + Pad" and inst.knob_funcs[0] == "Reverb"
     assert SOUND_BY_NAME[inst.keys["sound1"]].name == "Rhodes com Chorus"
+
+
+def test_all_pad_sounds_and_presets(engine):
+    from ampsim.instruments import PAD_PRESETS, PAD_SOUND_BY_NAME, PAD_SOUNDS
+
+    inst = engine.instruments
+    for p, names in PAD_PRESETS.items():
+        assert all(n in PAD_SOUND_BY_NAME for n in names), p
+    for s in PAD_SOUNDS:
+        if s.kind == "sf2":
+            assert (s.bank, s.prog) in inst.sf.presets, s.name
+    for name in PAD_PRESETS:
+        inst.set_pad_preset(name)
+        for i in range(8):
+            inst.pad_hit(i, 110)
+        assert 0.05 < render(engine, 0.4) <= 1.0, name
+        render(engine, 1.0)
+
+
+def test_continuous_pad_fades_and_stops(engine):
+    inst = engine.instruments
+
+    def run(sec):
+        peak = 0.0
+        for _ in range(int(sec / 0.033)):
+            peak = max(peak, render(engine, 0.033))
+            inst.tick(0.033)
+        return peak
+
+    inst.pad_hit(8, 100)                      # banco B, pad 1 = C
+    assert inst.cont_key == "C"
+    assert run(3.0) > 0.02
+    inst.pad_hit(9, 100)                      # troca para D (crossfade)
+    assert inst.cont_key == "D"
+    run(4.0)
+    assert len(inst._cp) == 1                 # o C já saiu
+    inst.pad_hit(15, 100)                     # Parar
+    assert inst.cont_key is None
+    run(4.5)
+    assert not inst._cp and render(engine, 0.3) < 0.02
+
+
+def test_synth_drums_and_shimmer_are_finite(engine):
+    import numpy as np
+
+    from ampsim.dsp.worship import DRUM_TYPE_NAMES, DrumSynth, ShimmerDSP, render_drums
+
+    d = DrumSynth(48000.0)
+    mix = np.zeros((48000, 2))
+    send = np.zeros(48000)
+    for i in range(len(DRUM_TYPE_NAMES)):
+        d.ev[i] = (i, 120)
+    render_drums(mix, send, 48000, d.ev, len(DRUM_TYPE_NAMES), d.DV, d.DT, 48000.0, 1.0)
+    sh = ShimmerDSP(48000.0)
+    out = np.zeros((48000, 2))
+    sh.process(send, 48000, out, 1.0, 0.7)
+    assert np.all(np.isfinite(mix)) and np.all(np.isfinite(out))
+    assert np.abs(out).max() > 1e-3
+
+
+def test_learning_bank_b(engine):
+    inst = engine.instruments
+    inst.start_learning(("pads_b",))
+    assert inst.screen_bank in (0, 1)
+    inst.handle_midi(0xB0, 30, 127)           # o botão PAD-B (CC): ignorado
+    inst.handle_midi(0x99, 60, 100)
+    assert inst.mapping["pads_b"][0] == [9, 60]
+    inst.stop_learning()

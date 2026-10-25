@@ -1,14 +1,18 @@
-"""Teclas e pads do controlador MIDI: timbres, camadas/divisão, bateria e mapeamento.
+"""Teclas e pads do controlador MIDI: timbres, camadas/divisão, bateria, pad contínuo e mapeamento.
 
-As notas do teclado tocam até dois timbres (camada sobreposta ou divisão "mão esquerda");
-os 8 pads disparam sons de bateria. Knobs e botões do controlador ganham funções
-(volume, reverb, próximo timbre...) aprendidas com o assistente de mapeamento.
+As notas do teclado tocam até dois timbres (camada sobreposta ou divisão "mão esquerda").
+Pads do banco A disparam sons de bateria (de qualquer kit, ou da bateria worship sintetizada);
+pads do banco B ligam o pad contínuo no tom escolhido. Knobs e botões ganham funções
+aprendidas com o assistente de mapeamento.
 """
+import time
+from collections import deque
 from dataclasses import dataclass
 
 from .dsp import layout as Ly
+from .dsp.worship import DRUM_TYPE_NAMES
 
-# ------------------------------------------------------------------ catálogo de timbres
+# ------------------------------------------------------------------ timbres das teclas
 @dataclass(frozen=True)
 class Sound:
     name: str
@@ -27,9 +31,10 @@ _SF2 = (
     ("Órgãos", (("Órgão Hammond", 0, 16), ("Órgão Percussivo", 0, 17), ("Órgão Rock", 0, 18),
                 ("Órgão de Tubos", 0, 19), ("Órgão de Tubos 2", 8, 19))),
     ("Pads e cordas", (("Pad Quente", 0, 89), ("Pad Halo", 0, 94), ("Pad Polysynth", 0, 90),
-                       ("Pad Atmosfera", 0, 99), ("Pad Vozes", 0, 91), ("Coral", 0, 52),
-                       ("Cordas Lentas", 0, 49), ("Cordas", 0, 48), ("Cordas Synth", 0, 50),
-                       ("Pad Orquestra", 8, 48))),
+                       ("Pad Atmosfera", 0, 99), ("Pad Vozes", 0, 91), ("Pad Cristal", 0, 98),
+                       ("Pad Sweep", 0, 95), ("Pad Vidro", 0, 92), ("Pad Chuva de Gelo", 0, 96),
+                       ("Coral", 0, 52), ("Cordas Lentas", 0, 49), ("Cordas", 0, 48),
+                       ("Cordas Synth", 0, 50), ("Pad Orquestra", 8, 48))),
     ("Baixos", (("Baixo Finger", 0, 33), ("Baixo Palheta", 0, 34), ("Baixo Fretless", 0, 35),
                 ("Baixo Acústico", 0, 32), ("Baixo Synth", 0, 38), ("Baixo Synth 101", 1, 38),
                 ("Baixo FM", 8, 39))),
@@ -48,54 +53,174 @@ for _preset in ("Pad Quente", "Pad Escuro", "Cordas", "Saw Brilhante", "Órgão"
 SOUND_BY_NAME = {s.name: s for s in SOUNDS}
 CATEGORIES = list(dict.fromkeys(s.cat for s in SOUNDS))
 
-# timbres prontos: combinam um ou dois sons (camada ou divisão)
-READY = {
-    "Piano + Pad": dict(sound1="Piano de Cauda", sound2="Pad Quente", mode2="layer", vol2=70),
-    "Piano + Cordas": dict(sound1="Piano de Cauda", sound2="Cordas Lentas", mode2="layer", vol2=65),
-    "Rhodes + Pad": dict(sound1="Rhodes com Chorus", sound2="Pad Halo", mode2="layer", vol2=60),
-    "Piano Brilhante": dict(sound1="Piano Brilhante", sound2=""),
-    "Pad de Louvor (AmpSim)": dict(sound1="Pad Quente (AmpSim)", sound2=""),
-    "Pad + Cordas": dict(sound1="Pad Atmosfera", sound2="Cordas Lentas", mode2="layer", vol2=75),
-    "Baixo | Piano (divisão em C3)": dict(sound1="Piano de Cauda", sound2="Baixo Finger",
-                                          mode2="split", split=48, vol2=100),
-    "Baixo Synth | Rhodes": dict(sound1="Rhodes", sound2="Baixo Synth", mode2="split", split=48, vol2=95),
-    "Órgão + Pad": dict(sound1="Órgão Hammond", sound2="Pad Quente", mode2="layer", vol2=55),
-    "Violão Aço": dict(sound1="Violão Aço", sound2=""),
-    "Guitarra Limpa (use com amp)": dict(sound1="Guitarra Limpa", sound2=""),
-}
+# timbres prontos (um ou dois sons + efeitos), agrupados para a lista da tela
+READY_GROUPS = (
+    ("Espaciais (worship)", {
+        "Pad Celestial (Shimmer)": dict(sound1="Pad Halo", sound2="Pad Vozes", vol2=80,
+                                        fx=dict(reverb=110, chorus=40, shimmer=65)),
+        "Céu Aberto": dict(sound1="Pad Atmosfera", sound2="Cordas Lentas", vol2=70,
+                           fx=dict(reverb=115, chorus=30, shimmer=50)),
+        "Pad Cristal": dict(sound1="Pad Cristal", sound2="Pad Halo", vol2=75,
+                            fx=dict(reverb=110, chorus=35, shimmer=55)),
+        "Coral Etéreo": dict(sound1="Coral", sound2="Pad Vidro", vol2=70,
+                             fx=dict(reverb=120, chorus=25, shimmer=45)),
+        "Piano Ambient": dict(sound1="Piano de Cauda", sound2="Pad Halo", vol2=65,
+                              fx=dict(reverb=95, chorus=15, shimmer=40)),
+        "Rhodes Ambient": dict(sound1="Rhodes com Chorus", sound2="Pad Atmosfera", vol2=60,
+                               fx=dict(reverb=100, chorus=35, shimmer=40)),
+        "Pad Sweep Worship": dict(sound1="Pad Sweep", sound2="Pad Quente", vol2=70,
+                                  fx=dict(reverb=110, chorus=40, shimmer=55)),
+    }),
+    ("Clássicos", {
+        "Piano + Pad": dict(sound1="Piano de Cauda", sound2="Pad Quente", vol2=70),
+        "Piano + Cordas": dict(sound1="Piano de Cauda", sound2="Cordas Lentas", vol2=65),
+        "Rhodes + Pad": dict(sound1="Rhodes com Chorus", sound2="Pad Halo", vol2=60),
+        "Piano Brilhante": dict(sound1="Piano Brilhante"),
+        "Pad de Louvor (AmpSim)": dict(sound1="Pad Quente (AmpSim)"),
+        "Pad + Cordas": dict(sound1="Pad Atmosfera", sound2="Cordas Lentas", vol2=75),
+        "Órgão + Pad": dict(sound1="Órgão Hammond", sound2="Pad Quente", vol2=55),
+    }),
+    ("Baixo na mão esquerda", {
+        "Baixo | Piano (divisão em C3)": dict(sound1="Piano de Cauda", sound2="Baixo Finger",
+                                              mode2="split", split=48, vol2=100),
+        "Baixo Synth | Rhodes": dict(sound1="Rhodes", sound2="Baixo Synth", mode2="split", split=48,
+                                     vol2=95),
+        "Baixo | Pad Espacial": dict(sound1="Pad Halo", sound2="Baixo Synth", mode2="split", split=48,
+                                     vol2=95, fx=dict(reverb=100, shimmer=45)),
+    }),
+    ("Violão e guitarra", {
+        "Violão Aço": dict(sound1="Violão Aço"),
+        "Guitarra Limpa (use com amp)": dict(sound1="Guitarra Limpa"),
+    }),
+)
+READY = {name: cfg for _, group in READY_GROUPS for name, cfg in group.items()}
 
-# ------------------------------------------------------------------ bateria
-DRUM_NAMES = {
-    35: "Bumbo 2", 36: "Bumbo", 37: "Aro (rim)", 38: "Caixa", 39: "Palmas", 40: "Caixa 2",
-    41: "Surdo grave", 42: "Chimbal fechado", 43: "Surdo", 44: "Chimbal pedal", 45: "Tom grave",
-    46: "Chimbal aberto", 47: "Tom médio", 48: "Tom médio-agudo", 49: "Prato de ataque",
-    50: "Tom agudo", 51: "Prato de condução", 52: "Prato china", 53: "Cúpula do ride",
-    54: "Pandeirola", 55: "Splash", 56: "Cowbell", 57: "Prato de ataque 2", 59: "Condução 2",
-    69: "Cabasa", 70: "Shaker", 75: "Claves", 81: "Triângulo",
-}
+# ------------------------------------------------------------------ sons dos pads
 KITS = (("Acústico (Room)", 128, 8), ("Power (rock)", 128, 16), ("Standard", 128, 0),
-        ("Eletrônico", 128, 24), ("808/909", 128, 25), ("Vassourinha (brush)", 128, 40),
-        ("Jazz", 128, 32))
-KIT_BY_NAME = {k[0]: k for k in KITS}
-DEFAULT_PAD_NOTES = [36, 38, 37, 39, 42, 46, 49, 51]
+        ("Eletrônico", 128, 24), ("808/909", 128, 25), ("Dance", 128, 26),
+        ("Vassourinha (brush)", 128, 40), ("Jazz", 128, 32), ("Orquestra", 128, 48))
+KIT_SHORT = {k[0]: k[0].split(" (")[0] for k in KITS}
+
+
+@dataclass(frozen=True)
+class PadSound:
+    name: str
+    cat: str
+    kind: str            # "sf2" ou "synth"
+    bank: int = 0
+    prog: int = 0
+    note: int = 36
+    melodic: bool = False   # timbre melódico: precisa de note-off programado
+    synth: int = -1
+
+
+def _kit_sounds(cat, label, note, kits):
+    out = []
+    for kit_name, bank, prog in KITS:
+        if KIT_SHORT[kit_name] in kits:
+            out.append(PadSound(f"{label} — {KIT_SHORT[kit_name]}", cat, "sf2", bank, prog, note))
+    return out
+
+
+def _synth(cat, name):
+    return PadSound(name, cat, "synth", synth=DRUM_TYPE_NAMES.index(name))
+
+
+_ALL_KITS = ("Acústico", "Power", "Standard", "Eletrônico", "808/909", "Dance", "Jazz", "Orquestra")
+PAD_SOUNDS = (
+    [_synth("Bumbos", n) for n in ("Bumbo Sub Worship", "Bumbo Boom Cinemático", "Bumbo Punch (pop)",
+                                   "Bumbo 808 Longo")]
+    + _kit_sounds("Bumbos", "Bumbo", 36, _ALL_KITS)
+    + _kit_sounds("Bumbos", "Bumbo 2", 35, ("Acústico", "Power", "Standard", "808/909"))
+    + [PadSound("Bumbo de Orquestra", "Bumbos", "sf2", 8, 116, 36, True),
+       PadSound("Taiko", "Bumbos", "sf2", 0, 116, 40, True)]
+    + [_synth("Caixas e palmas", n) for n in ("Caixa Grave Worship", "Caixa Ampla (rimshot)",
+                                              "Palmas Largas", "Palmas + Caixa Worship")]
+    + _kit_sounds("Caixas e palmas", "Caixa", 38, _ALL_KITS + ("Vassourinha",))
+    + _kit_sounds("Caixas e palmas", "Caixa 2", 40, ("Acústico", "Power", "Eletrônico", "808/909", "Vassourinha"))
+    + _kit_sounds("Caixas e palmas", "Aro (rim)", 37, ("Acústico", "Standard", "808/909"))
+    + _kit_sounds("Caixas e palmas", "Palmas", 39, ("Standard", "808/909", "Eletrônico", "Dance"))
+    + [_synth("Chimbais e pratos", n) for n in ("Chimbal Fechado (synth)", "Chimbal Aberto (synth)")]
+    + _kit_sounds("Chimbais e pratos", "Chimbal fechado", 42, ("Acústico", "Power", "Standard", "808/909", "Eletrônico", "Jazz"))
+    + _kit_sounds("Chimbais e pratos", "Chimbal aberto", 46, ("Acústico", "Power", "Standard", "808/909", "Eletrônico", "Jazz"))
+    + _kit_sounds("Chimbais e pratos", "Chimbal pedal", 44, ("Acústico", "Standard"))
+    + _kit_sounds("Chimbais e pratos", "Prato de ataque", 49, ("Acústico", "Power", "Standard", "Orquestra"))
+    + _kit_sounds("Chimbais e pratos", "Prato de ataque 2", 57, ("Acústico", "Standard"))
+    + _kit_sounds("Chimbais e pratos", "Prato de condução", 51, ("Acústico", "Jazz", "Standard"))
+    + _kit_sounds("Chimbais e pratos", "Cúpula do ride", 53, ("Acústico", "Jazz"))
+    + _kit_sounds("Chimbais e pratos", "Splash", 55, ("Acústico",))
+    + _kit_sounds("Chimbais e pratos", "China", 52, ("Acústico",))
+    + [_synth("Toms e percussão", n) for n in ("Tom Cinemático", "Tom Grave Cinemático", "Shaker Suave")]
+    + _kit_sounds("Toms e percussão", "Tom grave", 45, ("Acústico", "Power", "808/909"))
+    + _kit_sounds("Toms e percussão", "Tom médio", 47, ("Acústico", "Power", "808/909"))
+    + _kit_sounds("Toms e percussão", "Tom agudo", 50, ("Acústico", "Power", "808/909"))
+    + _kit_sounds("Toms e percussão", "Surdo", 41, ("Acústico", "Power"))
+    + _kit_sounds("Toms e percussão", "Pandeirola", 54, ("Standard",))
+    + _kit_sounds("Toms e percussão", "Shaker", 70, ("Standard",))
+    + _kit_sounds("Toms e percussão", "Cabasa", 69, ("Standard",))
+    + _kit_sounds("Toms e percussão", "Cowbell", 56, ("Standard",))
+    + _kit_sounds("Toms e percussão", "Triângulo", 81, ("Standard",))
+    + [PadSound("Tímpano", "Toms e percussão", "sf2", 0, 47, 41, True)]
+    + [_synth("Efeitos e cinemático", "Impacto (Boom + Prato)"),
+       PadSound("Swell (prato reverso)", "Efeitos e cinemático", "sf2", 0, 119, 60, True),
+       PadSound("Impacto Orquestral", "Efeitos e cinemático", "sf2", 0, 55, 60, True),
+       PadSound("Sino de Igreja", "Efeitos e cinemático", "sf2", 8, 14, 60, True),
+       PadSound("Sinos Tubulares", "Efeitos e cinemático", "sf2", 0, 14, 72, True)]
+)
+PAD_SOUND_BY_NAME = {s.name: s for s in PAD_SOUNDS}
+PAD_CATEGORIES = list(dict.fromkeys(s.cat for s in PAD_SOUNDS))
+PAD_PRESETS = {
+    "Worship Moderno": ["Bumbo Sub Worship", "Caixa Grave Worship", "Palmas + Caixa Worship",
+                        "Chimbal fechado — Power", "Chimbal aberto — Power", "Prato de ataque — Acústico",
+                        "Tom Cinemático", "Swell (prato reverso)"],
+    "Worship Acústico": ["Bumbo — Acústico", "Caixa — Acústico", "Aro (rim) — Acústico", "Shaker Suave",
+                         "Chimbal fechado — Acústico", "Chimbal aberto — Acústico",
+                         "Prato de condução — Acústico", "Pandeirola — Standard"],
+    "Cinemático / Intro": ["Bumbo Boom Cinemático", "Tom Grave Cinemático", "Tom Cinemático", "Taiko",
+                           "Impacto (Boom + Prato)", "Swell (prato reverso)", "Tímpano", "Sino de Igreja"],
+    "Balada Pop": ["Bumbo Punch (pop)", "Caixa — Power", "Palmas — 808/909", "Chimbal fechado — Standard",
+                   "Chimbal aberto — Standard", "Prato de ataque — Power", "Tom grave — Power",
+                   "Shaker — Standard"],
+    "Eletrônico Ambient": ["Bumbo 808 Longo", "Caixa — Eletrônico", "Palmas Largas", "Chimbal fechado — 808/909",
+                           "Chimbal aberto — 808/909", "Prato de ataque — Standard", "Tom grave — 808/909",
+                           "Swell (prato reverso)"],
+    "Kit Rock": ["Bumbo — Power", "Caixa — Power", "Aro (rim) — Standard", "Palmas — Standard",
+                 "Chimbal fechado — Power", "Chimbal aberto — Power", "Prato de ataque — Power",
+                 "Tom grave — Power"],
+}
+DEFAULT_PAD_PRESET = "Worship Moderno"
+
+# pad contínuo (banco B): tom de cada pad e timbre
+KEY_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+PAD_B_CHOICES = KEY_NAMES + ("Parar",)
+DEFAULT_PAD_KEYS = ["C", "D", "E", "F", "G", "A", "B", "Parar"]
+CONT_PAD_SOUNDS = ("Pad Halo", "Pad Atmosfera", "Pad Quente", "Pad Vozes", "Pad Cristal", "Pad Sweep",
+                   "Pad Vidro", "Coral", "Cordas Lentas", "Pad Orquestra")
+
 PAD_COUNT = 8
 KNOB_COUNT = 8
 BUTTONS = ("PLAY", "STOP", "REC", "BT", "ARP", "SC/CH", "KNOB-B", "PAD-B")
 
-KNOB_FUNCS = ("Nenhuma", "Volume teclas", "Volume camada 2", "Volume bateria", "Reverb", "Chorus",
-              "Brilho", "Release", "Ataque", "Master")
-DEFAULT_KNOB_FUNCS = ["Volume teclas", "Volume camada 2", "Volume bateria", "Reverb", "Chorus",
-                      "Brilho", "Release", "Master"]
-BUTTON_FUNCS = ("Nenhuma", "Timbre anterior", "Próximo timbre", "Kit anterior", "Próximo kit",
-                "Liga/desliga camada 2", "Pânico (soltar notas)")
-DEFAULT_BUTTON_FUNCS = ["Timbre anterior", "Próximo timbre", "Pânico (soltar notas)", "Nenhuma",
-                        "Kit anterior", "Próximo kit", "Liga/desliga camada 2", "Nenhuma"]
+KNOB_FUNCS = ("Nenhuma", "Volume teclas", "Volume camada 2", "Volume bateria", "Volume pad contínuo",
+              "Reverb", "Shimmer", "Reverb da bateria", "Chorus", "Brilho", "Release", "Ataque", "Master")
+DEFAULT_KNOB_FUNCS = ["Volume teclas", "Volume camada 2", "Volume bateria", "Volume pad contínuo",
+                      "Reverb", "Shimmer", "Brilho", "Master"]
+BUTTON_FUNCS = ("Nenhuma", "Timbre anterior", "Próximo timbre", "Preset de pads anterior",
+                "Próximo preset de pads", "Liga/desliga camada 2", "Parar pad contínuo",
+                "Banco de pads A/B (tela)", "Pânico (soltar notas)")
+DEFAULT_BUTTON_FUNCS = ["Timbre anterior", "Próximo timbre", "Parar pad contínuo", "Nenhuma",
+                        "Preset de pads anterior", "Próximo preset de pads", "Liga/desliga camada 2",
+                        "Banco de pads A/B (tela)"]
 
-CH_KEYS1, CH_KEYS2, CH_DRUMS = 0, 2, 9        # canais pares = grupo das teclas no FluidSynth
+CH_KEYS1, CH_KEYS2 = 0, 4                   # grupo 0
+CH_CPAD = (2, 6)                            # grupo 2 (duas para o crossfade entre tons)
+PAD_CHANNELS = (9, 1, 5, 13, 3, 7, 11, 15)  # grupos 1 e 3
+MELODIC_HOLD = 4.0                          # s até o note-off de pads melódicos
+FADE_IN, FADE_OUT = 2.5, 3.5                # s do pad contínuo
 
 
 def note_name(n):
-    return ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")[n % 12] + str(n // 12 - 1)
+    return KEY_NAMES[n % 12] + str(n // 12 - 1)
 
 
 class Instruments:
@@ -105,22 +230,34 @@ class Instruments:
         self.engine = engine
         self.sf = None
         self.error = None
-        self.keys = dict(sound1="Piano de Cauda", sound2="Pad Quente", mode2="layer", split=48,
-                         vol1=100, vol2=70, layer2_on=True)
-        self.ready = "Piano + Pad"
-        self.kit = KITS[0][0]
-        self.pad_notes = list(DEFAULT_PAD_NOTES)
-        self.levels = dict(keys=80, drums=85, reverb=45, chorus=15, bright=64, release=64, attack=0)
-        self.mapping = dict(pads=[[9, n] for n in range(36, 44)], knobs=[None] * KNOB_COUNT,
-                            buttons=[None] * len(BUTTONS))
+        self.keys = dict(sound1="Pad Halo", sound2="Pad Vozes", mode2="layer", split=48,
+                         vol1=100, vol2=80, layer2_on=True)
+        self.ready = "Pad Celestial (Shimmer)"
+        self.pad_preset = DEFAULT_PAD_PRESET
+        self.pad_sounds = list(PAD_PRESETS[DEFAULT_PAD_PRESET])
+        self.pad_keys = list(DEFAULT_PAD_KEYS)
+        self.cont_sound = "Pad Halo"
+        self.levels = dict(keys=80, drums=85, pad=70, reverb=110, chorus=40, shimmer=65,
+                           drumverb=35, bright=64, release=64, attack=0)
+        self.mapping = dict(pads=[[9, n] for n in range(36, 44)],
+                            pads_b=[[9, n] for n in range(44, 52)],
+                            knobs=[None] * KNOB_COUNT, buttons=[None] * len(BUTTONS))
         self.knob_funcs = list(DEFAULT_KNOB_FUNCS)
         self.button_funcs = list(DEFAULT_BUTTON_FUNCS)
         self.knob_values = [0] * KNOB_COUNT
+        self.screen_bank = 0                 # banco mostrado na tela (0 = A, 1 = B)
+        self.device = "M-VAVE SMK-25"         # instrumento desenhado na tela
+        self.cont_key = None                 # tom do pad contínuo ativo
+        self._cp = {}                        # canal -> [nível atual, alvo, notas]
+        self._cp_next = 0
+        self._pad_chan = [PAD_CHANNELS[0]] * PAD_COUNT
+        self._melodic_off = []               # [(instante, canal, nota)]
+        self.drum_events = deque()           # (tipo, velocidade) para a bateria sintetizada
         self._held = {}
         self.learn_steps = []
         self._learned = set()
         # ganchos da interface (chamados de qualquer thread; a UI os liga a sinais Qt)
-        self.on_pad = lambda i, vel: None
+        self.on_pad = lambda i, vel: None    # i >= 8: banco B
         self.on_key = lambda note, on: None
         self.on_knob = lambda i, val: None
         self.on_change = lambda: None
@@ -133,6 +270,8 @@ class Instruments:
         old, self.sf = self.sf, None
         if old is not None:
             old.close()
+        self._cp.clear()
+        self.cont_key = None
         if not available():
             self.error = "Timbres não instalados: rode tools\\baixar_extras.py"
             return
@@ -144,11 +283,21 @@ class Instruments:
             return
         self.apply_all()
 
+    @staticmethod
+    def _gain(level):
+        return (level / 100.0) ** 2 * 2.0
+
     def keys_gain(self):
-        return (self.levels["keys"] / 100.0) ** 2 * 2.0
+        return self._gain(self.levels["keys"])
 
     def drums_gain(self):
-        return (self.levels["drums"] / 100.0) ** 2 * 2.0
+        return self._gain(self.levels["drums"])
+
+    def pad_gain(self):
+        return self._gain(self.levels["pad"])
+
+    def shimmer_amount(self):
+        return self.levels["shimmer"] / 100.0
 
     def apply_all(self):
         self.all_off()
@@ -158,24 +307,43 @@ class Instruments:
                 self.sf.program(chan, s.bank, s.prog)
             if s is not None and s.src == "synth":
                 self.engine.synth.apply_preset(s.synth_preset)
+        self._assign_pad_channels()
         if self.sf:
-            _, bank, prog = KIT_BY_NAME.get(self.kit, KITS[0])
-            self.sf.program(CH_DRUMS, bank, prog)
             self.sf.cc(CH_KEYS1, 7, self.keys["vol1"])
             self.sf.cc(CH_KEYS2, 7, self.keys["vol2"])
-            for ch in (CH_KEYS1, CH_KEYS2, CH_DRUMS):
+            for ch in (CH_KEYS1, CH_KEYS2) + CH_CPAD:
                 self.sf.cc(ch, 91, self.levels["reverb"])
-                self.sf.cc(ch, 93, self.levels["chorus"] if ch != CH_DRUMS else 0)
+                self.sf.cc(ch, 93, self.levels["chorus"])
+            for ch in PAD_CHANNELS:
+                self.sf.cc(ch, 91, self.levels["drumverb"])
+                self.sf.cc(ch, 93, 0)
             for ch in (CH_KEYS1, CH_KEYS2):
                 self.sf.cc(ch, 74, self.levels["bright"])
                 self.sf.cc(ch, 72, self.levels["release"])
                 self.sf.cc(ch, 73, self.levels["attack"])
 
+    def _assign_pad_channels(self):
+        """Um canal MIDI por programa (kit/timbre) usado nos pads."""
+        progs = {}
+        for i, name in enumerate(self.pad_sounds):
+            s = PAD_SOUND_BY_NAME.get(name)
+            if s is None or s.kind != "sf2":
+                continue
+            key = (s.bank, s.prog)
+            if key not in progs:
+                progs[key] = PAD_CHANNELS[min(len(progs), len(PAD_CHANNELS) - 1)]
+                if self.sf:
+                    self.sf.program(progs[key], s.bank, s.prog)
+            self._pad_chan[i] = progs[key]
+
     # ------------------------------------------------------------------ timbres
     def set_ready(self, name):
         cfg = dict(sound2="", mode2="layer", split=48, vol1=100, vol2=70, layer2_on=True)
-        cfg.update(READY[name])
+        cfg.update({k: v for k, v in READY[name].items() if k != "fx"})
         self.keys.update(cfg)
+        fx = READY[name].get("fx", {})
+        self.levels.update(reverb=fx.get("reverb", 45), chorus=fx.get("chorus", 15),
+                           shimmer=fx.get("shimmer", 0))
         self.ready = name
         self.apply_all()
         self.on_change()
@@ -186,9 +354,28 @@ class Instruments:
         self.apply_all()
         self.on_change()
 
-    def set_kit(self, name):
-        self.kit = name
-        self.apply_all()
+    def set_pad_sound(self, i, name):
+        self.pad_sounds[i] = name
+        self.pad_preset = ""
+        self._assign_pad_channels()
+        self.on_change()
+
+    def set_pad_preset(self, name):
+        self.pad_preset = name
+        self.pad_sounds = list(PAD_PRESETS[name])
+        self._assign_pad_channels()
+        self.on_change()
+
+    def set_pad_key(self, i, key):
+        self.pad_keys[i] = key
+        self.on_change()
+
+    def set_cont_sound(self, name):
+        self.cont_sound = name
+        restart = self.cont_key
+        self.stop_cont_pad(immediate=True)
+        if restart:
+            self.start_cont_pad(restart)
         self.on_change()
 
     def step_ready(self, delta):
@@ -196,10 +383,10 @@ class Instruments:
         i = names.index(self.ready) if self.ready in names else -1
         self.set_ready(names[(i + delta) % len(names)])
 
-    def step_kit(self, delta):
-        names = [k[0] for k in KITS]
-        i = names.index(self.kit) if self.kit in names else 0
-        self.set_kit(names[(i + delta) % len(names)])
+    def step_pad_preset(self, delta):
+        names = list(PAD_PRESETS)
+        i = names.index(self.pad_preset) if self.pad_preset in names else -1
+        self.set_pad_preset(names[(i + delta) % len(names)])
 
     def display_text(self):
         k = self.keys
@@ -208,8 +395,11 @@ class Instruments:
         s2 = k["sound2"] if (k["sound2"] and k["layer2_on"]) else ""
         if not s2:
             return k["sound1"]
-        sep = " | " if k["mode2"] == "split" else " + "
-        return (s2 + sep + k["sound1"]) if k["mode2"] == "split" else (k["sound1"] + sep + s2)
+        return (s2 + " | " + k["sound1"]) if k["mode2"] == "split" else (k["sound1"] + " + " + s2)
+
+    def display_line2(self):
+        cp = f"Pad contínuo: {self.cont_key}" if self.cont_key else f"Pads: {self.pad_preset or 'personalizado'}"
+        return cp
 
     # ------------------------------------------------------------------ notas
     def _targets(self, note):
@@ -246,16 +436,111 @@ class Instruments:
         self.on_key(note, False)
 
     def pad_hit(self, i, vel=110):
-        if self.sf and 0 <= i < PAD_COUNT:
-            self.sf.noteon(CH_DRUMS, self.pad_notes[i], vel)
+        """i 0-7: banco A (bateria); 8-15: banco B (pad contínuo)."""
+        if i >= PAD_COUNT:
+            key = self.pad_keys[i - PAD_COUNT]
+            if key == "Parar" or key == self.cont_key:
+                self.stop_cont_pad()
+            else:
+                self.start_cont_pad(key)
+            self.on_pad(i, vel)
+            self.on_change()
+            return
+        s = PAD_SOUND_BY_NAME.get(self.pad_sounds[i])
+        if s is not None:
+            if s.kind == "synth":
+                self.drum_events.append((s.synth, vel))
+            elif self.sf:
+                ch = self._pad_chan[i]
+                self.sf.noteon(ch, s.note, vel)
+                if s.melodic:
+                    self._melodic_off.append((time.monotonic() + MELODIC_HOLD, ch, s.note))
         self.on_pad(i, vel)
+
+    def preview_pad_sound(self, name, vel=110):
+        """Toca um som de pad (usado no diálogo de escolha) sem alterar os pads."""
+        s = PAD_SOUND_BY_NAME.get(name)
+        if s is None:
+            return
+        if s.kind == "synth":
+            self.drum_events.append((s.synth, vel))
+        elif self.sf:
+            ch = PAD_CHANNELS[-1]
+            self.sf.program(ch, s.bank, s.prog)
+            self.sf.noteon(ch, s.note, vel)
+            self._melodic_off.append((time.monotonic() + MELODIC_HOLD, ch, s.note))
+
+    def end_preview(self):
+        self._assign_pad_channels()          # o canal de prévia pode ser de um pad
 
     def all_off(self):
         for note in list(self._held):
             self.key_off(note)
         if self.sf:
-            self.sf.all_off()
+            for ch in (CH_KEYS1, CH_KEYS2) + PAD_CHANNELS:
+                self.sf.all_off(ch)
         self.engine.send_event(Ly.EV_ALL_OFF)
+
+    # ------------------------------------------------------------------ pad contínuo (banco B)
+    def start_cont_pad(self, key):
+        if not self.sf:
+            return
+        s = SOUND_BY_NAME.get(self.cont_sound)
+        if s is None or s.src != "sf2":
+            return
+        root = 48 + KEY_NAMES.index(key)
+        notes = [root - 12, root, root + 7, root + 12, root + 19]
+        ch = CH_CPAD[self._cp_next % 2]
+        self._cp_next += 1
+        old = self._cp.get(ch)
+        if old:                               # canal ainda soando: corta antes de reutilizar
+            for n in old[2]:
+                self.sf.noteoff(ch, n)
+        for c, st in self._cp.items():        # o tom anterior sai em fade
+            if c != ch:
+                st[1] = 0.0
+        self.sf.program(ch, s.bank, s.prog)
+        self.sf.cc(ch, 11, 0)
+        self.sf.cc(ch, 91, 120)
+        self.sf.cc(ch, 93, 60)
+        for n in notes:
+            self.sf.noteon(ch, n, 90)
+        self._cp[ch] = [0.0, 127.0, notes]
+        self.cont_key = key
+
+    def stop_cont_pad(self, immediate=False):
+        for ch, st in list(self._cp.items()):
+            st[1] = 0.0
+            if immediate and self.sf:
+                for n in st[2]:
+                    self.sf.noteoff(ch, n)
+                del self._cp[ch]
+        self.cont_key = None
+
+    def tick(self, dt):
+        """Chamado pela interface ~30x/s: fades do pad contínuo e note-offs programados."""
+        sf = self.sf
+        if sf is None:
+            return
+        for ch, st in list(self._cp.items()):
+            cur, target, notes = st
+            if cur == target:
+                continue
+            rate = 127.0 * dt / (FADE_IN if target > cur else FADE_OUT)
+            cur = min(target, cur + rate) if target > cur else max(target, cur - rate)
+            st[0] = cur
+            sf.cc(ch, 11, int(cur))
+            if cur <= 0.0 and target <= 0.0:
+                for n in notes:
+                    sf.noteoff(ch, n)
+                del self._cp[ch]
+        if self._melodic_off:
+            now = time.monotonic()
+            due = [x for x in self._melodic_off if x[0] <= now]
+            if due:
+                self._melodic_off = [x for x in self._melodic_off if x[0] > now]
+                for _, ch, note in due:
+                    sf.noteoff(ch, note)
 
     # ------------------------------------------------------------------ knobs e botões
     def set_knob(self, i, value):
@@ -271,17 +556,26 @@ class Instruments:
             lv["keys"] = pct
         elif func == "Volume bateria":
             lv["drums"] = pct
+        elif func == "Volume pad contínuo":
+            lv["pad"] = pct
+        elif func == "Shimmer":
+            lv["shimmer"] = pct
         elif func == "Volume camada 2":
             self.keys["vol2"] = value
             if self.sf:
                 self.sf.cc(CH_KEYS2, 7, value)
         elif func == "Master":
             self.engine.master = (value / 127) ** 2 * 2.0
+        elif func == "Reverb da bateria":
+            lv["drumverb"] = value
+            if self.sf:
+                for ch in PAD_CHANNELS:
+                    self.sf.cc(ch, 91, value)
         elif self.sf and func in ("Reverb", "Chorus", "Brilho", "Release", "Ataque"):
             key, cc = {"Reverb": ("reverb", 91), "Chorus": ("chorus", 93), "Brilho": ("bright", 74),
                        "Release": ("release", 72), "Ataque": ("attack", 73)}[func]
             lv[key] = value
-            chans = (CH_KEYS1, CH_KEYS2, CH_DRUMS) if cc == 91 else (CH_KEYS1, CH_KEYS2)
+            chans = (CH_KEYS1, CH_KEYS2) + (CH_CPAD if cc in (91, 93) else ())
             for ch in chans:
                 self.sf.cc(ch, cc, value)
 
@@ -291,17 +585,25 @@ class Instruments:
             self.step_ready(-1)
         elif func == "Próximo timbre":
             self.step_ready(1)
-        elif func == "Kit anterior":
-            self.step_kit(-1)
-        elif func == "Próximo kit":
-            self.step_kit(1)
+        elif func == "Preset de pads anterior":
+            self.step_pad_preset(-1)
+        elif func == "Próximo preset de pads":
+            self.step_pad_preset(1)
         elif func == "Liga/desliga camada 2":
             self.keys["layer2_on"] = not self.keys["layer2_on"]
             self.ready = ""
             self.all_off()
             self.on_change()
+        elif func == "Parar pad contínuo":
+            self.stop_cont_pad()
+            self.on_change()
+        elif func == "Banco de pads A/B (tela)":
+            self.screen_bank = 1 - self.screen_bank
+            self.on_change()
         elif func.startswith("Pânico"):
             self.all_off()
+            self.stop_cont_pad(immediate=True)
+            self.on_change()
 
     # ------------------------------------------------------------------ MIDI (thread do winmm)
     def handle_midi(self, status, d1, d2):
@@ -312,11 +614,15 @@ class Instruments:
         m = self.mapping
         if kind in (0x80, 0x90):
             on = kind == 0x90 and d2 > 0
-            for i, pad in enumerate(m["pads"]):
-                if pad == [ch, d1]:
-                    if on:
-                        self.pad_hit(i, d2)
-                    return
+            for bank, key in ((0, "pads"), (1, "pads_b")):
+                for i, pad in enumerate(m[key]):
+                    if pad == [ch, d1]:
+                        if on:
+                            if self.screen_bank != bank:
+                                self.screen_bank = bank
+                                self.on_change()
+                            self.pad_hit(i + bank * PAD_COUNT, d2)
+                        return
             for i, b in enumerate(m["buttons"]):
                 if b == ["note", ch, d1]:
                     if on:
@@ -354,25 +660,27 @@ class Instruments:
                     self.sf.pitch_bend(c, val)
 
     # ------------------------------------------------------------------ assistente de mapeamento
-    def start_learning(self, what=("pads", "knobs", "buttons")):
+    def start_learning(self, what=("pads", "pads_b", "knobs", "buttons")):
         steps = []
-        if "pads" in what:
-            steps += [("pads", i) for i in range(PAD_COUNT)]
-        if "knobs" in what:
-            steps += [("knobs", i) for i in range(KNOB_COUNT)]
-        if "buttons" in what:
-            steps += [("buttons", i) for i in range(len(BUTTONS))]
+        for kind, count in (("pads", PAD_COUNT), ("pads_b", PAD_COUNT), ("knobs", KNOB_COUNT),
+                            ("buttons", len(BUTTONS))):
+            if kind in what:
+                steps += [(kind, i) for i in range(count)]
         self._learned = set()
         self.learn_steps = steps
         self.on_learn()
 
     def skip_learning_step(self):
         if self.learn_steps:
+            kind = self.learn_steps[0][0]
             self.learn_steps.pop(0)
+            if kind == "pads_b" and self.learn_steps and self.learn_steps[0][0] != "pads_b":
+                self.screen_bank = 0
             self.on_learn()
 
     def stop_learning(self):
         self.learn_steps = []
+        self.screen_bank = 0
         self.on_learn()
 
     def learning_prompt(self):
@@ -381,6 +689,9 @@ class Instruments:
         kind, i = self.learn_steps[0]
         if kind == "pads":
             return f"Toque o PAD {i + 1} no controlador"
+        if kind == "pads_b":
+            pre = "Aperte PAD-B no controlador e " if i == 0 else ""
+            return f"{pre}toque o PAD {i + 1} (banco B)"
         if kind == "knobs":
             return f"Gire o KNOB {i + 1} no controlador"
         return f"Aperte o botão {BUTTONS[i]} no controlador"
@@ -395,25 +706,34 @@ class Instruments:
             return
         if key in self._learned:          # resto do movimento de um knob já aprendido
             return
-        if step == "pads" and key[0] == "note":
-            self.mapping["pads"][i] = [ch, d1]
+        if step in ("pads", "pads_b") and key[0] == "note":
+            self.mapping[step][i] = [ch, d1]
         elif step == "knobs" and key[0] == "cc":
             self.mapping["knobs"][i] = [ch, d1]
         elif step == "buttons" and (key[0] == "note" or d2 > 0):
             self.mapping["buttons"][i] = list(key)
+        elif step == "pads_b" and key[0] == "cc":
+            return                        # o próprio botão PAD-B: ignora
         else:
             return
         self._learned.add(key)
         self.learn_steps.pop(0)
         if step == "pads":
-            self.pad_hit(i, d2 if key[0] == "note" else 100)
+            self.pad_hit(i, d2)
+        if self.learn_steps and self.learn_steps[0][0] == "pads_b":
+            self.screen_bank = 1
+        elif step == "pads_b":
+            self.screen_bank = 0
         self.on_learn()
 
     # ------------------------------------------------------------------ persistência
     def get_state(self):
-        return dict(keys=dict(self.keys), ready=self.ready, kit=self.kit, pad_notes=list(self.pad_notes),
-                    levels=dict(self.levels), mapping={k: list(v) for k, v in self.mapping.items()},
-                    knob_funcs=list(self.knob_funcs), button_funcs=list(self.button_funcs))
+        return dict(keys=dict(self.keys), ready=self.ready, pad_preset=self.pad_preset,
+                    pad_sounds=list(self.pad_sounds), pad_keys=list(self.pad_keys),
+                    cont_sound=self.cont_sound, levels=dict(self.levels),
+                    mapping={k: list(v) for k, v in self.mapping.items()},
+                    knob_funcs=list(self.knob_funcs), button_funcs=list(self.button_funcs),
+                    device=self.device)
 
     def load_state(self, st):
         if not st:
@@ -423,12 +743,21 @@ class Instruments:
             if self.keys[k] and self.keys[k] not in SOUND_BY_NAME:
                 self.keys[k] = "Piano de Cauda" if k == "sound1" else ""
         self.ready = st.get("ready", "") if st.get("ready", "") in READY else ""
-        if st.get("kit") in KIT_BY_NAME:
-            self.kit = st["kit"]
-        if len(st.get("pad_notes", [])) == PAD_COUNT:
-            self.pad_notes = list(st["pad_notes"])
+        sounds = st.get("pad_sounds")
+        if isinstance(sounds, list) and len(sounds) == PAD_COUNT:
+            self.pad_sounds = [s if s in PAD_SOUND_BY_NAME else PAD_PRESETS[DEFAULT_PAD_PRESET][i]
+                               for i, s in enumerate(sounds)]
+            self.pad_preset = st.get("pad_preset", "") if st.get("pad_preset") in PAD_PRESETS else ""
+        keys = st.get("pad_keys")
+        if isinstance(keys, list) and len(keys) == PAD_COUNT and all(k in PAD_B_CHOICES for k in keys):
+            self.pad_keys = list(keys)
+        if isinstance(st.get("device"), str):
+            self.device = st["device"]
+        if st.get("cont_sound") in CONT_PAD_SOUNDS:
+            self.cont_sound = st["cont_sound"]
         self.levels.update({k: v for k, v in st.get("levels", {}).items() if k in self.levels})
-        for k, n in (("pads", PAD_COUNT), ("knobs", KNOB_COUNT), ("buttons", len(BUTTONS))):
+        for k, n in (("pads", PAD_COUNT), ("pads_b", PAD_COUNT), ("knobs", KNOB_COUNT),
+                     ("buttons", len(BUTTONS))):
             v = st.get("mapping", {}).get(k)
             if isinstance(v, list) and len(v) == n:
                 self.mapping[k] = v

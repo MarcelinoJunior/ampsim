@@ -1,16 +1,17 @@
-"""Aba Teclas & Pads: controlador na tela, timbres, kit dos pads e mapeamento do controlador."""
+"""Aba Teclas & Pads: controlador na tela, timbres, pads e mapeamento do controlador."""
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QFont, QStandardItemModel
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget, QPushButton,
-    QSizePolicy, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSizePolicy, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..instruments import (
-    BUTTON_FUNCS, BUTTONS, CATEGORIES, DRUM_NAMES, KITS, KNOB_COUNT, KNOB_FUNCS, PAD_COUNT, READY,
-    SOUNDS, note_name,
+    BUTTON_FUNCS, BUTTONS, CATEGORIES, CONT_PAD_SOUNDS, KNOB_COUNT, KNOB_FUNCS, PAD_B_CHOICES,
+    PAD_CATEGORIES, PAD_COUNT, PAD_PRESETS, PAD_SOUNDS, READY_GROUPS, SOUNDS, note_name,
 )
-from .controller import ControllerWidget, pad_label
+from .controller import MODELS, TRADEMARKS, ControllerWidget
 
 SPLIT_NOTES = list(range(36, 73))
 
@@ -47,6 +48,79 @@ def _sound_combo():
     return c
 
 
+class PadSoundDialog(QDialog):
+    """Escolha do som de um pad: clique toca a prévia, duplo-clique (ou OK) escolhe."""
+
+    def __init__(self, inst, pad_index, parent=None):
+        super().__init__(parent)
+        self.inst = inst
+        self.setWindowTitle(f"Som do Pad {pad_index + 1}")
+        self.resize(430, 560)
+        lay = QVBoxLayout(self)
+        tip = QLabel("Clique para ouvir · duplo-clique ou OK para escolher")
+        tip.setObjectName("small")
+        lay.addWidget(tip)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Buscar (ex.: bumbo, caixa, 808, chimbal)…")
+        self.search.textChanged.connect(self._filter)
+        lay.addWidget(self.search)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        current = inst.pad_sounds[pad_index]
+        self._items = []
+        for cat in PAD_CATEGORIES:
+            top = QTreeWidgetItem([cat])
+            top.setFlags(Qt.ItemIsEnabled)
+            f = top.font(0)
+            f.setBold(True)
+            top.setFont(0, f)
+            self.tree.addTopLevelItem(top)
+            for s in PAD_SOUNDS:
+                if s.cat != cat:
+                    continue
+                label = s.name + ("   ✦ worship" if s.kind == "synth" else "")
+                it = QTreeWidgetItem([label])
+                it.setData(0, Qt.UserRole, s.name)
+                top.addChild(it)
+                self._items.append(it)
+                if s.name == current:
+                    self.tree.setCurrentItem(it)
+            top.setExpanded(cat in ("Bumbos", "Caixas e palmas") or
+                            any(s.name == current and s.cat == cat for s in PAD_SOUNDS))
+        self.tree.itemClicked.connect(self._preview)
+        self.tree.itemDoubleClicked.connect(lambda it, _: self._accept_item(it))
+        lay.addWidget(self.tree, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(lambda: self._accept_item(self.tree.currentItem()))
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+        self.choice = None
+
+    def _filter(self, text):
+        text = text.lower().strip()
+        for it in self._items:
+            it.setHidden(bool(text) and text not in it.text(0).lower())
+        for i in range(self.tree.topLevelItemCount()):
+            top = self.tree.topLevelItem(i)
+            visible = any(not top.child(j).isHidden() for j in range(top.childCount()))
+            top.setHidden(not visible)
+            top.setExpanded(bool(text) or top.isExpanded())
+
+    def _preview(self, it, _col=0):
+        name = it.data(0, Qt.UserRole)
+        if name:
+            self.inst.preview_pad_sound(name)
+
+    def _accept_item(self, it):
+        if it is not None and it.data(0, Qt.UserRole):
+            self.choice = it.data(0, Qt.UserRole)
+            self.accept()
+
+    def done(self, r):
+        self.inst.end_preview()
+        super().done(r)
+
+
 class KeysView(QWidget):
     def __init__(self, engine, accent):
         super().__init__()
@@ -59,8 +133,16 @@ class KeysView(QWidget):
 
         top = QHBoxLayout()
         top.setSpacing(6)
+        left = QVBoxLayout()
+        left.setSpacing(0)
         self.ctrl = ControllerWidget()
-        top.addWidget(self.ctrl, 1)
+        self.ctrl.set_model(self.inst.device)
+        left.addWidget(self.ctrl, 1)
+        tm = QLabel(TRADEMARKS)
+        tm.setObjectName("small")
+        tm.setAlignment(Qt.AlignCenter)
+        left.addWidget(tm)
+        top.addLayout(left, 1)
         top.addWidget(self._build_sounds())
         root.addLayout(top, 1)
         root.addWidget(self._build_mapping())
@@ -71,6 +153,7 @@ class KeysView(QWidget):
         c.keyOff.connect(lambda n: self.inst.key_off(n))
         c.knobMoved.connect(lambda i, v: self.inst.set_knob(i, v))
         c.buttonPressed.connect(lambda i: self.inst.button(i))
+        c.contextRequested.connect(self._context)
 
     # ------------------------------------------------------------------ painel de timbres
     def _build_sounds(self):
@@ -80,16 +163,33 @@ class KeysView(QWidget):
         lay = QVBoxLayout(box)
         lay.setContentsMargins(10, 6, 10, 8)
         lay.setSpacing(4)
-        t = QLabel("Timbres prontos (louvor)")
+        dev = QHBoxLayout()
+        dev.addWidget(QLabel("Instrumento na tela:"))
+        self.device = _combo(list(MODELS))
+        self.device.activated.connect(self._device_changed)
+        dev.addWidget(self.device, 1)
+        lay.addLayout(dev)
+        t = QLabel("Timbres prontos")
         t.setObjectName("fxtitle")
         lay.addWidget(t)
         self.ready_list = QListWidget()
         self.ready_list.setFocusPolicy(Qt.NoFocus)
         f = QFont(self.ready_list.font())
-        f.setPointSizeF(10)
+        f.setPointSizeF(9.5)
         self.ready_list.setFont(f)
-        self.ready_list.addItems(list(READY))
-        self.ready_list.itemClicked.connect(lambda it: self.inst.set_ready(it.text()))
+        for group, items in READY_GROUPS:
+            head = QListWidgetItem(group.upper())
+            head.setFlags(Qt.NoItemFlags)
+            hf = QFont(f)
+            hf.setBold(True)
+            hf.setPointSizeF(8)
+            head.setFont(hf)
+            self.ready_list.addItem(head)
+            for name in items:
+                it = QListWidgetItem("   " + name)
+                it.setData(Qt.UserRole, name)
+                self.ready_list.addItem(it)
+        self.ready_list.itemClicked.connect(self._ready_clicked)
         lay.addWidget(self.ready_list, 1)
 
         g = QGridLayout()
@@ -115,10 +215,16 @@ class KeysView(QWidget):
         self.split = _combo([f"abaixo de {note_name(n)}" for n in SPLIT_NOTES], width=110)
         self.split.activated.connect(self._split_changed)
         g.addWidget(self.split, 2, 2)
-        g.addWidget(QLabel("Kit dos pads:"), 3, 0)
-        self.kit = _combo([k[0] for k in KITS])
-        self.kit.activated.connect(lambda _: self.inst.set_kit(self.kit.currentText()))
-        g.addWidget(self.kit, 3, 1, 1, 2)
+        g.addWidget(QLabel("Pads (A):"), 3, 0)
+        self.pad_preset = _combo(list(PAD_PRESETS) + ["(personalizado)"])
+        self.pad_preset.setToolTip("Conjunto de sons dos 8 pads do banco A")
+        self.pad_preset.activated.connect(self._pad_preset_changed)
+        g.addWidget(self.pad_preset, 3, 1, 1, 2)
+        g.addWidget(QLabel("Pad contínuo:"), 4, 0)
+        self.cont_sound = _combo(CONT_PAD_SOUNDS)
+        self.cont_sound.setToolTip("Timbre dos pads do banco B (pad contínuo no tom escolhido)")
+        self.cont_sound.activated.connect(lambda _: self.inst.set_cont_sound(self.cont_sound.currentText()))
+        g.addWidget(self.cont_sound, 4, 1, 1, 2)
         g.setColumnStretch(1, 1)
         lay.addLayout(g)
         self.sound_status = QLabel("")
@@ -126,6 +232,15 @@ class KeysView(QWidget):
         self.sound_status.setWordWrap(True)
         lay.addWidget(self.sound_status)
         return box
+
+    def _device_changed(self, _):
+        self.inst.device = self.device.currentText()
+        self.ctrl.set_model(self.inst.device)
+
+    def _ready_clicked(self, it):
+        name = it.data(Qt.UserRole)
+        if name:
+            self.inst.set_ready(name)
 
     def _sound_changed(self, slot, combo):
         name = combo.currentData()
@@ -154,39 +269,56 @@ class KeysView(QWidget):
         self.inst.all_off()
         self.refresh()
 
+    def _pad_preset_changed(self, i):
+        names = list(PAD_PRESETS)
+        if i < len(names):
+            self.inst.set_pad_preset(names[i])
+
     # ------------------------------------------------------------------ mapeamento
     def _build_mapping(self):
         box = QFrame()
         box.setObjectName("effect")
         box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         g = QGridLayout(box)
-        g.setContentsMargins(10, 6, 10, 6)
+        g.setContentsMargins(10, 5, 10, 5)
         g.setHorizontalSpacing(4)
-        g.setVerticalSpacing(3)
-        drum_items = [f"{name} ({n})" for n, name in sorted(DRUM_NAMES.items())]
-        self._drum_notes = sorted(DRUM_NAMES)
-        self.pad_combos, self.knob_combos, self.button_combos = [], [], []
-        for row, (label, count, items, store) in enumerate((
-                ("Pads", PAD_COUNT, drum_items, self.pad_combos),
-                ("Knobs", KNOB_COUNT, KNOB_FUNCS, self.knob_combos),
-                ("Botões", len(BUTTONS), BUTTON_FUNCS, self.button_combos))):
+        g.setVerticalSpacing(2)
+        self.pad_buttons, self.padb_combos, self.knob_combos, self.button_combos = [], [], [], []
+        rows = (("Pads A", self.pad_buttons), ("Pads B", self.padb_combos),
+                ("Knobs", self.knob_combos), ("Botões", self.button_combos))
+        for row, (label, store) in enumerate(rows):
             lab = QLabel(label + ":")
             lab.setObjectName("fxtitle")
             g.addWidget(lab, row, 0)
-            for i in range(count):
-                c = _combo(items)
-                c.setMinimumWidth(96)
-                prefix = {"Pads": f"Pad {i + 1}", "Knobs": f"Knob {i + 1}", "Botões": BUTTONS[i]}[label]
-                c.setToolTip(prefix)
-                c.activated.connect(lambda idx, kind=label, i=i: self._mapping_changed(kind, i, idx))
-                store.append(c)
-                g.addWidget(c, row, i + 1)
+            for i in range(PAD_COUNT if label.startswith("Pads") else
+                           (KNOB_COUNT if label == "Knobs" else len(BUTTONS))):
+                if label == "Pads A":
+                    w = QPushButton("")
+                    w.setFocusPolicy(Qt.NoFocus)
+                    w.setToolTip(f"Pad {i + 1}: clique para escolher o som")
+                    w.clicked.connect(lambda _, i=i: self._choose_pad_sound(i))
+                elif label == "Pads B":
+                    w = _combo(PAD_B_CHOICES)
+                    w.setToolTip(f"Pad {i + 1} do banco B: tom do pad contínuo")
+                    w.activated.connect(lambda idx, i=i: self.inst.set_pad_key(i, PAD_B_CHOICES[idx]))
+                elif label == "Knobs":
+                    w = _combo(KNOB_FUNCS)
+                    w.setToolTip(f"Knob {i + 1}")
+                    w.activated.connect(lambda idx, i=i: self._set_knob_func(i, KNOB_FUNCS[idx]))
+                else:
+                    w = _combo(BUTTON_FUNCS)
+                    w.setToolTip(BUTTONS[i])
+                    w.activated.connect(lambda idx, i=i: self._set_button_func(i, BUTTON_FUNCS[idx]))
+                w.setMinimumWidth(96)
+                store.append(w)
+                g.addWidget(w, row, i + 1)
         side = QVBoxLayout()
+        side.setSpacing(2)
         self.learn_btn = QPushButton("Mapear meu controlador…")
         self.learn_btn.setObjectName("power")
         self.learn_btn.setFocusPolicy(Qt.NoFocus)
-        self.learn_btn.setToolTip("Assistente: toque cada pad, gire cada knob e aperte cada botão\n"
-                                  "quando o AmpSim pedir. Assim ele aprende o que o seu controlador envia.")
+        self.learn_btn.setToolTip("Assistente: toque cada pad (bancos A e B), gire cada knob e aperte\n"
+                                  "cada botão quando o AmpSim pedir. Assim ele aprende o seu controlador.")
         self.learn_btn.clicked.connect(self._learn_clicked)
         side.addWidget(self.learn_btn)
         row = QHBoxLayout()
@@ -203,22 +335,78 @@ class KeysView(QWidget):
         self.learn_label.setWordWrap(True)
         self.learn_label.setStyleSheet("color: #ffd166; font-weight: 600;")
         side.addWidget(self.learn_label)
-        g.addLayout(side, 0, PAD_COUNT + 1, 3, 1)
+        g.addLayout(side, 0, PAD_COUNT + 1, 4, 1)
         return box
 
-    def _mapping_changed(self, kind, i, idx):
-        if kind == "Pads":
-            self.inst.pad_notes[i] = self._drum_notes[idx]
-        elif kind == "Knobs":
-            self.inst.knob_funcs[i] = KNOB_FUNCS[idx]
-        else:
-            self.inst.button_funcs[i] = BUTTON_FUNCS[idx]
+    def _set_knob_func(self, i, func):
+        self.inst.knob_funcs[i] = func
+        self.refresh()
+
+    def _set_button_func(self, i, func):
+        self.inst.button_funcs[i] = func
+        self.refresh()
+
+    def _choose_pad_sound(self, i):
+        dlg = PadSoundDialog(self.inst, i, self)
+        if dlg.exec() and dlg.choice:
+            self.inst.set_pad_sound(i, dlg.choice)
+        self.refresh()
+
+    # ------------------------------------------------------------------ botão direito no controlador
+    def _context(self, kind, i, pos):
+        menu = QMenu(self)
+        if kind == "pad" and i < PAD_COUNT:
+            self._choose_pad_sound(i)
+            return
+        if kind == "pad":
+            j = i - PAD_COUNT
+            menu.addSection(f"Pad {j + 1} (banco B): tom do pad contínuo")
+            for key in PAD_B_CHOICES:
+                a = menu.addAction(key)
+                a.setCheckable(True)
+                a.setChecked(self.inst.pad_keys[j] == key)
+                a.triggered.connect(lambda _, key=key: self.inst.set_pad_key(j, key))
+            menu.addSeparator()
+            sub = menu.addMenu("Timbre do pad contínuo")
+            for name in CONT_PAD_SOUNDS:
+                a = sub.addAction(name)
+                a.setCheckable(True)
+                a.setChecked(self.inst.cont_sound == name)
+                a.triggered.connect(lambda _, n=name: self.inst.set_cont_sound(n))
+        elif kind == "knob":
+            menu.addSection(f"Knob {i + 1}: função")
+            for func in KNOB_FUNCS:
+                a = menu.addAction(func)
+                a.setCheckable(True)
+                a.setChecked(self.inst.knob_funcs[i] == func)
+                a.triggered.connect(lambda _, f=func: self._set_knob_func(i, f))
+        elif kind == "button":
+            menu.addSection(f"Botão {BUTTONS[i]}: função")
+            for func in BUTTON_FUNCS:
+                a = menu.addAction(func)
+                a.setCheckable(True)
+                a.setChecked(self.inst.button_funcs[i] == func)
+                a.triggered.connect(lambda _, f=func: self._set_button_func(i, f))
+        elif kind == "key":
+            menu.addSection("Timbre das teclas")
+            for group, items in READY_GROUPS:
+                sub = menu.addMenu(group)
+                for name in items:
+                    a = sub.addAction(name)
+                    a.triggered.connect(lambda _, n=name: self.inst.set_ready(n))
+            menu.addSeparator()
+            for cat in CATEGORIES:
+                sub = menu.addMenu(cat)
+                for s in SOUNDS:
+                    if s.cat == cat:
+                        a = sub.addAction(s.name)
+                        a.triggered.connect(lambda _, n=s.name: self.inst.set_sound(1, n))
+        menu.exec(pos)
         self.refresh()
 
     def _learn_clicked(self):
-        if self.engine.instruments.learn_steps:
-            return
-        self.inst.start_learning()
+        if not self.inst.learn_steps:
+            self.inst.start_learning()
 
     def on_learn(self):
         steps = self.inst.learn_steps
@@ -232,8 +420,8 @@ class KeysView(QWidget):
         m = self.inst.mapping
         knobs = sum(1 for k in m["knobs"] if k)
         btns = sum(1 for b in m["buttons"] if b)
-        pads = ", ".join(str(p[1]) for p in m["pads"][:2])
-        return f"Pads: notas {pads}… · knobs mapeados: {knobs}/8 · botões: {btns}/8"
+        return (f"Pads A: notas {m['pads'][0][1]}… · B: {m['pads_b'][0][1]}… · "
+                f"knobs {knobs}/8 · botões {btns}/8")
 
     # ------------------------------------------------------------------ atualização
     def refresh(self):
@@ -241,11 +429,11 @@ class KeysView(QWidget):
         k = inst.keys
         self._updating = True
         try:
-            items = self.ready_list.findItems(inst.ready, Qt.MatchExactly) if inst.ready else []
-            if items:
-                self.ready_list.setCurrentItem(items[0])
-            else:
-                self.ready_list.clearSelection()
+            self.ready_list.clearSelection()
+            for row in range(self.ready_list.count()):
+                it = self.ready_list.item(row)
+                if inst.ready and it.data(Qt.UserRole) == inst.ready:
+                    self.ready_list.setCurrentItem(it)
             for combo, key in ((self.sound1, "sound1"), (self.sound2, "sound2")):
                 i = combo.findData(k[key]) if k[key] else -1
                 if i >= 0:
@@ -258,22 +446,32 @@ class KeysView(QWidget):
             self.split.setVisible(k["mode2"] == "split")
             if k["split"] in SPLIT_NOTES:
                 self.split.setCurrentIndex(SPLIT_NOTES.index(k["split"]))
-            self.kit.setCurrentText(inst.kit)
-            for i, c in enumerate(self.pad_combos):
-                note = inst.pad_notes[i]
-                if note in self._drum_notes:
-                    c.setCurrentIndex(self._drum_notes.index(note))
+            self.pad_preset.setCurrentText(inst.pad_preset or "(personalizado)")
+            self.device.setCurrentText(inst.device)
+            self.cont_sound.setCurrentText(inst.cont_sound)
+            for i, b in enumerate(self.pad_buttons):
+                b.setText(_short(inst.pad_sounds[i], 16))
+                b.setToolTip(f"Pad {i + 1}: {inst.pad_sounds[i]}\nClique para trocar o som")
+            for i, c in enumerate(self.padb_combos):
+                c.setCurrentText(inst.pad_keys[i])
             for i, c in enumerate(self.knob_combos):
                 c.setCurrentText(inst.knob_funcs[i])
             for i, c in enumerate(self.button_combos):
                 c.setCurrentText(inst.button_funcs[i])
         finally:
             self._updating = False
-        self.sound_status.setText(inst.error or "")
+        self.sound_status.setText(inst.error or "Botão direito no controlador: escolher sons e funções.")
         c = self.ctrl
-        c.display = (inst.display_text(), f"Kit: {inst.kit}")
-        c.pad_labels = [pad_label(n) for n in inst.pad_notes]
+        c.display = (inst.display_text(), inst.display_line2())
+        c.pad_labels = list(inst.pad_sounds)
+        c.pad_keys_b = list(inst.pad_keys)
+        c.bank = inst.screen_bank
+        c.cont_key = inst.cont_key
         c.knob_labels = list(inst.knob_funcs)
         c.button_labels = list(inst.button_funcs)
         self.on_learn()
         c.update()
+
+
+def _short(text, n):
+    return text if len(text) <= n else text[: n - 1] + "…"

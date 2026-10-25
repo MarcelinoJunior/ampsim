@@ -18,7 +18,7 @@ from .panels import TrackPage
 from .widgets import Knob, Meter, PianoWidget
 
 ACCENTS = {"guitar": "#e8a33d", "bass": "#4fb3a9", "pads": "#9b7bff"}
-TITLES = {"guitar": "Guitarra", "bass": "Baixo", "pads": "Teclas && Pads"}
+TITLES = {"guitar": "Guitarra", "bass": "Baixo", "pads": "Pad/Piano"}
 NO_MIDI = "(nenhum)"
 
 
@@ -26,7 +26,7 @@ class MainWindow(QMainWindow):
     def __init__(self, engine):
         super().__init__()
         self.engine = engine
-        self.setWindowTitle("AmpSim — Guitarra · Baixo · Teclas & Pads")
+        self.setWindowTitle("AmpSim — Guitarra · Baixo · Pad/Piano")
         self.resize(1400, 900)
 
         central = QWidget()
@@ -168,7 +168,7 @@ class MainWindow(QMainWindow):
         self.pages["pads"].keys_view.ctrl.set_key(note, on)
 
     def _tab_changed(self, index):
-        # na aba Teclas & Pads o controlador desenhado já tem teclado: esconde o piano de baixo
+        # na aba Pad/Piano o instrumento desenhado já tem teclado: esconde o piano de baixo
         self.piano.setVisible(self.tabs.widget(index) is not self.pages["pads"])
         lay = self.kbd_box.layout()
         lay.invalidate()
@@ -281,6 +281,7 @@ class MainWindow(QMainWindow):
             self.pages[name].input_label.setText(txt)
 
     def _tick(self):
+        self.engine.instruments.tick(0.033)      # fades do pad contínuo, note-offs programados
         peak = max(page.update_meters() for page in self.pages.values())
         self.m_master.push(peak * self.engine.master)
         if self.engine.running:

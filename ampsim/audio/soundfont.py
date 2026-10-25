@@ -3,9 +3,11 @@
 O FluidSynth é usado só como "motor de vozes": nada de driver de áudio próprio. O AmpSim
 chama fluid_synth_process() dentro do callback de áudio, então não há latência extra.
 
-Saídas separadas por canal MIDI (audio-groups = 2):
-    canais pares (teclas: 0 e 2)  -> grupo 0  (podem passar pelo amplificador)
-    canal 9 (bateria dos pads)    -> grupo 1  (sempre direto, em estéreo)
+Saídas separadas por canal MIDI (audio-groups = 4, grupo = canal % 4):
+    grupo 0: canais 0, 4         teclas (podem passar pelo amplificador)
+    grupo 1: canais 1, 5, 9, 13  sons dos pads (sempre direto, em estéreo)
+    grupo 2: canais 2, 6         pad contínuo (banco B)
+    grupo 3: canais 3, 7, 11, 15 sons dos pads (continuação)
 """
 import ctypes as C
 import glob
@@ -16,8 +18,9 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SF2_DEFAULT = os.path.join(ROOT, "third_party", "soundfonts", "GeneralUser-GS.sf2")
 DRUM_CHANNEL = 9
-N_OUT = 4                 # 2 grupos estéreo
-N_FX = 8                  # 2 grupos x (reverb, chorus) x estéreo
+N_GROUPS = 4
+N_OUT = 2 * N_GROUPS      # grupos estéreo
+N_FX = 4 * N_GROUPS       # grupos x (reverb, chorus) x estéreo
 
 
 def _find_dll():
@@ -46,8 +49,8 @@ class SoundFontEngine:
         self.settings = lib.new_fluid_settings()
         for key, val in (("synth.sample-rate", float(fs)), ("synth.gain", 0.55)):
             lib.fluid_settings_setnum(self.settings, key.encode(), val)
-        for key, val in (("synth.audio-channels", 2), ("synth.audio-groups", 2),
-                         ("synth.effects-groups", 2), ("synth.polyphony", 192),
+        for key, val in (("synth.audio-channels", N_GROUPS), ("synth.audio-groups", N_GROUPS),
+                         ("synth.effects-groups", N_GROUPS), ("synth.polyphony", 256),
                          ("synth.cpu-cores", 1), ("synth.reverb.active", 1),
                          ("synth.chorus.active", 1)):
             lib.fluid_settings_setint(self.settings, key.encode(), val)
@@ -140,7 +143,8 @@ class SoundFontEngine:
 
     # ------------------------------------------------------------------ áudio (thread de áudio)
     def render(self, n):
-        """Gera n amostras em self.buf: linhas 0-1 teclas (L,R), 2-3 bateria, 4-11 efeitos."""
+        """Gera n amostras em self.buf: linhas 2g, 2g+1 = grupo g seco (L, R);
+        8 + 4g .. 8 + 4g + 3 = reverb L, R e chorus L, R do grupo g."""
         self.buf[:, :n] = 0.0
         self.lib.fluid_synth_process(self.synth, n, N_FX, C.cast(self._fx_ptrs, C.c_void_p),
                                      N_OUT, C.cast(self._out_ptrs, C.c_void_p))

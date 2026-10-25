@@ -11,6 +11,7 @@ from ..dsp.kernels import (
 )
 from ..dsp.synth import SynthDSP
 from ..dsp.track import TrackDSP
+from ..dsp.worship import DrumSynth, ShimmerDSP, render_drums
 from ..instruments import Instruments
 
 TRACKS = ("guitar", "bass", "pads")
@@ -35,6 +36,10 @@ class AudioEngine:
         self._ev = np.zeros((256, 3), dtype=np.int32)
         self.sf_peak = 0.0
         self.out_offset = 0
+        self._shim_send = np.zeros(Ly.MAX_BLOCK)
+        self._drum_send = np.zeros(Ly.MAX_BLOCK)
+        self._drum_ev = np.zeros((64, 2), dtype=np.int64)
+        self._make_worship()
         self.instruments = Instruments(self)
         self.instruments.start(self.fs, Ly.MAX_BLOCK)
 
@@ -131,11 +136,17 @@ class AudioEngine:
             s.load_state(self.synth.get_state())
             self.synth = s
             self.instruments.start(self.fs, Ly.MAX_BLOCK)
+            self._make_worship()
         else:
             for t in self.tracks.values():
                 t.reset_dsp_state()
             self.synth.reset_voices()
         self._events.clear()
+
+    def _make_worship(self):
+        self.drums = DrumSynth(self.fs)
+        self.shimmer = ShimmerDSP(self.fs, room=0.93, damp=0.25)
+        self.drumverb = ShimmerDSP(self.fs, room=0.84, damp=0.35)
 
     # ------------------------------------------------------------------ callbacks (tempo real)
     def _drain_events(self):
@@ -166,13 +177,29 @@ class AudioEngine:
         t = tracks["pads"]
         inst = self.instruments
         sf = inst.sf
+        shim = self._shim_send
+        shimmer = inst.shimmer_amount()
         if sf is not None:
             sf.render(frames)
             to_chain = t.D[Ly.T_AMP] > 0.5 and t.D[Ly.T_ON] > 0.5
-            pk = mix_soundfont(sf.buf, frames, mix, self._synth_out, to_chain, inst.keys_gain(),
-                               inst.drums_gain())
+            pk = mix_soundfont(sf.buf, frames, mix, self._synth_out, shim, to_chain, inst.keys_gain(),
+                               inst.drums_gain(), inst.pad_gain(), shimmer, 0.7)
             if pk > self.sf_peak:
                 self.sf_peak = pk
+            if shimmer > 0.0 or inst.cont_key is not None or inst._cp:
+                self.shimmer.process(shim, frames, mix, 0.55 + 0.6 * shimmer, 0.35 + 0.35 * shimmer)
+        # bateria worship sintetizada + sala da bateria
+        q = inst.drum_events
+        ev = self._drum_ev
+        nev = 0
+        while q and nev < len(ev):
+            ev[nev, 0], ev[nev, 1] = q.popleft()
+            nev += 1
+        d = self.drums
+        send = self._drum_send
+        send[:frames] = 0.0
+        render_drums(mix, send, frames, ev, nev, d.DV, d.DT, self.fs, inst.drums_gain())
+        self.drumverb.process(send, frames, mix, 0.25 + inst.levels["drumverb"] / 127.0, 0.0)
         if t.D[Ly.T_ON] > 0.5:
             self._run_track(t, self._synth_out, 0, frames, mix)
         write_output(mix, frames, outdata, self.out_offset, self.master)

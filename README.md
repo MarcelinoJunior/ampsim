@@ -99,10 +99,12 @@ Redutor de Ruído → Noise Gate → Compressor → Overdrive → Amplificador �
 - Cada efeito tem LED liga/desliga. Os presets de fábrica são marcados com ★; use
   **Salvar…** para criar os seus.
 
-## Teclas & Pads (controlador MIDI)
+## Pad/Piano (controlador MIDI)
 
-A aba **Teclas & Pads** mostra o controlador na tela (layout do M-VAVE SMK-25: 25 teclas,
-8 pads, 8 knobs e 8 botões). Tudo nele é clicável, e acende quando você toca no aparelho.
+A aba **Pad/Piano** mostra o instrumento na tela — escolha entre **M-VAVE SMK-25** (25 teclas,
+8 pads, 8 knobs, 8 botões), **Yamaha PSR-E473** (61 teclas) e **Roland VR-730** (73 teclas).
+Tudo nele é clicável, acende quando você toca no aparelho, e o **botão direito** em um pad,
+knob, botão ou tecla abre a escolha do som ou da função.
 
 - **Timbres prontos para louvor**: Piano + Pad, Piano + Cordas, Rhodes + Pad, Pad + Cordas,
   Baixo | Piano (divisão em C3: baixo na mão esquerda), Baixo Synth | Rhodes, Órgão + Pad,

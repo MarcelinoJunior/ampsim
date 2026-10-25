@@ -501,22 +501,31 @@ def process_track(src, ch, n, mix, D, BQ, Z, ST, H, OSU, OSD, IR, IRH, CHB, DLB,
 
 
 @njit(**JIT)
-def mix_soundfont(B, n, mix, synth_out, keys_to_chain, keys_gain, drums_gain):
-    """Soma a saída do FluidSynth. B: linhas 0-1 teclas, 2-3 bateria, 4-7 efeitos das teclas
-    (reverb L/R, chorus L/R), 8-11 efeitos da bateria. Retorna o pico enviado direto à saída."""
+def mix_soundfont(B, n, mix, synth_out, shim, to_chain, keys_gain, drums_gain, pad_gain,
+                  keys_shim, pad_shim):
+    """Soma a saída do FluidSynth (4 grupos; ver audio/soundfont.py) e monta o envio do Shimmer.
+
+    Teclas: para a trilha (to_chain, mono) ou direto em estéreo. Pads e pad contínuo: sempre
+    direto. Retorna o pico do que foi direto para a saída.
+    """
     peak = 0.0
     for i in range(n):
-        kl = (B[0, i] + B[4, i] + B[6, i]) * keys_gain
-        kr = (B[1, i] + B[5, i] + B[7, i]) * keys_gain
-        dl = (B[2, i] + B[8, i] + B[10, i]) * drums_gain
-        dr = (B[3, i] + B[9, i] + B[11, i]) * drums_gain
-        if keys_to_chain:
+        kl = (B[0, i] + B[8, i] + B[10, i]) * keys_gain
+        kr = (B[1, i] + B[9, i] + B[11, i]) * keys_gain
+        dl = (B[2, i] + B[12, i] + B[14, i] + B[6, i] + B[20, i] + B[22, i]) * drums_gain
+        dr = (B[3, i] + B[13, i] + B[15, i] + B[7, i] + B[21, i] + B[23, i]) * drums_gain
+        pl = (B[4, i] + B[16, i] + B[18, i]) * pad_gain
+        pr = (B[5, i] + B[17, i] + B[19, i]) * pad_gain
+        send = (pl + pr) * 0.5 * pad_shim
+        if to_chain:
             synth_out[i, 0] += (kl + kr) * 0.5
-            l = dl
-            r = dr
+            l = dl + pl
+            r = dr + pr
         else:
-            l = dl + kl
-            r = dr + kr
+            l = dl + kl + pl
+            r = dr + kr + pr
+            send += (kl + kr) * 0.5 * keys_shim
+        shim[i] = send
         mix[i, 0] += l
         mix[i, 1] += r
         a = max(abs(l), abs(r))
@@ -793,8 +802,12 @@ def warmup(fs=48000.0):
     out = np.zeros((n, 2), dtype=np.float32)
     write_output(mix, n, out, 0, 1.0)
     so = np.zeros((n, 1), dtype=np.float32)
-    mix_soundfont(np.zeros((12, n), dtype=np.float32), n, mix, so, True, 1.0, 1.0)
-    mix_soundfont(np.zeros((12, n), dtype=np.float32), n, mix, so, False, 1.0, 1.0)
+    sh = np.zeros(n)
+    for chain in (True, False):
+        mix_soundfont(np.zeros((24, n), dtype=np.float32), n, mix, so, sh, chain, 1.0, 1.0, 1.0, 0.5, 0.5)
+    from .worship import warmup as warmup_worship
+
+    warmup_worship(fs)
     s = SynthDSP(fs)
     ev = np.zeros((4, 3), dtype=np.int32)
     ev[0] = (EV_NOTE_ON, 60, 100)
