@@ -94,12 +94,19 @@ Com **ASIO4ALL**, abra **Painel do driver ASIO…** e, na chave inglesa, ligue a
 saída da sua placa (e desligue as outras). Se a saída aparecer como "Not Connected", nada sai
 no fone — é só ligá-la no painel.
 
-**Teclado com interface de áudio própria** (ex.: M-VAVE com saída P10): conecte com o AmpSim
-aberto. Se o Windows reconhecer o aparelho como placa de som, o AmpSim pergunta se o som deve
-sair por ele e abre a configuração já com a saída escolhida. É só conferir e clicar em
-**Aplicar e iniciar**. Se nenhum teclado MIDI estiver escolhido, o novo já fica ativo. Se o
-aparelho não aparecer em Configurações do Windows → Som → Saída, ele só manda MIDI, e o som
-continua saindo pela placa do computador.
+**Som saindo pelo próprio teclado** (saída P10 / fones de um M-VAVE SMK-25, Yamaha PSR-E473 ou
+Roland VR-730 ligado pelo USB). Há dois caminhos:
+
+- **Configurações → "Usar a saída do teclado (P10 / fones)…"**: procura esses modelos entre as
+  saídas de áudio do Windows. Dá preferência ao que estiver escolhido em "Na tela".
+- **Conectar com o AmpSim aberto**: se o Windows reconhecer o aparelho como placa de som, o
+  AmpSim pergunta se o som deve sair por ele e abre a configuração já com a saída escolhida. É
+  só conferir e clicar em **Aplicar e iniciar**. Se nenhum teclado MIDI estiver escolhido, o novo
+  já fica ativo.
+
+Se o aparelho não aparecer em Configurações do Windows → Som → Saída, ele só manda MIDI, e o som
+continua saindo pela placa do computador. Alguns fabricantes oferecem driver de áudio USB
+próprio para o modelo.
 
 ## A tela
 
@@ -146,8 +153,17 @@ Todas as abas seguem o mesmo desenho:
 - **Knobs grandes**: Volume, Reverb, Chorus, Shimmer, Brilho, Ataque, Release e Master.
 - **Teclado** na tela. Em **Na tela** dá para trocar pelo desenho de um controlador (M-VAVE
   SMK-25, Yamaha PSR-E473, Roland VR-730), em homenagem aos originais.
-- **Instrumento / Layer** (direita): o timbre e o volume de cada camada, a oitava, Rotação,
-  Drive, Delay, sensibilidade ao toque e a chave da camada 2.
+- **Instrumento / Layer** (direita): botões **L1 · L2 · L3 · L4** e **+** para adicionar
+  camadas (até 4). Em cada camada você escolhe:
+  - timbre, volume e oitava;
+  - liga/desliga;
+  - zona do teclado: teclado todo, mão esquerda ou mão direita (para as camadas 3 e 4);
+  - **efeitos próprios**: Rotação, Drive e Delay. Dá para ter rotação só no órgão e delay só no
+    piano, por exemplo.
+
+  **Rotação**: Lenta/Rápida como num Leslie (acelera e freia aos poucos). O slider **Veloc.**
+  ajusta a velocidade de cada modo. Com **BPM** marcado, ela acompanha o andamento, em voltas
+  por tempo. Os controles MIDI de efeito agem na camada escolhida no painel.
 - **Tocar · Synth · Amp e efeitos**: troca entre tocar, o Synth AmpSim (pads e baixo pulsante)
   e o amplificador/efeitos da trilha das teclas.
 

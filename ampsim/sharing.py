@@ -162,7 +162,7 @@ def sanitize_synth(values):
 
 
 SOUND_STATE_KEYS = ("keys", "ready", "pad_preset", "pad_sounds", "pad_keys", "cont_sound",
-                    "levels", "fx", "pad_eq", "bpm")
+                    "levels", "fx", "layer_fx", "extra_layers", "pad_eq", "bpm")
 
 
 def sound_state(inst_state):
@@ -191,6 +191,14 @@ def sanitize_instruments(st, current):
             out[k] = list(src)
     if isinstance(st.get("pad_eq"), dict):
         out["pad_eq"] = dict(DEFAULT_PAD_EQ, **clean_pad_eq(st["pad_eq"]))
+    from .instruments import MAX_LAYERS, clean_fx, clean_layer
+
+    if isinstance(st.get("layer_fx"), list):
+        out["layer_fx"] = [clean_fx(d) if isinstance(d, dict) else {} for d in st["layer_fx"][:MAX_LAYERS]]
+    if isinstance(st.get("extra_layers"), list):
+        out["extra_layers"] = [x for x in (clean_layer(d) for d in st["extra_layers"][:MAX_LAYERS - 2]) if x]
+    elif "keys" in out:
+        out["extra_layers"] = []        # timbre sem camadas extras: tira as que estavam
     if _num(st.get("bpm")):
         out["bpm"] = int(max(30, min(300, st["bpm"])))
     return out

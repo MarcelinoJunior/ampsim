@@ -42,8 +42,8 @@ def test_split_routes_low_notes_to_layer2(engine):
     inst.set_ready("Baixo | Piano (divisão em C3)")
     low = inst._targets(40)
     high = inst._targets(64)
-    assert [s.name for s, _ in low] == ["Baixo Finger"]
-    assert [s.name for s, _ in high] == ["Piano de Cauda"]
+    assert [s.name for s, *_ in low] == ["Baixo Finger"]
+    assert [s.name for s, *_ in high] == ["Piano de Cauda"]
 
 
 def test_pads_play_drums_without_keys(engine):

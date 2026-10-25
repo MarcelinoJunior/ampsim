@@ -36,6 +36,34 @@ def midi_inputs():
     return winmm.list_inputs()
 
 
+# palavras que aparecem no nome do aparelho no Windows (o nome exato depende do driver/firmware;
+# a pergunta de "aparelho conectado" vale para qualquer placa, mesmo sem estar nesta lista)
+INSTRUMENTS = {
+    "M-VAVE SMK-25": ("m-vave", "mvave", "smk-25", "smk25"),
+    "Yamaha PSR-E473": ("psr-e473", "psr e473", "psr-e", "yamaha", "digital keyboard"),
+    "Roland VR-730": ("vr-730", "vr730", "v-combo", "roland"),
+}
+
+
+def instrument_of(name):
+    """Modelo conhecido pelo nome do aparelho de áudio, ou None."""
+    low = name.lower()
+    for model, words in INSTRUMENTS.items():
+        if any(w in low for w in words):
+            return model
+    return None
+
+
+def find_instrument_output(names, prefer=None):
+    """(modelo, nome) da saída de um instrumento conhecido; dá preferência ao modelo `prefer`."""
+    found = [(instrument_of(n), n) for n in names]
+    found = [(m, n) for m, n in found if m]
+    for m, n in found:
+        if m == prefer:
+            return m, n
+    return found[0] if found else (None, None)
+
+
 def match_output(short_name, candidates):
     """Nome (cortado) do winmm -> nome completo do PortAudio, ou None."""
     s = short_name.strip().lower()

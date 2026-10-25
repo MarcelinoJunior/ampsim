@@ -403,6 +403,13 @@ class BottomDock(QFrame):
         row.addWidget(self.power_btn)
         row.addStretch(1)
         col.addLayout(row)
+        inst_out = QPushButton(" Usar a saída do teclado (P10 / fones)…")
+        inst_out.setIcon(icon("volume", C["text"], 15))
+        inst_out.setFocusPolicy(Qt.NoFocus)
+        inst_out.setToolTip("Som pela saída do próprio instrumento ligado no USB:\n"
+                            "M-VAVE SMK-25, Yamaha PSR-E473 ou Roland VR-730 (se o Windows o vê como placa de som)")
+        inst_out.clicked.connect(lambda *_: self.win.use_instrument_output())
+        col.addWidget(inst_out, 0, Qt.AlignLeft)
         col.addStretch(1)
         lay.addLayout(col, 1)
         lay.addWidget(_vsep())

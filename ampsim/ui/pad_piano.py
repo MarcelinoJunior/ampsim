@@ -2,9 +2,9 @@
 "Instrumento / Layer" à direita. Também abriga o Synth AmpSim e o amp/efeitos das teclas.
 """
 from PySide6.QtCore import QObject, QSize, Qt, Signal
-from PySide6.QtGui import QIntValidator, QStandardItemModel
+from PySide6.QtGui import QIcon, QIntValidator, QStandardItemModel
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
     QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QToolButton, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -14,6 +14,8 @@ from ..instruments import (
     PAD_CATEGORIES,
     PAD_COUNT, PAD_SOUNDS, READY, READY_GROUPS, SOUND_BY_NAME, SOUNDS, note_name,
 )
+from ..dsp.keysfx import ROT_MULTS, rotation_hz
+from ..instruments import CH_LAYERS, LAYER_ZONES, MAX_LAYERS
 from .controller import MODELS, TRADEMARKS, ControllerWidget
 from .funcs import func_param, func_value, set_func
 from .icons import icon
@@ -406,12 +408,12 @@ class PadPianoView(QWidget):
         layers = QHBoxLayout()
         layers.setSpacing(8)
         self.layer_buttons = []
-        for i in (1, 2):
+        for i in range(1, MAX_LAYERS + 1):
             b = QPushButton()
             b.setCheckable(True)
             b.setFocusPolicy(Qt.NoFocus)
             b.setMinimumHeight(44)
-            b.setMinimumWidth(120)
+            b.setMinimumWidth(78)
             b.setIcon(icon("keys", C["text"], 22))
             b.setIconSize(QSize(22, 22))
             b.setStyleSheet("QPushButton { text-align: left; padding: 6px 12px; }")
@@ -520,63 +522,89 @@ class PadPianoView(QWidget):
         lay.addLayout(head)
 
         seg = QHBoxLayout()
-        seg.setSpacing(4)
+        seg.setSpacing(3)
         self.side_layer_buttons = []
-        for i in (1, 2):
-            b = QPushButton(f"Layer {i}")
+        for i in range(1, MAX_LAYERS + 1):
+            b = QPushButton(f"L{i}")
             b.setObjectName("seg")
             b.setCheckable(True)
             b.setFocusPolicy(Qt.NoFocus)
+            b.setToolTip(f"Layer {i}")
             b.clicked.connect(lambda _, i=i: self.select_layer(i))
             self.side_layer_buttons.append(b)
-            seg.addWidget(b)
+            seg.addWidget(b, 1)
+        self.add_layer_btn = QPushButton()
+        self.add_layer_btn.setIcon(icon("add", C["text"], 14))
+        self.add_layer_btn.setFixedSize(30, 28)
+        self.add_layer_btn.setFocusPolicy(Qt.NoFocus)
+        self.add_layer_btn.setToolTip("Adicionar camada (até 4)")
+        self.add_layer_btn.clicked.connect(lambda *_: self.add_layer())
+        seg.addWidget(self.add_layer_btn)
         lay.addLayout(seg)
 
         card = QFrame()
         card.setObjectName("card")
         cl = QGridLayout(card)
         cl.setContentsMargins(8, 8, 8, 8)
-        cl.setSpacing(6)
-        self.layer_art = ArtTile(52)
+        cl.setHorizontalSpacing(8)
+        cl.setVerticalSpacing(4)
+        self.layer_art = ArtTile(44)
         cl.addWidget(self.layer_art, 0, 0, 2, 1)
         self.layer_name = _label("", "section")
         self.layer_sub = _label("", "small")
         cl.addWidget(self.layer_name, 0, 1)
         cl.addWidget(self.layer_sub, 1, 1)
+        self.layer_on = ToggleSwitch()
+        self.layer_on.setToolTip("Liga/desliga esta camada")
+        self.layer_on.clicked.connect(lambda *_: self._layer_switch(self.layer_on.isChecked()))
+        cl.addWidget(self.layer_on, 0, 2)
+        self.remove_layer_btn = QPushButton()
+        self.remove_layer_btn.setIcon(icon("delete", C["text"], 13))
+        self.remove_layer_btn.setFixedSize(26, 24)
+        self.remove_layer_btn.setFocusPolicy(Qt.NoFocus)
+        self.remove_layer_btn.setToolTip("Remover esta camada")
+        self.remove_layer_btn.clicked.connect(lambda *_: self.remove_layer())
+        cl.addWidget(self.remove_layer_btn, 1, 2)
         self.layer_sound = sound_combo()
         self.layer_sound.activated.connect(self._layer_sound)
-        cl.addWidget(self.layer_sound, 2, 0, 1, 2)
+        cl.addWidget(self.layer_sound, 2, 0, 1, 3)
         cl.setColumnStretch(1, 1)
         lay.addWidget(card)
 
         row = QHBoxLayout()
-        row.addWidget(_label("Volume da camada"))
-        self.layer_vol_lab = _label("", "small")
-        row.addStretch(1)
-        row.addWidget(self.layer_vol_lab)
-        lay.addLayout(row)
+        row.addWidget(_label("Volume"))
         self.layer_vol = QSlider(Qt.Horizontal)
         self.layer_vol.setRange(0, 127)
         self.layer_vol.setFocusPolicy(Qt.NoFocus)
         self.layer_vol.valueChanged.connect(self._layer_volume)
-        lay.addWidget(self.layer_vol)
+        row.addWidget(self.layer_vol, 1)
+        self.layer_vol_lab = _label("", "small")
+        self.layer_vol_lab.setFixedWidth(32)
+        row.addWidget(self.layer_vol_lab)
+        lay.addLayout(row)
         row = QHBoxLayout()
-        self.oct_label = _label("Oitava da camada")
+        self.oct_label = _label("Oitava")
         row.addWidget(self.oct_label)
-        row.addStretch(1)
-        self.layer_oct = _combo(("−2", "−1", "0", "+1", "+2"), 64)
+        self.layer_oct = _combo(("−2", "−1", "0", "+1", "+2"), 52)
         self.layer_oct.activated.connect(self._layer_octave)
         row.addWidget(self.layer_oct)
+        row.addStretch(1)
+        self.zone_label = _label("Zona")
+        row.addWidget(self.zone_label)
+        self.layer_zone = _combo(("Teclado todo", "Mão esquerda", "Mão direita"), 112)
+        self.layer_zone.setToolTip("Onde esta camada toca (a divisão é a mesma do modo Dividido)")
+        self.layer_zone.activated.connect(lambda i: self._layer_zone(LAYER_ZONES[i]))
+        row.addWidget(self.layer_zone)
         lay.addLayout(row)
 
-        lay.addWidget(_label("Efeitos das teclas", "section"))
+        self.fx_title = _label("Efeitos da Layer 1", "section")
+        lay.addWidget(self.fx_title)
         fx = QGridLayout()
         fx.setHorizontalSpacing(8)
-        fx.setVerticalSpacing(6)
+        fx.setVerticalSpacing(5)
         self.fx_switch = {}
-        rows = (("Rotação liga/desliga", "Rotação"), ("Drive liga/desliga", "Drive"),
-                ("Delay liga/desliga", "Delay"))
-        for r, (func, text) in enumerate(rows):
+        for r, (func, text) in ((0, ("Rotação liga/desliga", "Rotação")), (2, ("Drive liga/desliga", "Drive")),
+                                (3, ("Delay liga/desliga", "Delay"))):
             sw = ToggleSwitch()
             sw.clicked.connect(lambda _, f=func: self._action(f))
             w = Mapped(self, func, sw)
@@ -586,48 +614,46 @@ class PadPianoView(QWidget):
             fx.addWidget(w, r, 0)
             fx.addWidget(QLabel(text), r, 1)
         self.rot_speed = _combo(("Lenta", "Rápida"))
+        self.rot_speed.setToolTip("Lenta/Rápida como num Leslie (acelera e freia aos poucos)")
         self.rot_speed.activated.connect(self._rot_speed)
         fx.addWidget(self.rot_speed, 0, 2)
+        fx.addWidget(_label("Veloc.", "small"), 1, 1)
+        vrow = QHBoxLayout()
+        vrow.setSpacing(4)
+        self.rot_rate = QSlider(Qt.Horizontal)
+        self.rot_rate.setFocusPolicy(Qt.NoFocus)
+        self.rot_rate.setToolTip("Velocidade do modo escolhido (Lenta ou Rápida).\n"
+                                 "Com BPM marcado: voltas por tempo da música.")
+        self.rot_rate.valueChanged.connect(self._rot_rate)
+        vrow.addWidget(self.rot_rate, 1)
+        self.rot_rate_lab = _label("", "small")
+        self.rot_rate_lab.setFixedWidth(46)
+        vrow.addWidget(self.rot_rate_lab)
+        self.rot_sync = QCheckBox("BPM")
+        self.rot_sync.setFocusPolicy(Qt.NoFocus)
+        self.rot_sync.setToolTip("A rotação acompanha o BPM da música")
+        self.rot_sync.clicked.connect(lambda *_: self._rot_sync(self.rot_sync.isChecked()))
+        vrow.addWidget(self.rot_sync)
+        fx.addLayout(vrow, 1, 2)
         self.drive = QSlider(Qt.Horizontal)
         self.drive.setRange(0, 100)
         self.drive.setFocusPolicy(Qt.NoFocus)
         self.drive.valueChanged.connect(lambda v: None if self._updating else (
             set_func(self.engine, "Drive", v), self.refresh_values()))
-        fx.addWidget(self.drive, 1, 2)
+        fx.addWidget(self.drive, 2, 2)
         self.delay_div = _combo(DELAY_DIVS)
         self.delay_div.activated.connect(self._delay_div)
-        fx.addWidget(self.delay_div, 2, 2)
-        fx.addWidget(QLabel("Toque"), 3, 1)
+        fx.addWidget(self.delay_div, 3, 2)
+        fx.addWidget(QLabel("Toque"), 4, 1)
         self.touch = QSlider(Qt.Horizontal)
         self.touch.setRange(0, 100)
         self.touch.setFocusPolicy(Qt.NoFocus)
-        self.touch.setToolTip("Sensibilidade ao toque: 0 = todas as notas iguais, 100 = segue a força")
+        self.touch.setToolTip("Sensibilidade ao toque (todas as camadas): 0 = notas iguais, 100 = segue a força")
         self.touch.valueChanged.connect(lambda v: None if self._updating else
                                         set_func(self.engine, "Sensibilidade ao toque", v))
-        fx.addWidget(self.touch, 3, 2)
+        fx.addWidget(self.touch, 4, 2)
         fx.setColumnStretch(2, 1)
         lay.addLayout(fx)
-
-        lay.addWidget(_label("Outras camadas", "section"))
-        other = QFrame()
-        other.setObjectName("card")
-        ol = QHBoxLayout(other)
-        ol.setContentsMargins(8, 6, 8, 6)
-        self.other_art = ArtTile(34)
-        ol.addWidget(self.other_art)
-        oc = QVBoxLayout()
-        oc.setSpacing(0)
-        self.other_name = _label("Layer 2")
-        self.other_sub = _label("", "small")
-        oc.addWidget(self.other_name)
-        oc.addWidget(self.other_sub)
-        ol.addLayout(oc, 1)
-        self.layer2_switch = ToggleSwitch()
-        self.layer2_switch.setToolTip("Liga/desliga a camada 2")
-        self.layer2_switch.clicked.connect(lambda on: self.set_key_mode(
-            ("layer" if self.inst.keys["mode2"] != "split" else "split") if on else "single"))
-        ol.addWidget(self.layer2_switch)
-        lay.addWidget(other)
         lay.addStretch(1)
         scroll.setWidget(body)
         outer.addWidget(scroll)
@@ -644,11 +670,27 @@ class PadPianoView(QWidget):
             self.amp_page.refresh()
 
     def select_layer(self, i):
-        self.layer = i
+        """Escolhe a camada editada no painel (e a dos efeitos/controles MIDI)."""
         if i == 2 and key_mode(self.inst.keys) == "single":
+            self.layer = 2
+            self.inst.fx_layer = 1
             self.set_key_mode("layer")
             return
+        self.layer = max(1, min(i, self.inst.layer_count()))
+        self.inst.fx_layer = self.layer - 1
         self.refresh()
+
+    def add_layer(self):
+        n = self.inst.add_layer()
+        if n:
+            self.user_preset = ""
+            self.select_layer(n)
+
+    def remove_layer(self):
+        if self.layer >= 3:
+            self.inst.remove_layer(self.layer)
+            self.user_preset = ""
+            self.select_layer(min(self.layer, self.inst.layer_count()))
 
     def set_device(self, name):
         self.inst.device = name
@@ -673,6 +715,39 @@ class PadPianoView(QWidget):
         self.inst.apply_fx()
         self.refresh()
 
+    # velocidade livre: 0,3 a 10 Hz em escala log; no BPM: índice em ROT_MULTS
+    def _rot_key(self):
+        fx = self.inst.fx
+        fast = fx["rot_fast"]
+        if fx["rot_sync"]:
+            return "rot_fast_mult" if fast else "rot_slow_mult"
+        return "rot_fast_hz" if fast else "rot_slow_hz"
+
+    def _rot_rate(self, v):
+        if self._updating:
+            return
+        fx = self.inst.fx
+        key = self._rot_key()
+        fx[key] = ROT_MULTS[v] if fx["rot_sync"] else round(0.3 * (10 / 0.3) ** (v / 100), 2)
+        self.inst.apply_fx()
+        self._rot_rate_text()
+
+    def _rot_sync(self, on):
+        self.inst.fx["rot_sync"] = bool(on)
+        self.inst.apply_fx()
+        self.refresh_values()
+
+    def _rot_rate_text(self):
+        fx = self.inst.fx
+        hz = rotation_hz(fx, self.inst.bpm)
+        if fx["rot_sync"]:
+            m = fx[self._rot_key()]
+            self.rot_rate_lab.setText(f"{m:g}×")
+            self.rot_rate_lab.setToolTip(f"{m:g} volta(s) por tempo = {hz:.2f} Hz a {self.inst.bpm} BPM")
+        else:
+            self.rot_rate_lab.setText(f"{hz:.1f} Hz")
+            self.rot_rate_lab.setToolTip("")
+
     def _delay_div(self, i):
         self.inst.fx["delay_div"] = i
         self.inst.fx["delay_on"] = True
@@ -680,33 +755,59 @@ class PadPianoView(QWidget):
         self.refresh()
 
     def _layer_slot(self):
-        return 2 if self.layer == 2 and key_mode(self.inst.keys) != "single" else 1
+        """Camada do painel (1-4)."""
+        return min(self.layer, self.inst.layer_count())
 
     def _layer_sound(self, _):
         name = self.layer_sound.currentData()
-        if name:
-            self.inst.set_sound(self._layer_slot(), name)
-            self.user_preset = ""
+        if not name:
+            return
+        n = self._layer_slot()
+        if n >= 3:
+            self.inst.set_extra_layer(n, sound=name)
+        else:
+            self.inst.set_sound(n, name)
+        self.user_preset = ""
 
     def _layer_volume(self, v):
         if self._updating:
             return
-        slot = self._layer_slot()
-        self.inst.keys["vol1" if slot == 1 else "vol2"] = v
+        n = self._layer_slot()
+        if n >= 3:
+            self.inst.extra_layers[n - 3]["vol"] = v
+        else:
+            self.inst.keys["vol1" if n == 1 else "vol2"] = v
         if self.inst.sf:
-            from ..instruments import CH_KEYS1, CH_KEYS2
-            self.inst.sf.cc(CH_KEYS1 if slot == 1 else CH_KEYS2, 7, v)
+            self.inst.sf.cc(CH_LAYERS[n - 1], 7, v)
         self.layer_vol_lab.setText(f"{round(v / 1.27)}%")
 
     def _layer_octave(self, i):
         o = i - 2
-        if self._layer_slot() == 2:
-            self.inst.all_off()
+        n = self._layer_slot()
+        self.inst.all_off()
+        if n >= 3:
+            self.inst.extra_layers[n - 3]["oct"] = o
+        elif n == 2:
             self.inst.keys["oct2"] = o
         else:
-            self.inst.all_off()
             self.inst.transpose = 12 * o
         self.inst.on_change()
+
+    def _layer_zone(self, zone):
+        n = self._layer_slot()
+        if n >= 3:
+            self.inst.set_extra_layer(n, zone=zone)
+
+    def _layer_switch(self, on):
+        n = self._layer_slot()
+        if n == 2:
+            self.set_key_mode(("split" if self.inst.keys["mode2"] == "split" else "layer") if on else "single")
+            if not on:
+                self.layer = 2
+                self.inst.fx_layer = 1
+                self.refresh()
+        elif n >= 3:
+            self.inst.set_extra_layer(n, on=bool(on))
 
     def set_key_mode(self, mode, split=None):
         """Um timbre / dois juntos / dividido; `split` = primeira nota da mão direita."""
@@ -718,8 +819,6 @@ class PadPianoView(QWidget):
                 k["sound2"] = "Baixo Finger" if mode == "split" else "Pad Quente"
         if split is not None:
             k["split"] = min(max(split, SPLIT_NOTES[0]), SPLIT_NOTES[-1])
-        if mode == "single":
-            self.layer = 1
         self.inst.ready = ""
         self.user_preset = ""
         self.inst.apply_all()
@@ -873,6 +972,16 @@ class PadPianoView(QWidget):
             self.fx_switch["Drive liga/desliga"].setChecked(fx["drive_on"])
             self.fx_switch["Delay liga/desliga"].setChecked(fx["delay_on"])
             self.rot_speed.setCurrentIndex(1 if fx["rot_fast"] else 0)
+            self.rot_sync.setChecked(bool(fx["rot_sync"]))
+            if fx["rot_sync"]:
+                self.rot_rate.setRange(0, len(ROT_MULTS) - 1)
+                m = fx[self._rot_key()]
+                self.rot_rate.setValue(min(range(len(ROT_MULTS)), key=lambda q: abs(ROT_MULTS[q] - m)))
+            else:
+                import math
+                self.rot_rate.setRange(0, 100)
+                hz = max(0.3, min(10.0, fx[self._rot_key()]))
+                self.rot_rate.setValue(round(100 * math.log(hz / 0.3) / math.log(10 / 0.3)))
             self.drive.setValue(int(fx["drive"]))
             self.delay_div.setCurrentIndex(int(fx.get("delay_div", 0)))
             self.touch.setValue(int(inst.levels["touch"]))
@@ -880,6 +989,7 @@ class PadPianoView(QWidget):
             self.bpm.set_value(inst.bpm)
         finally:
             self._updating = False
+        self._rot_rate_text()
         for w in self.mapped.values():
             w.refresh()
 
@@ -887,10 +997,7 @@ class PadPianoView(QWidget):
         inst = self.inst
         k = inst.keys
         mode = key_mode(k)
-        if mode == "single":
-            self.layer = 1
         s1 = SOUND_BY_NAME.get(k["sound1"])
-        s2 = SOUND_BY_NAME.get(k["sound2"]) if k["sound2"] else None
         self.title.setText(_short(self.user_preset or inst.ready or "Timbre personalizado", 34))
         sub = k["sound1"]
         if mode == "layer":
@@ -899,43 +1006,67 @@ class PadPianoView(QWidget):
             sub = f"{k['sound2']} (esq.) | {k['sound1']} (dir.)"
         self.subtitle.setText(sub)
         self.art.set_kind(s1.cat if s1 else "Pianos")
-        names = (("LAYER 1", k["sound1"]), ("LAYER 2", k["sound2"] if mode != "single" else "desligado"))
+        count = inst.layer_count()
+        self.layer = max(1, min(self.layer, count))
+        inst.fx_layer = self.layer - 1
+        names = [("LAYER 1", k["sound1"]), ("LAYER 2", k["sound2"] if mode != "single" else "desligado")]
         if mode == "split":
-            names = (("MÃO DIREITA", k["sound1"]), ("MÃO ESQUERDA", k["sound2"]))
-        for i, (b, (head, name)) in enumerate(zip(self.layer_buttons, names)):
-            b.setText(f"{head}\n{_short(name, 20)}")
-            b.setChecked(self.layer == i + 1)
+            names = [("MÃO DIREITA", k["sound1"]), ("MÃO ESQUERDA", k["sound2"])]
+        for n, lay in enumerate(inst.extra_layers, start=3):
+            zone = {"left": " (esq.)", "right": " (dir.)"}.get(lay["zone"], "")
+            names.append((f"LAYER {n}{zone}", lay["sound"] if lay["on"] else "desligado"))
+        width = 20 if count <= 2 else 13
+        for i, b in enumerate(self.layer_buttons):
+            b.setVisible(i < count)
+            b.setIcon(icon("keys", C["text"], 22) if count <= 2 else QIcon())   # 4 camadas: espaço p/ o nome
+            if i < count:
+                b.setText(f"{names[i][0]}\n{_short(names[i][1], width)}")
+                b.setChecked(self.layer == i + 1)
         for i, b in enumerate(self.side_layer_buttons):
-            b.setText(names[i][0].title())
+            b.setVisible(i < count)
             b.setChecked(self.layer == i + 1)
+            if i < count:
+                b.setToolTip(f"{names[i][0].title()}: {names[i][1]}")
+        self.add_layer_btn.setEnabled(count < MAX_LAYERS)
         self.mode.setCurrentIndex(("single", "layer", "split").index(mode))
         self.split.setVisible(mode == "split")
         if k["split"] in SPLIT_NOTES:
             self.split.setCurrentIndex(SPLIT_NOTES.index(k["split"]))
 
-        slot = self._layer_slot()
-        sname = k["sound2" if slot == 2 else "sound1"]
-        snd = s2 if slot == 2 else s1
-        self.layer_name.setText(_short(sname or "—", 26))
-        self.layer_sub.setText(snd.cat if snd else "")
+        n = self.layer
+        if n >= 3:
+            lay = inst.extra_layers[n - 3]
+            sname, vol, octv, on = lay["sound"], lay["vol"], lay["oct"], lay["on"]
+        elif n == 2:
+            sname, vol, octv, on = k["sound2"], k["vol2"], k.get("oct2", 0), mode != "single"
+        else:
+            sname, vol, octv, on = k["sound1"], k["vol1"], inst.transpose // 12, True
+        snd = SOUND_BY_NAME.get(sname or "")
+        where = {"split": "mão direita" if n == 1 else ("mão esquerda" if n == 2 else ""),
+                 }.get(mode, "") if n <= 2 else {"all": "teclado todo", "left": "mão esquerda",
+                                                 "right": "mão direita"}[inst.extra_layers[n - 3]["zone"]]
+        self.layer_name.setText(_short(sname or "—", 22))
+        self.layer_sub.setText(" · ".join(x for x in ((snd.cat if snd else ""), where) if x))
         self.layer_art.set_kind(snd.cat if snd else "Pianos")
         i = self.layer_sound.findData(sname)
         if i >= 0:
             self.layer_sound.setCurrentIndex(i)
+        self.layer_on.setVisible(n >= 2)
+        self.remove_layer_btn.setVisible(n >= 3)
+        self.zone_label.setVisible(n >= 3)
+        self.layer_zone.setVisible(n >= 3)
         self._updating = True
         try:
-            vol = k["vol2" if slot == 2 else "vol1"]
+            self.layer_on.setChecked(bool(on))
             self.layer_vol.setValue(int(vol))
             self.layer_vol_lab.setText(f"{round(vol / 1.27)}%")
-            o = k.get("oct2", 0) if slot == 2 else inst.transpose // 12
-            self.layer_oct.setCurrentIndex(max(0, min(4, o + 2)))
+            self.layer_oct.setCurrentIndex(max(0, min(4, octv + 2)))
+            if n >= 3:
+                self.layer_zone.setCurrentIndex(LAYER_ZONES.index(inst.extra_layers[n - 3]["zone"]))
         finally:
             self._updating = False
-        self.oct_label.setText("Oitava da camada 2" if slot == 2 else "Oitava do teclado")
-        self.layer2_switch.setChecked(mode != "single")
-        self.other_name.setText("Mão esquerda" if mode == "split" else "Layer 2")
-        self.other_sub.setText(k["sound2"] if k["sound2"] else "—")
-        self.other_art.set_kind(s2.cat if s2 else "Pads e cordas")
+        self.oct_label.setText("Oitava" if n >= 2 else "Oitava (teclado)")
+        self.fx_title.setText(f"Efeitos da Layer {n}" + ("" if on else " (desligada)"))
 
         self.cont_title.setText(f"Pad contínuo · {inst.cont_sound}")
         for key, b in self.cont_buttons.items():

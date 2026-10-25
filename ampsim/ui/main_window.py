@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 
 from .. import sharing, storage
 from ..audio import devices as dev
-from ..audio.hotplug import DeviceWatcher
+from ..audio.hotplug import DeviceWatcher, audio_outputs, find_instrument_output, instrument_of
 from ..audio.engine import TRACKS
 from ..midi import winmm
 from ..presets import DEFAULT_PRESET, FACTORY
@@ -476,14 +476,35 @@ class MainWindow(QMainWindow):
             self._declined_outputs.add(name)
 
     def ask_use_output(self, name):
+        model = instrument_of(name)
         box = QMessageBox(self)
         box.setWindowTitle("Aparelho de áudio conectado")
-        box.setText(f"<b>{name}</b> foi conectado e tem saída de áudio.<br><br>"
-                    "Quer que o som do AmpSim saia por ele (ex.: a saída P10 do teclado)?")
+        who = f"<b>{model}</b> ({name})" if model else f"<b>{name}</b>"
+        box.setText(f"{who} foi conectado e tem saída de áudio.<br><br>"
+                    "Quer que o som do AmpSim saia por ele (ex.: a saída P10 / fones do teclado)?")
         use = box.addButton("Usar a saída dele", QMessageBox.AcceptRole)
         box.addButton("Agora não", QMessageBox.RejectRole)
         box.exec()
         return box.clickedButton() is use
+
+    def use_instrument_output(self):
+        """Botão "Usar a saída do teclado": procura M-VAVE, PSR-E473 ou VR-730 entre as saídas."""
+        from .pad_piano import is_simple
+
+        prefer = None if is_simple(self.inst.device) else self.inst.device
+        model, name = find_instrument_output(audio_outputs(), prefer)
+        if name:
+            self.use_new_output(name)
+            return True
+        QMessageBox.information(
+            self, "Saída do teclado",
+            "Nenhum teclado com saída de áudio apareceu no Windows.<br><br>"
+            "1. Ligue o teclado no computador pelo cabo USB dele (porta USB TO HOST / COMPUTER).<br>"
+            "2. Confira em Configurações do Windows → Som → Saída se ele aparece.<br>"
+            "3. Se o fabricante tiver driver próprio de áudio USB para o modelo, instale.<br><br>"
+            "Se ele aparecer com outro nome, escolha em <b>Placa de som e driver…</b>. Se não aparecer, "
+            "o teclado só manda MIDI e o som continua saindo pela placa do computador.")
+        return False
 
     def use_new_output(self, short_name):
         """Recarrega a lista de placas (o PortAudio só vê aparelhos novos assim) e abre a

@@ -361,8 +361,12 @@ def test_layers_split_volume_and_octave(win):
     pv.split.setCurrentIndex(pv.split.findText("divisão em C4"))
     pv.split.activated.emit(pv.split.currentIndex())
     assert k["split"] == 60 and win.pad_view.piano.split_note == 60
-    pv.layer2_switch.click()
+    pv.select_layer(2)
+    pv.layer_on.click()
     assert not k["layer2_on"]
+    assert pv.layer == 2 and "desligada" in pv.fx_title.text()
+    pv.layer_on.click()
+    assert k["layer2_on"]
 
 
 @needs_sf
@@ -501,3 +505,60 @@ def test_session_is_restored(app, dirs):
     assert w2.tabs.currentIndex() == 1 and not w2.dock.collapsed
     assert w2.inst.device == "Roland VR-730"
     w2.timer.stop()
+
+
+# ------------------------------------------------------------------ camadas e efeitos por camada
+@needs_sf
+def test_layers_panel_add_select_fx_and_remove(win, app):
+    win.tabs.setCurrentIndex(2)
+    pv = win.pad_view
+    win.load_from_bank("ready", "Piano + Pad (culto)")
+    QTest.mouseClick(pv.add_layer_btn, Qt.LeftButton)              # Layer 3
+    QTest.mouseClick(pv.add_layer_btn, Qt.LeftButton)              # Layer 4
+    app.processEvents()
+    assert win.inst.layer_count() == 4 and not pv.add_layer_btn.isEnabled()
+    assert pv.layer == 4 and pv.fx_title.text().startswith("Efeitos da Layer 4")
+    assert all(b.isVisible() for b in pv.layer_buttons)
+    # efeitos: rotação só na camada 4, drive só na 1
+    pv.fx_switch["Rotação liga/desliga"].click()
+    QTest.mouseClick(pv.side_layer_buttons[0], Qt.LeftButton)
+    assert pv.fx_title.text().startswith("Efeitos da Layer 1")
+    assert not pv.fx_switch["Rotação liga/desliga"].isChecked()      # a 1 mostra os efeitos dela
+    pv.fx_switch["Drive liga/desliga"].click()
+    lf = win.inst.layer_fx
+    assert lf[3]["rot_on"] and not lf[0]["rot_on"] and lf[0]["drive_on"] and not lf[3]["drive_on"]
+    # camada 3 só na mão esquerda
+    QTest.mouseClick(pv.side_layer_buttons[2], Qt.LeftButton)
+    assert pv.layer_zone.isVisible()
+    pv.layer_zone.setCurrentIndex(1)
+    pv.layer_zone.activated.emit(1)
+    assert win.inst.extra_layers[0]["zone"] == "left"
+    # remover a camada 3: a 4 (com a rotação) vira a 3
+    QTest.mouseClick(pv.remove_layer_btn, Qt.LeftButton)
+    assert win.inst.layer_count() == 3 and win.inst.layer_fx[2]["rot_on"]
+    assert not pv.layer_buttons[3].isVisible()
+    # cabe na tela com camadas extras
+    app.processEvents()
+    assert (win.width(), win.height()) == (1536, 800)
+    side_scroll = [s for s in win.findChildren(QScrollArea) if s.isVisible() and s.verticalScrollBar().isVisible()]
+    assert not side_scroll
+
+
+def test_rotation_speed_slider_and_bpm_checkbox(win, app):
+    win.tabs.setCurrentIndex(2)
+    pv = win.pad_view
+    pv.select_layer(1)
+    fx = win.inst.fx
+    pv.rot_speed.setCurrentIndex(1)
+    pv.rot_speed.activated.emit(1)                                 # Rápida
+    assert fx["rot_fast"] and fx["rot_on"]
+    pv.rot_rate.setValue(50)                                       # livre: ~1,6 Hz
+    assert 1.4 < fx["rot_fast_hz"] < 1.8
+    assert "Hz" in pv.rot_rate_lab.text()
+    QTest.mouseClick(pv.rot_sync, Qt.LeftButton)                   # segue o BPM
+    assert fx["rot_sync"] and pv.rot_rate.maximum() == 7
+    pv.rot_rate.setValue(3)                                        # 2 voltas por tempo
+    assert fx["rot_fast_mult"] == 2.0 and pv.rot_rate_lab.text() == "2×"
+    from ampsim.dsp.keysfx import K_ROT_HZ
+    win.inst.set_bpm(120)
+    assert win.engine.keys_fx[0].KP[K_ROT_HZ] == pytest.approx(4.0)

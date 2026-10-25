@@ -122,3 +122,40 @@ def test_audio_dialog_preselects_the_new_device(win, monkeypatch):
     assert dlg.api.currentText() == "Windows WASAPI"
     assert dlg.out.currentText() == target
     dlg.reject()
+
+
+def test_known_instruments_by_name():
+    from ampsim.audio.hotplug import find_instrument_output, instrument_of
+    assert instrument_of("Alto-falantes (M-VAVE SMK-25 Au") == "M-VAVE SMK-25"
+    assert instrument_of("Digital Keyboard (PSR-E473)") == "Yamaha PSR-E473"
+    assert instrument_of("OUT (VR-730)") == "Roland VR-730"
+    assert instrument_of("Alto-falantes (Realtek(R) Audio") is None
+    outs = ["Realtek", "OUT (VR-730)", "Digital Keyboard (PSR-E473)"]
+    assert find_instrument_output(outs, prefer="Yamaha PSR-E473") == ("Yamaha PSR-E473", outs[2])
+    assert find_instrument_output(outs) == ("Roland VR-730", outs[1])
+    assert find_instrument_output(["Realtek"]) == (None, None)
+
+
+def test_use_instrument_output_button(win, monkeypatch):
+    import ampsim.ui.main_window as mw
+    opened = []
+    monkeypatch.setattr(win, "use_new_output", lambda name: opened.append(name))
+    monkeypatch.setattr(mw, "audio_outputs", lambda: ["Realtek", "OUT (VR-730)", "Digital Keyboard (PSR-E473)"])
+    win.inst.device = "Yamaha PSR-E473"                    # desenho na tela = PSR: prefere ele
+    assert win.use_instrument_output()
+    assert opened == ["Digital Keyboard (PSR-E473)"]
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: opened.append("ajuda")))
+    monkeypatch.setattr(mw, "audio_outputs", lambda: ["Realtek"])
+    assert not win.use_instrument_output()
+    assert opened[-1] == "ajuda"
+    from PySide6.QtWidgets import QPushButton
+    assert any("saída do teclado" in b.text() for b in win.dock.findChildren(QPushButton))
+
+
+def test_hotplug_question_names_the_instrument(win, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    shown = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(self.text()) or 0)
+    win.ask_use_output("OUT (VR-730)")
+    assert "Roland VR-730" in shown[0]

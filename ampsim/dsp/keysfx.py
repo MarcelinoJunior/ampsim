@@ -12,14 +12,26 @@ TWO_PI = 2.0 * math.pi
 
 # parâmetros (KP)
 K_DRV_ON, K_DRV, K_ROT_ON, K_ROT_FAST, K_ROT_MIX, K_DL_ON, K_DL_TIME, K_DL_FB, K_DL_MIX, \
-    K_DL_DAMP, K_DL_PING = range(11)
+    K_DL_DAMP, K_DL_PING, K_ROT_HZ = range(12)
 KP_SIZE = 16
 # estado (KS)
 S_HSPD, S_DSPD, S_HPH, S_DPH, S_XLP, S_RPOS, S_DPOS, S_DLPL, S_DLPR = range(9)
 KS_SIZE = 16
 ROT_BUF = 2048            # buffer do Doppler da corneta (potência de 2)
-HORN_SLOW, HORN_FAST = 0.8, 6.8      # Hz
-DRUM_SLOW, DRUM_FAST = 0.7, 5.9
+HORN_SLOW, HORN_FAST = 0.8, 6.8      # Hz (padrões de Lenta / Rápida)
+DRUM_RATIO = 0.87                    # o tambor gira um pouco mais devagar que a corneta
+ROT_MULTS = (0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0)   # voltas por tempo quando segue o BPM
+
+
+def rotation_hz(fx, bpm):
+    """Velocidade-alvo da corneta (Hz) para o modo atual (Lenta/Rápida), livre ou no BPM."""
+    fast = fx.get("rot_fast", False)
+    if fx.get("rot_sync", False):
+        mult = fx.get("rot_fast_mult" if fast else "rot_slow_mult", 4.0 if fast else 0.5)
+        hz = max(bpm, 30) / 60.0 * mult
+    else:
+        hz = fx.get("rot_fast_hz" if fast else "rot_slow_hz", HORN_FAST if fast else HORN_SLOW)
+    return min(max(hz, 0.1), 12.0)
 
 
 @njit(**JIT)
@@ -35,9 +47,8 @@ def process_keys_fx(KB, n, KP, KS, DB, RB, fs):
             KB[i, 1] = math.tanh(KB[i, 1] * g) * comp
     # ---------------------------------------------------------------- rotação (Leslie)
     if KP[K_ROT_ON] > 0.5:
-        fast = KP[K_ROT_FAST] > 0.5
-        h_tgt = HORN_FAST if fast else HORN_SLOW
-        d_tgt = DRUM_FAST if fast else DRUM_SLOW
+        h_tgt = KP[K_ROT_HZ]
+        d_tgt = h_tgt * DRUM_RATIO
         h_acc = 1.0 - math.exp(-inv / 0.9)        # corneta acelera em ~1 s
         d_acc = 1.0 - math.exp(-inv / 3.0)        # tambor é mais pesado (~3 s)
         xc = 1.0 - math.exp(-TWO_PI * 800.0 * inv)
@@ -94,7 +105,7 @@ def process_keys_fx(KB, n, KP, KS, DB, RB, fs):
     else:
         # parado: o rotor mantém a velocidade lenta para religar sem "arrancada"
         KS[S_HSPD] = HORN_SLOW
-        KS[S_DSPD] = DRUM_SLOW
+        KS[S_DSPD] = HORN_SLOW * DRUM_RATIO
     # ---------------------------------------------------------------- delay estéreo
     if KP[K_DL_ON] > 0.5 and KP[K_DL_MIX] > 0.0:
         size = DB.shape[1]
@@ -151,16 +162,19 @@ def add_stereo(mix, KB, n):
 
 
 class KeysFX:
-    def __init__(self, fs, max_block):
+    """Efeitos de UMA camada das teclas. `kb`: buffer [max_block, 2] onde o mixer põe a camada."""
+
+    def __init__(self, fs, max_block, kb=None):
         self.fs = float(fs)
         self.KP = np.zeros(KP_SIZE)
         self.KS = np.zeros(KS_SIZE)
         size = 1 << int(math.ceil(math.log2(2.1 * fs)))
         self.DB = np.zeros((2, size))
         self.RB = np.zeros(ROT_BUF)
-        self.KB = np.zeros((max_block, 2))
+        self.KB = np.zeros((max_block, 2)) if kb is None else kb
         self.KS[S_HSPD] = HORN_SLOW
-        self.KS[S_DSPD] = DRUM_SLOW
+        self.KS[S_DSPD] = HORN_SLOW * DRUM_RATIO
+        self.KP[K_ROT_HZ] = HORN_SLOW
 
     def configure(self, fx, bpm):
         """fx: dicionário de níveis (0-100) e chaves liga/desliga vindos de Instruments."""
@@ -170,6 +184,7 @@ class KeysFX:
         KP[K_ROT_ON] = 1.0 if fx["rot_on"] else 0.0
         KP[K_ROT_FAST] = 1.0 if fx["rot_fast"] else 0.0
         KP[K_ROT_MIX] = fx["rot_mix"] / 100.0
+        KP[K_ROT_HZ] = rotation_hz(fx, bpm)
         KP[K_DL_ON] = 1.0 if fx["delay_on"] else 0.0
         div = fx.get("delay_div", 0)
         if div:                                 # sincronizado ao BPM

@@ -15,7 +15,7 @@ from ..dsp.track import TrackDSP
 from ..dsp.keysfx import KeysFX, add_stereo
 from ..dsp.padeq import PadEQ
 from ..dsp.worship import DrumSynth, ShimmerDSP, render_drums
-from ..instruments import Instruments
+from ..instruments import MAX_LAYERS, Instruments, channel_routes
 
 TRACKS = ("guitar", "bass", "pads")
 INPUT_TRACKS = ("guitar", "bass")
@@ -44,6 +44,7 @@ class AudioEngine:
         self._shim_send = np.zeros(Ly.MAX_BLOCK)
         self._drum_send = np.zeros(Ly.MAX_BLOCK)
         self._drum_ev = np.zeros((64, 2), dtype=np.int64)
+        self._route = channel_routes()
         # RTA da aba aberta: entrada seca e saída só desta trilha (anéis lidos pela UI)
         self.rta_track = None
         self.rta_in = np.zeros(RTA_N)
@@ -160,7 +161,9 @@ class AudioEngine:
         self.drums = DrumSynth(self.fs)
         self.shimmer = ShimmerDSP(self.fs, room=0.93, damp=0.25)
         self.drumverb = ShimmerDSP(self.fs, room=0.84, damp=0.35)
-        self.keys_fx = KeysFX(self.fs, Ly.MAX_BLOCK)
+        # uma cadeia de efeitos (drive, rotação, delay) por camada das teclas
+        self._kbs = np.zeros((MAX_LAYERS, Ly.MAX_BLOCK, 2))
+        self.keys_fx = [KeysFX(self.fs, Ly.MAX_BLOCK, self._kbs[k]) for k in range(MAX_LAYERS)]
         self.pad_eq = PadEQ(self.fs)
         if hasattr(self, "instruments"):
             self.instruments.apply_fx()
@@ -203,14 +206,14 @@ class AudioEngine:
         if sf is not None:
             sf.render(frames)
             to_chain = t.D[Ly.T_AMP] > 0.5 and t.D[Ly.T_ON] > 0.5
-            kfx = self.keys_fx
             eq = self.pad_eq
-            pk = mix_soundfont(sf.buf, frames, mix, self._synth_out, shim, kfx.KB, to_chain,
+            pk = mix_soundfont(sf.buf, frames, mix, self._synth_out, shim, self._kbs, self._route, to_chain,
                                inst.keys_gain(), inst.drums_gain(), inst.pad_gain(), shimmer,
                                inst.pad_eq["shimmer"] / 100.0, eq.BQ, eq.Z, eq.P)
             if not to_chain:
-                kfx.process(frames)
-                pk = max(pk, add_stereo(mix, kfx.KB, frames))
+                for kfx in self.keys_fx:
+                    kfx.process(frames)
+                    pk = max(pk, add_stereo(mix, kfx.KB, frames))
             if pk > self.sf_peak:
                 self.sf_peak = pk
             if shimmer > 0.0 or inst.cont_key is not None or inst._cp:

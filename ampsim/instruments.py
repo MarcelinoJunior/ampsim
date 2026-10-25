@@ -73,8 +73,8 @@ READY_GROUPS = (
             reverb=40, chorus=0, rot_on=True, rot_fast=False, rot_mix=100, drive_on=True, drive=25)),
         "Órgão Rock (drive + rotação rápida)": dict(sound1="Órgão Rock", fx=dict(
             reverb=35, rot_on=True, rot_fast=True, rot_mix=100, drive_on=True, drive=60)),
-        "Órgão + Piano": dict(sound1="Piano de Cauda", sound2="Órgão Hammond", vol2=55, fx=dict(
-            reverb=60, rot_on=True, rot_mix=50)),
+        "Órgão + Piano": dict(sound1="Piano de Cauda", sound2="Órgão Hammond", vol2=55, fx=dict(reverb=60),
+                              fx2=dict(rot_on=True, rot_mix=100)),
         "Rhodes com Delay (balada)": dict(sound1="Rhodes", sound2="Pad Quente", vol2=45, fx=dict(
             reverb=70, chorus=40, delay_on=True, delay_div=3, delay_fb=30, delay_mix=22)),
         "Piano Brilhante + Synth Pad": dict(sound1="Piano Brilhante", sound2="Pad Polysynth", vol2=55,
@@ -253,20 +253,67 @@ BUTTON_FUNCS = ("Nenhuma", "Tap tempo (BPM)", "Timbre anterior", "Próximo timbr
                 "Delay liga/desliga", "Drive liga/desliga", "Sustain (segurar)", "Oitava −", "Oitava +",
                 "Pânico (soltar notas)")
 DEFAULT_FX = dict(drive_on=False, drive=30, rot_on=False, rot_fast=False, rot_mix=100, delay_on=False,
-                  delay_ms=380, delay_div=0, delay_fb=30, delay_mix=25, delay_ping=True)
+                  delay_ms=380, delay_div=0, delay_fb=30, delay_mix=25, delay_ping=True,
+                  # velocidade da rotação: Hz de cada modo, ou voltas por tempo quando segue o BPM
+                  rot_sync=False, rot_slow_hz=0.8, rot_fast_hz=6.8, rot_slow_mult=0.5, rot_fast_mult=4.0)
 DELAY_DIVS = ("ms (livre)", "1/4", "1/8", "1/8 pontuada", "1/16", "1/8 tercina")
 DEFAULT_BUTTON_FUNCS = ["Timbre anterior", "Próximo timbre", "Parar pad contínuo", "Tap tempo (BPM)",
                         "Preset de pads anterior", "Próximo preset de pads", "Liga/desliga camada 2",
                         "Banco de pads A/B (tela)"]
 
-CH_KEYS1, CH_KEYS2 = 0, 4                   # grupo 0
-CH_CPAD = (2, 6)                            # grupo 2 (duas para o crossfade entre tons)
-PAD_CHANNELS = (9, 1, 5, 13, 3, 7, 11, 15)  # grupos 1 e 3
+MAX_LAYERS = 4
+CH_LAYERS = (0, 1, 2, 3)                    # um canal (e uma saída de áudio) por camada das teclas
+CH_KEYS1, CH_KEYS2 = CH_LAYERS[0], CH_LAYERS[1]
+CH_CPAD = (4, 6)                            # pad contínuo (dois canais para o crossfade entre tons)
+PAD_CHANNELS = (9, 5, 7, 8, 10, 11, 12, 13)  # pads da bateria (o último também é o da prévia)
+ROUTE_PAD, ROUTE_DRUMS = 4, 5
+LAYER_ZONES = ("all", "left", "right")      # camadas 3 e 4: teclado todo / abaixo / a partir da divisão
+
+
+def channel_routes():
+    """Destino de cada canal do FluidSynth no mixer (kernels.mix_soundfont)."""
+    import numpy as np
+
+    r = np.full(16, -1, dtype=np.int64)
+    for i, ch in enumerate(CH_LAYERS):
+        r[ch] = i
+    for ch in CH_CPAD:
+        r[ch] = ROUTE_PAD
+    for ch in PAD_CHANNELS:
+        r[ch] = ROUTE_DRUMS
+    return r
 MELODIC_HOLD = 4.0                          # s até o note-off de pads melódicos
 
 
 def note_name(n):
     return KEY_NAMES[n % 12] + str(n // 12 - 1)
+
+
+def clean_fx(d):
+    """Efeitos de uma camada vindos de fora: só chaves conhecidas, com o tipo do padrão."""
+    out = {}
+    for k, v in d.items():
+        ref = DEFAULT_FX.get(k)
+        if ref is None:
+            continue
+        if isinstance(ref, bool):
+            if isinstance(v, bool):
+                out[k] = v
+        elif isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) < 1e6:
+            out[k] = v
+    return out
+
+
+def clean_layer(d):
+    """Camada 3/4 vinda de fora (sessão, preset compartilhado) ou None."""
+    if not isinstance(d, dict) or d.get("sound") not in SOUND_BY_NAME:
+        return None
+    vol, octv = d.get("vol", 90), d.get("oct", 0)
+    return dict(sound=d["sound"],
+                vol=int(max(0, min(127, vol))) if isinstance(vol, (int, float)) else 90,
+                oct=int(max(-2, min(2, octv))) if isinstance(octv, (int, float)) else 0,
+                on=d.get("on", True) if isinstance(d.get("on", True), bool) else True,
+                zone=d.get("zone", "all") if d.get("zone", "all") in LAYER_ZONES else "all")
 
 
 class Instruments:
@@ -295,7 +342,11 @@ class Instruments:
         self.device = "Teclado simples"         # instrumento desenhado na tela
         self.bpm = 100
         self._taps = []
-        self.fx = dict(DEFAULT_FX)           # efeitos das teclas (drive, rotação, delay)
+        # efeitos (drive, rotação, delay) de cada camada; fx_layer = camada que a tela e os
+        # controles MIDI estão editando (self.fx aponta para ela)
+        self.layer_fx = [dict(DEFAULT_FX) for _ in range(MAX_LAYERS)]
+        self.fx_layer = 0
+        self.extra_layers = []               # camadas 3 e 4: dict(sound, vol, oct, on, zone)
         self.pad_eq = dict(DEFAULT_PAD_EQ)   # EQ e ambiente do pad contínuo (banco B)
         self.transpose = 0
         self.sustain = False
@@ -318,6 +369,66 @@ class Instruments:
         self.on_knob = lambda i, val: None
         self.on_change = lambda: None
         self.on_learn = lambda: None
+
+    # ------------------------------------------------------------------ camadas
+    @property
+    def fx(self):
+        return self.layer_fx[self.fx_layer]
+
+    @fx.setter
+    def fx(self, value):
+        self.layer_fx[self.fx_layer] = value
+
+    def layer_count(self):
+        return 2 + len(self.extra_layers)
+
+    def add_layer(self, sound="Cordas Lentas"):
+        """Nova camada (3 ou 4) no teclado todo. Devolve o número dela, ou None se já tem 4."""
+        if self.layer_count() >= MAX_LAYERS:
+            return None
+        self.extra_layers.append(dict(sound=sound, vol=90, oct=0, on=True, zone="all"))
+        n = self.layer_count()
+        self.layer_fx[n - 1] = dict(DEFAULT_FX)
+        self.ready = ""
+        self.apply_all()
+        self.apply_fx()
+        self.on_change()
+        return n
+
+    def remove_layer(self, n):
+        """Remove a camada n (3 ou 4); os efeitos das seguintes andam junto."""
+        i = n - 3
+        if not 0 <= i < len(self.extra_layers):
+            return
+        self.all_off()
+        del self.extra_layers[i]
+        del self.layer_fx[n - 1]
+        self.layer_fx.append(dict(DEFAULT_FX))
+        self.fx_layer = min(self.fx_layer, self.layer_count() - 1)
+        self.ready = ""
+        self.apply_all()
+        self.apply_fx()
+        self.on_change()
+
+    def set_extra_layer(self, n, **values):
+        lay = self.extra_layers[n - 3]
+        if "sound" in values and values["sound"] not in SOUND_BY_NAME:
+            values.pop("sound")
+        if values.get("zone", "all") not in LAYER_ZONES:
+            values.pop("zone")
+        self.all_off()
+        lay.update(values)
+        self.ready = ""
+        self.apply_all()
+        self.on_change()
+
+    def layer_sounds(self):
+        """[(número, timbre, ligada)] de todas as camadas existentes."""
+        k = self.keys
+        out = [(1, k["sound1"], True), (2, k["sound2"], bool(k["sound2"] and k["layer2_on"]))]
+        for i, lay in enumerate(self.extra_layers):
+            out.append((3 + i, lay["sound"], bool(lay["on"])))
+        return out
 
     # ------------------------------------------------------------------ motor
     def start(self, fs, max_block):
@@ -357,17 +468,19 @@ class Instruments:
 
     def apply_all(self):
         self.all_off()
-        for chan, key in ((CH_KEYS1, "sound1"), (CH_KEYS2, "sound2")):
-            s = SOUND_BY_NAME.get(self.keys.get(key) or "")
+        sounds = [self.keys.get("sound1"), self.keys.get("sound2")] + [x["sound"] for x in self.extra_layers]
+        vols = [self.keys["vol1"], self.keys["vol2"]] + [x["vol"] for x in self.extra_layers]
+        for chan, name in zip(CH_LAYERS, sounds):
+            s = SOUND_BY_NAME.get(name or "")
             if s is not None and s.src == "sf2" and self.sf:
                 self.sf.program(chan, s.bank, s.prog)
             if s is not None and s.src == "synth":
                 self.engine.synth.apply_preset(s.synth_preset)
         self._assign_pad_channels()
         if self.sf:
-            self.sf.cc(CH_KEYS1, 7, self.keys["vol1"])
-            self.sf.cc(CH_KEYS2, 7, self.keys["vol2"])
-            for ch in (CH_KEYS1, CH_KEYS2):
+            for ch, vol in zip(CH_LAYERS, vols):
+                self.sf.cc(ch, 7, int(vol))
+            for ch in CH_LAYERS:
                 self.sf.cc(ch, 91, self.levels["reverb"])
                 self.sf.cc(ch, 93, self.levels["chorus"])
             for ch in CH_CPAD:
@@ -376,7 +489,7 @@ class Instruments:
             for ch in PAD_CHANNELS:
                 self.sf.cc(ch, 91, self.levels["drumverb"])
                 self.sf.cc(ch, 93, 0)
-            for ch in (CH_KEYS1, CH_KEYS2):
+            for ch in CH_LAYERS:
                 self.sf.cc(ch, 74, self.levels["bright"])
                 self.sf.cc(ch, 72, self.levels["release"])
                 self.sf.cc(ch, 73, self.levels["attack"])
@@ -398,13 +511,16 @@ class Instruments:
     # ------------------------------------------------------------------ timbres
     def set_ready(self, name):
         cfg = dict(sound2="", mode2="layer", split=48, vol1=100, vol2=70, layer2_on=True, oct2=0)
-        cfg.update({k: v for k, v in READY[name].items() if k != "fx"})
+        cfg.update({k: v for k, v in READY[name].items() if k not in ("fx", "fx2")})
         self.keys.update(cfg)
+        self.extra_layers = []
         fx = READY[name].get("fx", {})
         self.levels.update(reverb=fx.get("reverb", 45), chorus=fx.get("chorus", 15),
                            shimmer=fx.get("shimmer", 0), attack=fx.get("attack", 0))
-        self.fx = dict(DEFAULT_FX)
-        self.fx.update({k: v for k, v in fx.items() if k in DEFAULT_FX})
+        self.layer_fx = [dict(DEFAULT_FX) for _ in range(MAX_LAYERS)]
+        for i, d in enumerate((fx, READY[name].get("fx2", {}))):       # efeitos da camada 1 e 2
+            self.layer_fx[i].update({k: v for k, v in d.items() if k in DEFAULT_FX})
+        self.fx_layer = 0
         self.ready = name
         self.apply_all()
         self.apply_fx()
@@ -428,9 +544,8 @@ class Instruments:
             eq.configure(self.pad_eq)
 
     def apply_fx(self):
-        kfx = getattr(self.engine, "keys_fx", None)
-        if kfx is not None:
-            kfx.configure(self.fx, self.bpm)
+        for kfx, fx in zip(getattr(self.engine, "keys_fx", ()), self.layer_fx):
+            kfx.configure(fx, self.bpm)
 
     def set_sound(self, slot, name):
         self.keys["sound1" if slot == 1 else "sound2"] = name
@@ -489,15 +604,23 @@ class Instruments:
 
     # ------------------------------------------------------------------ notas
     def _targets(self, note):
+        """[(timbre, canal, oitava)] das camadas que tocam esta nota."""
         k = self.keys
         s1 = SOUND_BY_NAME.get(k["sound1"])
         s2 = SOUND_BY_NAME.get(k["sound2"]) if (k["sound2"] and k["layer2_on"]) else None
         split = s2 is not None and k["mode2"] == "split"
         out = []
         if s1 is not None and (not split or note >= k["split"]):
-            out.append((s1, CH_KEYS1))
+            out.append((s1, CH_KEYS1, 0))
         if s2 is not None and (not split or note < k["split"]):
-            out.append((s2, CH_KEYS2))
+            out.append((s2, CH_KEYS2, k.get("oct2", 0)))
+        for i, lay in enumerate(self.extra_layers):
+            s = SOUND_BY_NAME.get(lay["sound"])
+            zone = lay.get("zone", "all")
+            if s is None or not lay.get("on", True):
+                continue
+            if zone == "all" or (zone == "left" and note < k["split"]) or (zone == "right" and note >= k["split"]):
+                out.append((s, CH_LAYERS[2 + i], lay.get("oct", 0)))
         return out
 
     def _touch(self, vel):
@@ -509,8 +632,7 @@ class Instruments:
             self.key_off(note)
         vel = self._touch(vel)
         played = note + self.transpose
-        o2 = 12 * self.keys.get("oct2", 0)
-        targets = [(s, ch, played + (o2 if ch == CH_KEYS2 else 0)) for s, ch in self._targets(played)]
+        targets = [(s, ch, played + 12 * o) for s, ch, o in self._targets(played)]
         self._held[note] = targets
         synth_done = False
         for s, ch, n in targets:
@@ -572,7 +694,7 @@ class Instruments:
         for note in list(self._held):
             self.key_off(note)
         if self.sf:
-            for ch in (CH_KEYS1, CH_KEYS2) + PAD_CHANNELS:
+            for ch in CH_LAYERS + PAD_CHANNELS:
                 self.sf.all_off(ch)
         self.engine.send_event(Ly.EV_ALL_OFF)
 
@@ -694,7 +816,7 @@ class Instruments:
                        "Release": ("release", 72), "Ataque": ("attack", 73)}[func]
             lv[key] = value
             if self.sf:                     # só as teclas: o pad contínuo tem reverb/chorus próprios
-                for ch in (CH_KEYS1, CH_KEYS2):
+                for ch in CH_LAYERS:
                     self.sf.cc(ch, cc, value)
 
     # ------------------------------------------------------------------ andamento
@@ -745,7 +867,7 @@ class Instruments:
             val = 127 if self.sustain else 0
             self.engine.send_event(Ly.EV_SUSTAIN, val)
             if self.sf:
-                for c in (CH_KEYS1, CH_KEYS2):
+                for c in CH_LAYERS:
                     self.sf.cc(c, 64, val)
             self.on_change()
         elif func in ("Oitava −", "Oitava +"):
@@ -837,13 +959,13 @@ class Instruments:
                 self.all_off()
                 return
             if self.sf:
-                for c in (CH_KEYS1, CH_KEYS2):
+                for c in CH_LAYERS:
                     self.sf.cc(c, d1, d2)
         elif kind == 0xE0:
             val = d1 | (d2 << 7)
             self.engine.send_event(Ly.EV_BEND, val)
             if self.sf:
-                for c in (CH_KEYS1, CH_KEYS2):
+                for c in CH_LAYERS:
                     self.sf.pitch_bend(c, val)
 
     # ------------------------------------------------------------------ assistente de mapeamento
@@ -920,7 +1042,9 @@ class Instruments:
                     cont_sound=self.cont_sound, levels=dict(self.levels),
                     mapping={k: list(v) for k, v in self.mapping.items()},
                     knob_funcs=list(self.knob_funcs), button_funcs=list(self.button_funcs),
-                    device=self.device, bpm=self.bpm, fx=dict(self.fx), free_map=dict(self.free_map),
+                    device=self.device, bpm=self.bpm, fx=dict(self.layer_fx[0]), free_map=dict(self.free_map),
+                    layer_fx=[dict(f) for f in self.layer_fx], fx_layer=self.fx_layer,
+                    extra_layers=[dict(x) for x in self.extra_layers],
                     pad_eq=dict(self.pad_eq))
 
     def load_state(self, st):
@@ -941,8 +1065,18 @@ class Instruments:
             self.pad_keys = list(keys)
         if isinstance(st.get("device"), str):
             self.device = st["device"]
-        if isinstance(st.get("fx"), dict):
-            self.fx.update({k: v for k, v in st["fx"].items() if k in DEFAULT_FX})
+        if isinstance(st.get("layer_fx"), list):
+            self.layer_fx = [dict(DEFAULT_FX) for _ in range(MAX_LAYERS)]
+            for i, d in enumerate(st["layer_fx"][:MAX_LAYERS]):
+                if isinstance(d, dict):
+                    self.layer_fx[i] = dict(DEFAULT_FX, **clean_fx(d))
+        elif isinstance(st.get("fx"), dict):              # sessão antiga: um conjunto só
+            self.layer_fx = [dict(DEFAULT_FX) for _ in range(MAX_LAYERS)]
+            self.layer_fx[0] = dict(DEFAULT_FX, **clean_fx(st["fx"]))
+        if isinstance(st.get("extra_layers"), list):
+            self.extra_layers = [x for x in (clean_layer(d) for d in st["extra_layers"][:MAX_LAYERS - 2]) if x]
+        if isinstance(st.get("fx_layer"), int):
+            self.fx_layer = max(0, min(st["fx_layer"], self.layer_count() - 1))
         if isinstance(st.get("pad_eq"), dict):
             self.pad_eq.update(clean_pad_eq(st["pad_eq"]))
         if isinstance(st.get("free_map"), dict):

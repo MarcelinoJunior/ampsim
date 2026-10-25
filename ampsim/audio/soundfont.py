@@ -3,11 +3,9 @@
 O FluidSynth é usado só como "motor de vozes": nada de driver de áudio próprio. O AmpSim
 chama fluid_synth_process() dentro do callback de áudio, então não há latência extra.
 
-Saídas separadas por canal MIDI (audio-groups = 4, grupo = canal % 4):
-    grupo 0: canais 0, 4         teclas (podem passar pelo amplificador)
-    grupo 1: canais 1, 5, 9, 13  sons dos pads (sempre direto, em estéreo)
-    grupo 2: canais 2, 6         pad contínuo (banco B)
-    grupo 3: canais 3, 7, 11, 15 sons dos pads (continuação)
+Uma saída estéreo por canal MIDI (audio-groups = 16, grupo = canal), cada uma com reverb e
+chorus próprios. O destino de cada canal (camada 1-4 das teclas, pad contínuo, bateria) fica em
+instruments.channel_routes(); kernels.mix_soundfont soma cada um no lugar certo.
 """
 import ctypes as C
 import glob
@@ -18,7 +16,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SF2_DEFAULT = os.path.join(ROOT, "third_party", "soundfonts", "GeneralUser-GS.sf2")
 DRUM_CHANNEL = 9
-N_GROUPS = 4
+N_GROUPS = 16             # um grupo por canal: cada camada das teclas tem os próprios efeitos
 N_OUT = 2 * N_GROUPS      # grupos estéreo
 N_FX = 4 * N_GROUPS       # grupos x (reverb, chorus) x estéreo
 
@@ -151,8 +149,8 @@ class SoundFontEngine:
 
     # ------------------------------------------------------------------ áudio (thread de áudio)
     def render(self, n):
-        """Gera n amostras em self.buf: linhas 2g, 2g+1 = grupo g seco (L, R);
-        8 + 4g .. 8 + 4g + 3 = reverb L, R e chorus L, R do grupo g."""
+        """Gera n amostras em self.buf: linhas 2g, 2g+1 = grupo (canal) g seco (L, R);
+        N_OUT + 4g .. N_OUT + 4g + 3 = reverb L, R e chorus L, R do grupo g."""
         self.buf[:, :n] = 0.0
         self._process(self.synth, n, N_FX, self._fx_arg, N_OUT, self._out_arg)
 

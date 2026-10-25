@@ -504,26 +504,58 @@ def process_track(src, ch, n, mix, D, BQ, Z, ST, H, OSU, OSD, IR, IRH, CHB, DLB,
 
 
 @njit(**JIT)
-def mix_soundfont(B, n, mix, synth_out, shim, kb, to_chain, keys_gain, drums_gain, pad_gain,
+def mix_soundfont(B, n, mix, synth_out, shim, KBS, ROUTE, to_chain, keys_gain, drums_gain, pad_gain,
                   keys_shim, pad_shim, EQB, EQZ, EQP):
-    """Soma a saída do FluidSynth (4 grupos; ver audio/soundfont.py) e monta o envio do Shimmer.
+    """Soma a saída do FluidSynth (um grupo por canal; ver audio/soundfont.py) e monta o envio do
+    Shimmer.
 
-    Teclas: para a trilha (to_chain, mono) ou direto em estéreo. Pads e pad contínuo: sempre
-    direto; o pad contínuo passa pelo EQ próprio (dsp/padeq.py: EQB/EQZ/EQP). Retorna o pico do
-    que foi direto para a saída.
+    ROUTE[canal]: 0-3 = camada das teclas (vai para KBS[camada], onde cada uma tem os seus efeitos),
+    4 = pad contínuo (com o EQ próprio: EQB/EQZ/EQP), 5 = bateria, -1 = não usado.
+    Teclas com to_chain vão para a trilha (mono, passam pelo amplificador). Retorna o pico do que
+    foi direto para a saída.
     """
     peak = 0.0
     eq_on = EQP[0] > 0.5
     width = EQP[1]
     eq_gain = EQP[2]
     ns = EQB.shape[0] // 2
+    ng = ROUTE.shape[0]
+    fx0 = 2 * ng
+    nl = KBS.shape[0]
+    for k in range(nl):
+        for i in range(n):
+            KBS[k, i, 0] = 0.0
+            KBS[k, i, 1] = 0.0
     for i in range(n):
-        kl = (B[0, i] + B[8, i] + B[10, i]) * keys_gain
-        kr = (B[1, i] + B[9, i] + B[11, i]) * keys_gain
-        dl = (B[2, i] + B[12, i] + B[14, i] + B[6, i] + B[20, i] + B[22, i]) * drums_gain
-        dr = (B[3, i] + B[13, i] + B[15, i] + B[7, i] + B[21, i] + B[23, i]) * drums_gain
-        pl = (B[4, i] + B[16, i] + B[18, i]) * pad_gain
-        pr = (B[5, i] + B[17, i] + B[19, i]) * pad_gain
+        dl = 0.0
+        dr = 0.0
+        pl = 0.0
+        pr = 0.0
+        keys_mono = 0.0
+        for g in range(ng):
+            dest = ROUTE[g]
+            if dest < 0:
+                continue
+            f = fx0 + 4 * g
+            l = B[2 * g, i] + B[f, i] + B[f + 2, i]
+            r = B[2 * g + 1, i] + B[f + 1, i] + B[f + 3, i]
+            if dest < nl:
+                l *= keys_gain
+                r *= keys_gain
+                keys_mono += (l + r) * 0.5
+                if not to_chain:
+                    KBS[dest, i, 0] += l
+                    KBS[dest, i, 1] += r
+            elif dest == 4:
+                pl += l
+                pr += r
+            else:
+                dl += l
+                dr += r
+        dl *= drums_gain
+        dr *= drums_gain
+        pl *= pad_gain
+        pr *= pad_gain
         if eq_on:
             for j in range(ns):
                 pl = bq(pl, EQB, EQZ, j)
@@ -533,17 +565,13 @@ def mix_soundfont(B, n, mix, synth_out, shim, kb, to_chain, keys_gain, drums_gai
             pl = (m + sd) * eq_gain
             pr = (m - sd) * eq_gain
         send = (pl + pr) * 0.5 * pad_shim
+        if to_chain:
+            synth_out[i, 0] += keys_mono
+        else:
+            send += keys_mono * keys_shim
+        shim[i] = send
         l = dl + pl
         r = dr + pr
-        if to_chain:
-            synth_out[i, 0] += (kl + kr) * 0.5
-            kb[i, 0] = 0.0
-            kb[i, 1] = 0.0
-        else:                                   # teclas vão para os efeitos das teclas (kb)
-            kb[i, 0] = kl
-            kb[i, 1] = kr
-            send += (kl + kr) * 0.5 * keys_shim
-        shim[i] = send
         mix[i, 0] += l
         mix[i, 1] += r
         a = max(abs(l), abs(r))
@@ -881,9 +909,11 @@ def warmup(fs=48000.0):
     write_output(mix, n, out, 0, 1.0)
     so = np.zeros((n, 1), dtype=np.float32)
     sh = np.zeros(n)
-    kb = np.zeros((n, 2))
+    route = np.full(16, -1, dtype=np.int64)
+    route[0], route[1], route[4], route[9] = 0, 1, 4, 5
+    kbs = np.zeros((4, n, 2))
     for chain in (True, False):
-        mix_soundfont(np.zeros((24, n), dtype=np.float32), n, mix, so, sh, kb, chain, 1.0, 1.0, 1.0,
+        mix_soundfont(np.zeros((96, n), dtype=np.float32), n, mix, so, sh, kbs, route, chain, 1.0, 1.0, 1.0,
                       0.5, 0.5, np.zeros((14, 5)), np.zeros((14, 2)), np.array([1.0, 1.0, 1.0]))
     from .keysfx import warmup as warmup_keysfx
     from .worship import warmup as warmup_worship
