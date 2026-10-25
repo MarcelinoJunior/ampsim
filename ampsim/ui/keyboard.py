@@ -59,11 +59,12 @@ class PcKeyboard(QObject):
         app = QApplication.instance()
         if app.activeModalWidget() is not None or app.activePopupWidget() is not None:
             return False
-        if isinstance(app.focusWidget(), (QLineEdit, QTextEdit, QAbstractSpinBox)):
-            return False
+        focus = app.focusWidget()
+        if isinstance(focus, (QLineEdit, QTextEdit)) and not isinstance(focus.parent(), QAbstractSpinBox):
+            return False                  # digitando texto (ex.: busca, nome de preset)
         ident, offset, ctrl = self._identify(e)
         if ident is None:
-            return False
+            return False                  # números/setas seguem para o campo (ex.: BPM)
         if e.isAutoRepeat():
             return True
         if t == QEvent.KeyPress:

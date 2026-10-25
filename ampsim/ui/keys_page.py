@@ -176,6 +176,7 @@ class KeysView(QWidget):
         self.bpm.setFocusPolicy(Qt.ClickFocus)
         self.bpm.setToolTip("Andamento usado pelo pulso dos timbres sincronizados (ex.: Baixo Pulsante)")
         self.bpm.valueChanged.connect(lambda v: None if self._updating else self.inst.set_bpm(v))
+        self.bpm.editingFinished.connect(self.bpm.clearFocus)
         tempo.addWidget(self.bpm)
         tap = QPushButton("Tap")
         tap.setFocusPolicy(Qt.NoFocus)
