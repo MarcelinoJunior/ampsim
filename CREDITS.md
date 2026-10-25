@@ -3,7 +3,10 @@
 O AmpSim é distribuído sob a **GNU General Public License v3.0** (arquivo [LICENSE](LICENSE)).
 Abaixo está tudo o que vem de outras pessoas, com a licença de cada parte. Nenhum desses
 arquivos fica guardado neste repositório. As bibliotecas são instaladas pelo `pip`, e os timbres
-e motores são baixados das fontes oficiais pelo `tools/baixar_extras.py`.
+e motores são baixados pelo `tools/baixar_extras.py` de uma cópia sem modificações publicada
+no release [extras-1](https://github.com/MarcelinoJunior/ampsim/releases/tag/extras-1). Essa cópia
+traz as licenças (pasta `licencas/`) e o código-fonte do FluidSynth, exigido pela LGPL. Se ela
+falhar, o script baixa das fontes oficiais listadas abaixo.
 
 ## Código e algoritmos
 

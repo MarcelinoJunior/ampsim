@@ -8,7 +8,8 @@
 #   4. Oferece instalar um driver ASIO gratuito (ASIO4ALL ou FlexASIO), pelo winget
 #   5. Compila o DSP uma vez (deixa a primeira abertura rápida) e cria o atalho na Área de Trabalho
 #
-# Tudo é baixado das fontes oficiais; nada de terceiros fica guardado no repositório.
+# Python e drivers vêm das fontes oficiais (winget); timbres e motores vêm da cópia do AmpSim no
+# GitHub (release extras-1, conferida por SHA-256), com as fontes oficiais como reserva.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -73,7 +74,7 @@ if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar as bibliotecas (veja a mensa
 Ok "Bibliotecas instaladas."
 
 # ------------------------------------------------------------------ 3. timbres gratuitos
-Passo 3 "Timbres e motores gratuitos (FluidSynth, GeneralUser GS, capturas NAM) ~45 MB"
+Passo 3 "Timbres e motores gratuitos (FluidSynth, GeneralUser GS, capturas NAM) ~33 MB"
 & $venvPy tools\baixar_extras.py
 if ($LASTEXITCODE -ne 0) { Aviso "Não foi possível baixar tudo agora (sem internet?). Rode 'tools\baixar_extras.py' depois." }
 else { Ok "Timbres prontos em third_party\" }

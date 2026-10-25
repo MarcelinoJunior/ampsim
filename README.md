@@ -57,14 +57,18 @@ Todos os timbres usados são **gratuitos e de licença livre**, e o AmpSim é **
    |---|---|
    | 1 | Instala o **Python 3.13** pelo `winget` (se você ainda não tiver Python 3.11+) |
    | 2 | Cria o ambiente `.venv` e instala as bibliotecas do `requirements.txt` |
-   | 3 | Baixa os timbres e motores gratuitos (~45 MB): FluidSynth, banco GeneralUser GS e capturas NAM |
+   | 3 | Baixa os timbres e motores gratuitos (~33 MB): FluidSynth, banco GeneralUser GS e capturas NAM, da cópia mantida no GitHub do AmpSim |
    | 4 | Pergunta se quer instalar um **driver ASIO gratuito**: ASIO4ALL ou FlexASIO (pelo `winget`) |
    | 5 | Prepara o DSP (≈30 s, só na primeira vez) e cria o atalho **AmpSim** na Área de Trabalho |
 
 3. Abra pelo atalho **AmpSim** (ou `run.bat`).
 
-> Tudo é baixado das **fontes oficiais** (python.org via winget, GitHub dos projetos, autores
-> dos drivers). Nenhum instalador de terceiros fica guardado neste repositório.
+> O Python e os drivers vêm das **fontes oficiais** (winget). Os timbres e motores vêm de uma
+> **cópia mantida no próprio GitHub do AmpSim**, no release
+> [extras-1](https://github.com/MarcelinoJunior/ampsim/releases/tag/extras-1), conferida por
+> SHA-256. Assim, se algum projeto mudar o lugar dos arquivos, a instalação continua
+> funcionando. Se essa cópia falhar, o instalador busca em cada fonte oficial. Os arquivos ficam
+> fora do código para as atualizações continuarem leves.
 
 <details>
 <summary>Instalação manual (sem o instalador)</summary>
