@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from .. import sharing, storage
 from ..audio import devices as dev
+from ..audio.hotplug import DeviceWatcher
 from ..audio.engine import TRACKS
 from ..midi import winmm
 from ..presets import DEFAULT_PRESET, FACTORY
@@ -130,6 +131,13 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(33)
+        # aparelhos conectados com o app aberto (ex.: teclado com interface de áudio própria)
+        self.watcher = DeviceWatcher()
+        self.watcher.poll()
+        self._declined_outputs = set()
+        self.hotplug_timer = QTimer(self)
+        self.hotplug_timer.timeout.connect(self.check_new_devices)
+        self.hotplug_timer.start(2000)
 
     # ------------------------------------------------------------------ construção
     def _build_ready_combo(self):
@@ -442,6 +450,49 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "MIDI", str(exc))
                 self.dock.midi_combo.setCurrentText(NO_MIDI)
 
+    # ------------------------------------------------------------------ aparelhos conectados
+    def check_new_devices(self):
+        if getattr(self, "_asking", False):             # pergunta aberta: o timer continua rodando
+            return
+        new_outs, new_midis = self.watcher.poll()
+        if new_midis:
+            self._reload_midi()
+            current = self.midi.name if self.midi else None
+            if self.midi is not None and not current:      # nenhum teclado aberto: usa o novo
+                self.dock.midi_combo.setCurrentText(new_midis[0])
+                self._open_midi(new_midis[0])
+                self.flash_status(f"Teclado MIDI conectado: {new_midis[0]}")
+        for name in new_outs:
+            if name in self._declined_outputs or name == self.engine.config.output_device:
+                continue
+            self._asking = True
+            try:
+                use = self.ask_use_output(name)
+            finally:
+                self._asking = False
+            if use:
+                self.use_new_output(name)
+                return
+            self._declined_outputs.add(name)
+
+    def ask_use_output(self, name):
+        box = QMessageBox(self)
+        box.setWindowTitle("Aparelho de áudio conectado")
+        box.setText(f"<b>{name}</b> foi conectado e tem saída de áudio.<br><br>"
+                    "Quer que o som do AmpSim saia por ele (ex.: a saída P10 do teclado)?")
+        use = box.addButton("Usar a saída dele", QMessageBox.AcceptRole)
+        box.addButton("Agora não", QMessageBox.RejectRole)
+        box.exec()
+        return box.clickedButton() is use
+
+    def use_new_output(self, short_name):
+        """Recarrega a lista de placas (o PortAudio só vê aparelhos novos assim) e abre a
+        configuração de áudio já com a saída do aparelho escolhida."""
+        self.engine.stop()
+        dev.refresh()
+        self._update_status()
+        self.open_audio_dialog(suggest_output=short_name)
+
     # ------------------------------------------------------------------ áudio
     def toggle_power(self, on):
         if on:
@@ -465,8 +516,8 @@ class MainWindow(QMainWindow):
         self._refresh_all()
         self._update_status()
 
-    def open_audio_dialog(self):
-        dlg = AudioDialog(self.engine, self)
+    def open_audio_dialog(self, suggest_output=None):
+        dlg = AudioDialog(self.engine, self, suggest_output=suggest_output)
         if dlg.exec():
             cfg, channels = dlg.result_config()
             self.engine.input_channel.update(channels)
@@ -619,6 +670,7 @@ class MainWindow(QMainWindow):
             self._start_audio()
 
     def closeEvent(self, ev):
+        self.hotplug_timer.stop()
         self.save_state()
         if self.midi:
             self.midi.close()

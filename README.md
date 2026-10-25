@@ -80,7 +80,7 @@ winget install -e --id MichaelTippach.ASIO4ALL
 
 ## Primeiro uso: escolhendo a placa de som
 
-1. Clique em **⚙ Áudio…** no topo.
+1. Clique na placa/latência no topo (ou ☰ → **Placa de som e driver…**).
 2. **API de áudio**: use **ASIO** (menor atraso). Sem ASIO, use **Windows WASAPI** com
    "modo exclusivo", ou **WDM-KS**.
 3. Escolha a **Entrada** (onde a guitarra/baixo está plugada) e a **Saída** (fone/caixa).
@@ -93,6 +93,13 @@ winget install -e --id MichaelTippach.ASIO4ALL
 Com **ASIO4ALL**, abra **Painel do driver ASIO…** e, na chave inglesa, ligue a entrada e a
 saída da sua placa (e desligue as outras). Se a saída aparecer como "Not Connected", nada sai
 no fone — é só ligá-la no painel.
+
+**Teclado com interface de áudio própria** (ex.: M-VAVE com saída P10): conecte com o AmpSim
+aberto. Se o Windows reconhecer o aparelho como placa de som, o AmpSim pergunta se o som deve
+sair por ele e abre a configuração já com a saída escolhida. É só conferir e clicar em
+**Aplicar e iniciar**. Se nenhum teclado MIDI estiver escolhido, o novo já fica ativo. Se o
+aparelho não aparecer em Configurações do Windows → Som → Saída, ele só manda MIDI, e o som
+continua saindo pela placa do computador.
 
 ## A tela
 

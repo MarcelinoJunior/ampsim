@@ -18,7 +18,7 @@ API_HINTS = {
 
 
 class AudioDialog(QDialog):
-    def __init__(self, engine, parent=None):
+    def __init__(self, engine, parent=None, suggest_output=None):
         super().__init__(parent)
         self.engine = engine
         self.setWindowTitle("Configuração de áudio")
@@ -98,6 +98,27 @@ class AudioDialog(QDialog):
         self._select(self.g_ch, engine.input_channel["guitar"], data=True)
         self._select(self.b_ch, engine.input_channel["bass"], data=True)
         self._update_latency()
+        if suggest_output:
+            self.suggest(suggest_output)
+
+    def suggest(self, short_name):
+        """Aparelho recém-conectado: WASAPI (funciona com qualquer interface USB) e a saída dele."""
+        from ..audio.hotplug import match_output
+
+        keep_in = self.inp.currentText()
+        for api in ("Windows WASAPI", self.api.currentText()):
+            if api not in dev.hostapis():
+                continue
+            names = [d.name for d in dev.devices(api, "output")]
+            name = match_output(short_name, names)
+            if name:
+                self.api.setCurrentText(api)
+                self._api_changed(api)
+                self._select(self.out, name)
+                self._select(self.inp, keep_in)
+                self.hint.setText(f"Aparelho conectado: {name}. Confira e clique em “Aplicar e iniciar”.")
+                return name
+        return None
 
     @staticmethod
     def _select(combo, value, data=False):
