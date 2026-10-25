@@ -19,6 +19,11 @@ run.bat
 Na primeira vez o `run.bat` cria o ambiente `.venv`, instala as dependências e compila o DSP
 (leva ~20 s; depois fica em cache). Depois clique em **⚙ Áudio…**.
 
+**Atalho na Área de Trabalho:** rode `criar_atalho.ps1` (botão direito → *Executar com o
+PowerShell*) para criar o ícone **AmpSim**, que abre o app sem janela de console.
+Para fechar, use o botão **⏻ Sair** no canto superior direito: ele salva a sessão, desliga o
+áudio e encerra o programa. Erros inesperados ficam em `%APPDATA%\AmpSim\error.log`.
+
 > Mantenha a pasta num caminho curto (ex.: `C:\Github\ampsim`). O PySide6 tem arquivos com
 > nomes longos e a instalação falha em caminhos muito profundos.
 

@@ -16,7 +16,26 @@ def _raise_priority():
         k32.SetPriorityClass(k32.GetCurrentProcess(), HIGH_PRIORITY_CLASS)
 
 
+def _install_error_log():
+    """Sem console (pythonw), erros inesperados vão para %APPDATA%\\AmpSim\\error.log."""
+    import traceback
+
+    from .storage import APP_DIR
+
+    def hook(exc_type, exc, tb):
+        try:
+            APP_DIR.mkdir(parents=True, exist_ok=True)
+            with open(APP_DIR / "error.log", "a", encoding="utf-8") as f:
+                traceback.print_exception(exc_type, exc, tb, file=f)
+        except OSError:
+            pass
+        sys.__excepthook__(exc_type, exc, tb)
+
+    sys.excepthook = hook
+
+
 def main():
+    _install_error_log()
     # A thread de áudio precisa do GIL a cada callback: trocar de thread mais rápido que o
     # padrão (5 ms) evita que a UI segure o GIL por um buffer inteiro.
     sys.setswitchinterval(0.0005)
@@ -24,10 +43,18 @@ def main():
 
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication, QSplashScreen
-    from PySide6.QtGui import QColor, QPixmap
+    from PySide6.QtGui import QColor, QIcon, QPixmap
 
+    if sys.platform == "win32":
+        # ícone próprio na barra de tarefas (em vez do ícone do Python)
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AmpSim.App")
     app = QApplication(sys.argv)
     app.setApplicationName("AmpSim")
+    icon = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "ampsim.ico")
+    if os.path.exists(icon):
+        app.setWindowIcon(QIcon(icon))
     from .ui.theme import STYLE
 
     app.setStyleSheet(STYLE)

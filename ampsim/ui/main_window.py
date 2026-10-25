@@ -98,6 +98,13 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.master_knob)
         self.m_master = Meter()
         lay.addWidget(self.m_master)
+        lay.addSpacing(10)
+        quit_btn = QPushButton("⏻ Sair")
+        quit_btn.setObjectName("quit")
+        quit_btn.setToolTip("Salva a sessão, desliga o áudio e fecha o AmpSim")
+        quit_btn.setFocusPolicy(Qt.NoFocus)
+        quit_btn.clicked.connect(self.close)
+        lay.addWidget(quit_btn)
         return bar
 
     def _build_keyboard_bar(self):
