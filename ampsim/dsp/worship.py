@@ -43,25 +43,72 @@ DRUM_TYPES = {
 }
 DRUM_TYPE_NAMES = list(DRUM_TYPES)
 
-MAX_DRUM_VOICES = 24
-DV_ACTIVE, DV_TYPE, DV_T, DV_VEL, DV_PH, DV_PH2, DV_LP, DV_HP, DV_HPX, DV_LP2 = range(10)
-DV_SIZE = 10
+MAX_DRUM_VOICES = 64
+GHOSTS = 4             # linhas extras no fim de DV: vozes roubadas terminando o fade (nunca recebem batida)
+DV_ACTIVE, DV_TYPE, DV_T, DV_VEL, DV_PH, DV_PH2, DV_LP, DV_HP, DV_HPX, DV_LP2, DV_LAST, DV_LASTS,     DV_G, DV_G1, DV_GK = range(15)
+DV_SIZE = 15
+# Sem degrau nem quina na forma de onda quando uma voz precisa sumir:
+# - nova batida do mesmo som abafa a anterior (como a pele de verdade) com fade suave de ~40 ms;
+# - sem voz livre, a mais baixa vai para uma linha "fantasma" e some em ~10 ms, continuando a soar.
+# O ganho segue um fade de 2ª ordem (g persegue g1, que decai): começa com inclinação zero.
+CHOKE_TAU = 0.012
+STEAL_TAU = 0.003
+# último recurso (fantasmas todos ocupados): o valor em que a voz estava decai até zero (DS)
+DECLICK_TAU = 0.002
 
 
 @njit(**JIT)
-def render_drums(mix, verb_send, n, ev, nev, DV, DT, fs, gain):
-    """Dispara eventos (tipo, velocidade) e soma as vozes em mix (estéreo) e no envio de reverb."""
+def _voice_level(DV, DT, k, inv):
+    p = DT[int(DV[k, DV_TYPE])]
+    tt = DV[k, DV_T] * inv
+    return p[P_LEVEL] * DV[k, DV_VEL] * max(p[P_TONE] * math.exp(-tt / p[P_ADEC]),
+                                            p[P_NOISE] * math.exp(-tt / p[P_NDEC]))
+
+
+@njit(**JIT)
+def render_drums(mix, verb_send, n, ev, nev, DV, DT, fs, gain, DS):
+    """Dispara eventos (tipo, velocidade) e soma as vozes em mix (estéreo) e no envio de reverb.
+
+    Sem voz livre, a mais baixa termina num fade rápido numa linha fantasma (ver GHOSTS).
+    """
+    inv = 1.0 / fs
+    nv = DV.shape[0] - GHOSTS
     for e in range(nev):
         v = -1
-        oldest = -1.0
-        for k in range(DV.shape[0]):
+        quiet = 1e9
+        for k in range(nv):
             if DV[k, DV_ACTIVE] < 0.5:
                 v = k
                 break
-            if DV[k, DV_T] > oldest:
-                oldest = DV[k, DV_T]
+            lv = _voice_level(DV, DT, k, inv) * DV[k, DV_G]
+            if lv < quiet:
+                quiet = lv
                 v = k
+        if DV[v, DV_ACTIVE] > 0.5:              # roubo: a voz continua soando no fantasma
+            gh = -1
+            gq = 1e9
+            for k in range(nv, DV.shape[0]):
+                if DV[k, DV_ACTIVE] < 0.5:
+                    gh = k
+                    break
+                lv = _voice_level(DV, DT, k, inv) * DV[k, DV_G]
+                if lv < gq:
+                    gq = lv
+                    gh = k
+            if DV[gh, DV_ACTIVE] > 0.5:         # fantasmas lotados: corta o mais baixo com declick
+                DS[0] += DV[gh, DV_LAST]
+                DS[1] += DV[gh, DV_LASTS]
+            for c in range(DV.shape[1]):
+                DV[gh, c] = DV[v, c]
+            DV[gh, DV_GK] = math.exp(-inv / STEAL_TAU)
+        kf = math.exp(-inv / CHOKE_TAU)
+        for k in range(nv):                     # abafa as batidas anteriores do mesmo som
+            if DV[k, DV_ACTIVE] > 0.5 and int(DV[k, DV_TYPE]) == ev[e, 0] and k != v                     and DV[k, DV_GK] >= 1.0:
+                DV[k, DV_GK] = kf
         DV[v, DV_ACTIVE] = 1.0
+        DV[v, DV_G] = 1.0
+        DV[v, DV_G1] = 1.0
+        DV[v, DV_GK] = 1.0
         DV[v, DV_TYPE] = ev[e, 0]
         DV[v, DV_T] = 0.0
         DV[v, DV_VEL] = ev[e, 1] / 127.0
@@ -71,7 +118,19 @@ def render_drums(mix, verb_send, n, ev, nev, DV, DT, fs, gain):
         DV[v, DV_HP] = 0.0
         DV[v, DV_HPX] = 0.0
         DV[v, DV_LP2] = 0.0
-    inv = 1.0 / fs
+        DV[v, DV_LAST] = 0.0
+        DV[v, DV_LASTS] = 0.0
+    if DS[0] != 0.0 or DS[1] != 0.0:
+        k = math.exp(-inv / DECLICK_TAU)
+        for i in range(n):
+            mix[i, 0] += DS[0]
+            mix[i, 1] += DS[0]
+            verb_send[i] += DS[1]
+            DS[0] *= k
+            DS[1] *= k
+        if abs(DS[0]) < 1e-7 and abs(DS[1]) < 1e-7:
+            DS[0] = 0.0
+            DS[1] = 0.0
     for v in range(DV.shape[0]):
         if DV[v, DV_ACTIVE] < 0.5:
             continue
@@ -90,6 +149,10 @@ def render_drums(mix, verb_send, n, ev, nev, DV, DT, fs, gain):
         lp = DV[v, DV_LP]
         hp = DV[v, DV_HP]
         lp2 = DV[v, DV_LP2]
+        g = DV[v, DV_G]
+        g1 = DV[v, DV_G1]
+        gk = DV[v, DV_GK]
+        gc = 1.0 - gk
         end = 6.0 * max(adec, ndec) + 0.05
         for i in range(n):
             tt = t * inv
@@ -127,12 +190,17 @@ def render_drums(mix, verb_send, n, ev, nev, DV, DT, fs, gain):
                 s += noise_l * nz * env * 1.6
                 if click > 0.0 and tt < 0.004:
                     s += click * w * (1.0 - tt / 0.004)
-            out = s * amp
+            out = s * amp * g
+            if gc > 0.0:
+                g1 *= gk
+                g += (g1 - g) * gc
             mix[i, 0] += out
             mix[i, 1] += out
             verb_send[i] += out * send
+            DV[v, DV_LAST] = out
+            DV[v, DV_LASTS] = out * send
             t += 1.0
-            if tt > end:
+            if tt > end or (g < 1e-4 and g1 < 1e-4):
                 DV[v, DV_ACTIVE] = 0.0
                 break
         DV[v, DV_T] = t
@@ -141,14 +209,17 @@ def render_drums(mix, verb_send, n, ev, nev, DV, DT, fs, gain):
         DV[v, DV_LP] = lp
         DV[v, DV_HP] = hp
         DV[v, DV_LP2] = lp2
+        DV[v, DV_G] = g
+        DV[v, DV_G1] = g1
 
 
 class DrumSynth:
     def __init__(self, fs):
         self.fs = float(fs)
-        self.DV = np.zeros((MAX_DRUM_VOICES, DV_SIZE))
+        self.DV = np.zeros((MAX_DRUM_VOICES + GHOSTS, DV_SIZE))
         self.DT = np.array([DRUM_TYPES[k] for k in DRUM_TYPE_NAMES], dtype=np.float64)
         self.ev = np.zeros((64, 2), dtype=np.int64)
+        self.DS = np.zeros(2)
 
 
 # ------------------------------------------------------------------ reverb Shimmer
@@ -275,5 +346,5 @@ def warmup(fs=48000.0):
     send = np.zeros(64)
     d.ev[0] = (0, 100)
     d.ev[1] = (6, 100)
-    render_drums(mix, send, 64, d.ev, 2, d.DV, d.DT, fs, 1.0)
+    render_drums(mix, send, 64, d.ev, 2, d.DV, d.DT, fs, 1.0, d.DS)
     ShimmerDSP(fs).process(send, 64, mix, 0.5, 0.5)

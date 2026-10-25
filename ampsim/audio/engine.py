@@ -225,7 +225,7 @@ class AudioEngine:
         d = self.drums
         send = self._drum_send
         send[:frames] = 0.0
-        render_drums(mix, send, frames, ev, nev, d.DV, d.DT, self.fs, inst.drums_gain())
+        render_drums(mix, send, frames, ev, nev, d.DV, d.DT, self.fs, inst.drums_gain(), d.DS)
         self.drumverb.process(send, frames, mix, 0.25 + inst.levels["drumverb"] / 127.0, 0.0)
         if t.D[Ly.T_ON] > 0.5:
             self._run_track(t, self._synth_out, 0, frames, mix)

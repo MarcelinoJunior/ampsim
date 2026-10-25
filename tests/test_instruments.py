@@ -150,7 +150,7 @@ def test_synth_drums_and_shimmer_are_finite(engine):
     send = np.zeros(48000)
     for i in range(len(DRUM_TYPE_NAMES)):
         d.ev[i] = (i, 120)
-    render_drums(mix, send, 48000, d.ev, len(DRUM_TYPE_NAMES), d.DV, d.DT, 48000.0, 1.0)
+    render_drums(mix, send, 48000, d.ev, len(DRUM_TYPE_NAMES), d.DV, d.DT, 48000.0, 1.0, d.DS)
     sh = ShimmerDSP(48000.0)
     out = np.zeros((48000, 2))
     sh.process(send, 48000, out, 1.0, 0.7)
