@@ -26,7 +26,7 @@ from ..dsp.nam import list_captures
 from ..dsp.params import AMP_MODELS, CAB_IR_INDEX, EFFECT_BY_KEY, SYNTH_GROUPS, TRACK_PARAMS
 from ..dsp.synth import SYNTH_PRESETS
 from ..presets import FACTORY
-from .amp_skins import SKINS, paint_face
+from .amp_skins import SKINS, TRADEMARK_NOTICE, capture_face, paint_face
 from .widgets import Knob, LedButton, Meter
 
 CALIB_TICKS = 70          # ~2,3 s com o timer de 33 ms da janela principal
@@ -202,7 +202,7 @@ class AmpRigPanel(QFrame):
         self.face = _Face(self._paint_face)
         self.face.setObjectName("ampface")
         fl = QVBoxLayout(self.face)
-        fl.setContentsMargins(14, 8, 14, 10)
+        fl.setContentsMargins(14, 8, 14, 24)
         fl.setSpacing(4)
 
         top = QHBoxLayout()
@@ -218,14 +218,14 @@ class AmpRigPanel(QFrame):
         fl.addLayout(top)
 
         self.grille = QWidget()
-        self.grille.setFixedHeight(54)
+        self.grille.setFixedHeight(58)
         fl.addWidget(self.grille)
 
         # controles de cada tipo de amp (só um grupo fica visível)
         self.knobs = {}
         self.model_box = QWidget()
         ml = QHBoxLayout(self.model_box)
-        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setContentsMargins(0, 12, 0, 0)
         ml.setSpacing(4)
         ml.addStretch(1)
         for p in EFFECT_BY_KEY["amp"].params:
@@ -239,7 +239,7 @@ class AmpRigPanel(QFrame):
 
         self.nam_box = QWidget()
         nl = QHBoxLayout(self.nam_box)
-        nl.setContentsMargins(0, 0, 0, 0)
+        nl.setContentsMargins(0, 12, 0, 0)
         nl.addStretch(1)
         self.nam_knobs = {}
         for p in EFFECT_BY_KEY["nam"].params:
@@ -261,7 +261,7 @@ class AmpRigPanel(QFrame):
 
         self.vst_box = QWidget()
         vl = QHBoxLayout(self.vst_box)
-        vl.setContentsMargins(0, 0, 0, 0)
+        vl.setContentsMargins(0, 12, 0, 0)
         vl.addStretch(1)
         self.vst_mix = Knob(EFFECT_BY_KEY["vst"].params[0], accent)
         self.vst_mix.valueChanged.connect(lambda v: self.track().set_param("vst", "mix", v))
@@ -281,7 +281,7 @@ class AmpRigPanel(QFrame):
         self.di_box.setAlignment(Qt.AlignCenter)
 
         for box in (self.model_box, self.nam_box, self.vst_box, self.di_box):
-            box.setFixedHeight(88)
+            box.setFixedHeight(104)          # espaço para o modelo escrito e o aviso de marca
             fl.addWidget(box)
 
         outer.addWidget(self.face, 4)
@@ -397,21 +397,27 @@ class AmpRigPanel(QFrame):
 
     # ------------------------------------------------------------------ aparência
     def _face_info(self):
+        """(fachada, texto da marca/logo, modelo escrito no painel, aviso de marca)."""
         kind, arg = self.source()
         if kind == "model":
             m = AMP_MODELS[arg]
-            return m["skin"], m["name"]
+            if not m["brand"]:
+                return m["skin"], m["name"], "", ""
+            return (m["skin"], m["brand"], f"{m['model']}  ·  AmpSim {m['name']}",
+                    TRADEMARK_NOTICE.format(brand=m["brand"]))
         if kind == "nam":
-            return "nam", arg
+            skin, brand, model = capture_face(arg)
+            if skin == "nam":
+                return skin, arg, "captura NAM", ""
+            return skin, brand, f"{model}  ·  captura NAM", TRADEMARK_NOTICE.format(brand=brand)
         if kind == "vst":
             t = self.track()
-            return "vst", t.vst.name if t.vst else os.path.basename(arg)
-        return "di", "Sinal direto (DI)"
+            return "vst", t.vst.name if t.vst else os.path.basename(arg), "plugin VST3", ""
+        return "di", "Sinal direto (DI)", "", ""
 
     def _paint_face(self, _):
-        skin, logo = self._face_info()
-        g = self.grille.geometry()
-        paint_face(self.face, skin, logo, g)
+        skin, logo, model, notice = self._face_info()
+        paint_face(self.face, skin, logo, self.grille.geometry(), model, notice)
 
     def refresh(self):
         t = self.track()
@@ -435,7 +441,8 @@ class AmpRigPanel(QFrame):
 
         skin = SKINS[self._face_info()[0]]
         for knob in list(self.knobs.values()) + list(self.nam_knobs.values()) + [self.vst_mix]:
-            knob.set_skin(skin.accent, skin.knob_cap, skin.knob_ring, skin.text, skin.dim, skin.pointer)
+            knob.set_skin(skin.accent, skin.knob_cap, skin.knob_ring, skin.text, skin.dim, skin.pointer,
+                          style=skin.knob_style, skirt=skin.knob_skirt, upper=skin.upper)
         self.di_box.setStyleSheet(f"color: {skin.dim};")
         for key, k in self.knobs.items():
             k.setValue(t.values["amp"][key])

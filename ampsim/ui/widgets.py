@@ -2,7 +2,7 @@
 import math
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF, QRadialGradient
 from PySide6.QtWidgets import QAbstractButton, QSizePolicy, QWidget
 
 BG = QColor("#16181d")
@@ -54,6 +54,9 @@ class Knob(QWidget):
         self.text = TEXT
         self.dim = DIM
         self.pointer = TEXT
+        self.style = "arc"            # "arc" (moderno) ou estilos de amp: tophat, skirt, chicken, chrome
+        self.skirt = QColor("#111111")
+        self.upper = False
         self._value = param.default
         self._drag = None
         self.setFocusPolicy(Qt.NoFocus)
@@ -66,9 +69,10 @@ class Knob(QWidget):
         self.setToolTip(f"{param.label}\nArraste para cima/baixo (Shift = ajuste fino)\n"
                         "Roda do mouse ajusta · duplo-clique restaura o padrão")
 
-    def set_skin(self, accent, cap, ring, text, dim, pointer):
+    def set_skin(self, accent, cap, ring, text, dim, pointer, style="arc", skirt="#111111", upper=False):
         self.accent, self.cap, self.ring = QColor(accent), QColor(cap), QColor(ring)
         self.text, self.dim, self.pointer = QColor(text), QColor(dim), QColor(pointer)
+        self.style, self.skirt, self.upper = style, QColor(skirt), upper
         self.update()
 
     # mapeamento valor <-> posição 0..1
@@ -132,6 +136,9 @@ class Knob(QWidget):
             _, _, r, cy, ly, vy = KNOB_SIZES[self.size_mode]
             c = QPointF(w / 2, cy)
         thick = 4 if r >= 18 else 3
+        if self.style != "arc" and self.size_mode == "normal":
+            self._paint_amp_knob(qp, c, r)
+            return
         rect = QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r)
         qp.setPen(QPen(self.ring, thick, Qt.SolidLine, Qt.RoundCap))
         qp.drawArc(rect, 225 * 16, -270 * 16)
@@ -162,6 +169,75 @@ class Knob(QWidget):
             return
         qp.setPen(self.text)
         qp.drawText(QRectF(0, ly, w, 15), Qt.AlignCenter, self.p.label)
+        qp.setPen(self.dim)
+        qp.drawText(QRectF(0, vy, w, 15), Qt.AlignCenter, fmt_value(self.p, self._value))
+
+
+    def _paint_amp_knob(self, qp, c, r):
+        """Knobs no estilo dos amplificadores reais: escala 0-10 em volta e ponteiro."""
+        t = self._to_norm(self._value)
+        w = self.width()
+        # escala impressa no painel (11 marcas, 0 a 10)
+        qp.setPen(QPen(self.text, 1.2))
+        for i in range(11):
+            a = math.radians(225 - 27 * i)
+            r1, r2 = r + 1.5, r + (5 if i % 5 == 0 else 3.5)
+            qp.drawLine(QPointF(c.x() + r1 * math.cos(a), c.y() - r1 * math.sin(a)),
+                        QPointF(c.x() + r2 * math.cos(a), c.y() - r2 * math.sin(a)))
+        ang = math.radians(225 - 270 * t)
+        ca, sa = math.cos(ang), -math.sin(ang)
+        st = self.style
+        if st == "chicken":
+            # base redonda + ponteiro alongado (estilo "chicken head" dos Vox)
+            qp.setPen(QPen(QColor(0, 0, 0, 140), 1))
+            qp.setBrush(self.cap)
+            qp.drawEllipse(c, r * 0.55, r * 0.55)
+            perp = (-sa, ca)
+            tip = QPointF(c.x() + ca * (r - 1), c.y() + sa * (r - 1))
+            back = QPointF(c.x() - ca * r * 0.65, c.y() - sa * r * 0.65)
+            wdt = r * 0.32
+            poly = QPolygonF([QPointF(tip.x() + perp[0] * 2, tip.y() + perp[1] * 2),
+                              QPointF(back.x() + perp[0] * wdt, back.y() + perp[1] * wdt),
+                              QPointF(back.x() - perp[0] * wdt, back.y() - perp[1] * wdt),
+                              QPointF(tip.x() - perp[0] * 2, tip.y() - perp[1] * 2)])
+            qp.drawPolygon(poly)
+            qp.setPen(QPen(self.pointer, 2, Qt.SolidLine, Qt.RoundCap))
+            qp.drawLine(c, tip)
+        else:
+            # saia (skirt) + tampa; tophat = tampa dourada dos Marshall
+            grad = QRadialGradient(c.x() - r * 0.3, c.y() - r * 0.3, r * 1.4)
+            grad.setColorAt(0, self.skirt.lighter(170))
+            grad.setColorAt(1, self.skirt)
+            qp.setPen(QPen(QColor(0, 0, 0, 180), 1))
+            qp.setBrush(grad)
+            qp.drawEllipse(c, r, r)
+            if st == "chrome":       # serrilhado na borda
+                qp.setPen(QPen(QColor(255, 255, 255, 40), 1))
+                for i in range(24):
+                    a = math.radians(i * 15)
+                    qp.drawLine(QPointF(c.x() + (r - 3) * math.cos(a), c.y() + (r - 3) * math.sin(a)),
+                                QPointF(c.x() + r * math.cos(a), c.y() + r * math.sin(a)))
+            cap_r = r * (0.62 if st == "tophat" else 0.72)
+            cg = QRadialGradient(c.x() - cap_r * 0.4, c.y() - cap_r * 0.4, cap_r * 1.6)
+            cg.setColorAt(0, self.cap.lighter(160))
+            cg.setColorAt(1, self.cap.darker(120))
+            qp.setBrush(cg)
+            qp.drawEllipse(c, cap_r, cap_r)
+            qp.setPen(QPen(self.pointer, 2.2, Qt.SolidLine, Qt.RoundCap))
+            start = cap_r * (1.0 if st == "tophat" else 0.25)
+            qp.drawLine(QPointF(c.x() + ca * start, c.y() + sa * start),
+                        QPointF(c.x() + ca * (r - 2), c.y() + sa * (r - 2)))
+        f = QFont(self.font())
+        f.setPointSizeF(7.5 if self.upper else 8)
+        f.setBold(self.upper)
+        f.setLetterSpacing(QFont.PercentageSpacing, 108 if self.upper else 100)
+        qp.setFont(f)
+        _, _, _, _, ly, vy = KNOB_SIZES[self.size_mode]
+        qp.setPen(self.text)
+        label = self.p.label.upper() if self.upper else self.p.label
+        qp.drawText(QRectF(0, ly, w, 15), Qt.AlignCenter, label)
+        f.setBold(False)
+        qp.setFont(f)
         qp.setPen(self.dim)
         qp.drawText(QRectF(0, vy, w, 15), Qt.AlignCenter, fmt_value(self.p, self._value))
 

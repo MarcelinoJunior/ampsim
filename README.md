@@ -70,8 +70,9 @@ Redutor de Ruído → Noise Gate → Compressor → Overdrive → Amplificador �
   mede o chiado da entrada por 2 s e ajusta os limiares do Gate e do Redutor de Ruído.
   Entradas de microfone de placas USB simples costumam ter bastante chiado: com distorção ele
   vira um "zunido" agudo se o gate ficar abaixo do ruído.
-- **Amplificador**: 7 modelos inspirados em clássicos, cada um com fachada própria (tecido,
-  logo e painel desenhados no estilo do original, sem marcas):
+- **Amplificador**: escolhido num seletor único no topo (modelos AmpSim, capturas NAM,
+  plugins VST3 ou sem amp). Cada amp aparece com a fachada no estilo do original: tecido,
+  painel, knobs (top hat, chicken head, saia numerada...), jacks, luz piloto e chaves:
 
   | Modelo | Estilo de | Uso |
   |---|---|---|
@@ -167,8 +168,16 @@ O teste de desempenho imprime quanto da janela de 64 amostras o DSP completo con
 ## Licenças de terceiros
 
 `pedalboard` (Spotify) é GPL-3.0; as capturas NAM incluídas pelo script são GPL-3.0; o
-plugin Neural Amp Modeler é MIT. Os nomes de equipamentos citados identificam o estilo ou o
-equipamento capturado e pertencem aos seus donos; não há afiliação.
+plugin Neural Amp Modeler é MIT.
+
+## Marcas registradas
+
+Fender, Marshall, Mesa/Boogie, Vox, Ampeg, Orange, EVH, Soldano, Tech 21 e demais nomes de
+equipamentos citados são marcas registradas de seus respectivos titulares. O AmpSim não é
+afiliado, patrocinado nem endossado por nenhum deles. Os nomes aparecem apenas para
+identificar o estilo de timbre que cada modelo busca ou o equipamento real capturado (NAM).
+As fachadas são desenhos próprios, com os nomes escritos em fontes comuns, e não reproduzem
+logotipos oficiais. Cada fachada exibe esse aviso na própria tela.
 
 ## Próximos passos sugeridos
 
