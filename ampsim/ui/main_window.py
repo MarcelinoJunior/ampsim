@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import sharing, storage, updater
+from ..version import version_text
 from ..audio import devices as dev
 from ..audio.hotplug import DeviceWatcher, audio_outputs, find_instrument_output, instrument_of
 from ..audio.engine import TRACKS
@@ -44,7 +45,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.engine = engine
         self.inst = engine.instruments
-        self.setWindowTitle("AmpSim — Live Performance")
+        self.setWindowTitle(f"AmpSim {version_text()} — Live Performance")
         self.resize(1536, 800)
         self._dock_by_page = {"guitar": True, "bass": True, "pads": False}   # recolhida?
 
@@ -150,6 +151,7 @@ class MainWindow(QMainWindow):
         self._update_bridge.done.connect(self._update_done)
         self._update_thread = None
         self.topbar.update_btn.clicked.connect(lambda *_: self.restart())
+        self.topbar.version_btn.clicked.connect(lambda *_: self.show_about())
         self.dock.auto_update.toggled.connect(lambda on: setattr(self, "auto_update", on))
         self._show_version()
         if self.auto_update and not os.environ.get("AMPSIM_NO_UPDATE"):    # testes não acessam a rede
@@ -206,7 +208,7 @@ class MainWindow(QMainWindow):
         m.addAction(icon("mixer", C["text"], 14), "Mixer", lambda: self.dock.show_tab(1))
         m.addAction(icon("stop", C["text"], 14), "Pânico (soltar todas as notas)", self.panic)
         m.addSeparator()
-        m.addAction(icon("info", C["text"], 14), "Sobre o AmpSim e licenças…", self.file_menu.about)
+        m.addAction(icon("info", C["text"], 14), "Sobre o AmpSim…", lambda: self.show_about())
         m.addAction(icon("close", C["text"], 14), "Sair (salva a sessão)", self.close)
         return m
 
@@ -470,7 +472,7 @@ class MainWindow(QMainWindow):
     def _show_version(self, extra=""):
         sha = updater.local_commit()
         mode = "git" if updater.install_mode() == "git" else "ZIP"
-        self.dock.version_label.setText(f"Versão instalada: {sha[:7] or 'desconhecida'} ({mode})" +
+        self.dock.version_label.setText(f"Versão {version_text()} · {sha[:7] or '?'} ({mode})" +
                                         (f"\n{extra}" if extra else ""))
 
     def check_updates(self, manual=False):
@@ -500,7 +502,7 @@ class MainWindow(QMainWindow):
             return
         if info.available:                               # achou, mas só instala com o seu ok
             if QMessageBox.question(self, "Atualização disponível",
-                                    f"Nova versão no GitHub ({info.remote[:7]}):\n{info.message}\n\n"
+                                    f"Nova versão no GitHub: {info.label()}\n{info.message}\n\n"
                                     "Baixar e instalar agora?") == QMessageBox.Yes:
                 try:
                     info.notes = updater.apply(info) or ["ok"]
@@ -517,11 +519,16 @@ class MainWindow(QMainWindow):
     def _update_ready(self, info):
         notes = [n for n in info.notes if n != "ok"]
         self.topbar.update_btn.setVisible(True)
-        self.topbar.update_btn.setToolTip(f"Versão {info.remote[:7]}: {info.message}\n"
+        self.topbar.update_btn.setToolTip(f"Versão {info.label()}: {info.message}\n"
                                           "Clique para reiniciar o AmpSim com a versão nova")
-        self._show_version(f"Atualização {info.remote[:7]} instalada: reinicie para usar." +
+        self._show_version(f"Versão {info.label()} instalada: reinicie para usar." +
                            (" " + " ".join(notes) if notes else ""))
         self.flash_status("Atualização instalada · clique em “Reiniciar para atualizar”")
+
+    def show_about(self):
+        from .about import AboutDialog
+
+        AboutDialog(self).exec()
 
     def restart(self):
         """Fecha (salvando a sessão) e abre de novo, já com a versão nova."""

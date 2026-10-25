@@ -201,3 +201,24 @@ def test_auto_update_setting_is_saved(win):
     win.save_state()
     from ampsim import storage
     assert storage.load_state()["ui"]["auto_update"] is False
+
+
+def test_version_number_parsing_and_label():
+    from ampsim.version import parse_version
+    assert parse_version('X = 1\nVERSION = "1.4.2"\nCHANNEL = ""') == "1.4.2"
+    assert parse_version("nada aqui") == ""
+    info = updater.UpdateInfo(remote=SHA_NEW, version="1.4.2")
+    assert info.label() == "1.4.2 (bbbbbbb)"
+    assert updater.UpdateInfo(remote=SHA_NEW).label() == "bbbbbbb"
+
+
+@needs_git
+def test_update_reports_the_new_version_number(git_repos):
+    dev, user = git_repos
+    (dev / "ampsim").mkdir()
+    (dev / "ampsim" / "version.py").write_text('VERSION = "2.0.0"\n', encoding="utf-8")
+    _g(dev, "add", "-A")
+    _g(dev, "commit", "-m", "versão 2")
+    _g(dev, "push", "origin", "HEAD:main")
+    info = updater.check_and_apply(user, auto=False, remote=None)
+    assert info.available and info.version == "2.0.0"

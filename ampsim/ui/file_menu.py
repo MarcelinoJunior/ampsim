@@ -1,5 +1,4 @@
 """Menu Arquivo: cenas e presets para salvar, abrir e compartilhar (arquivo .ampsim ou código de texto)."""
-import os
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence
@@ -45,7 +44,7 @@ class FileMenu(QMenu):
         share.addAction("Timbres do teclado (Pad/Piano)", lambda: self.copy_code("teclas"))
         self.addSeparator()
         act("Abrir a pasta de cenas e presets", self.open_folder)
-        self.addAction("Sobre o AmpSim e licenças…", self.about)
+        self.addAction("Sobre o AmpSim…", lambda: self.win.show_about())
 
     # ------------------------------------------------------------------ montar documentos
     def _current_kind(self):
@@ -228,13 +227,4 @@ class FileMenu(QMenu):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(storage.SHARE_DIR)))
 
     def about(self):
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        QMessageBox.about(
-            self.win, "Sobre o AmpSim",
-            "<b>AmpSim</b> — simulador de amp, pads e piano para quem tem pouco orçamento.<br><br>"
-            "Software livre sob a licença <b>GNU GPL-3.0</b>: pode usar, copiar, estudar, modificar e "
-            "distribuir, desde que mantenha a mesma licença e o código aberto.<br><br>"
-            "Os nomes e desenhos de amplificadores e teclados são homenagens; as marcas pertencem aos "
-            "seus donos e o AmpSim não é afiliado a eles. Os timbres são exemplos criados pelo AmpSim "
-            "ou vindos de bancos gratuitos — não são cópias do som dos equipamentos originais.<br><br>"
-            f"Créditos e licenças de terceiros: CREDITS.md na pasta do programa<br>({root})")
+        self.win.show_about()

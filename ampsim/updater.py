@@ -45,6 +45,10 @@ class UpdateInfo:
     available: bool = False
     reason: str = ""                  # por que não dá para atualizar (ex.: mudanças locais)
     notes: list = field(default_factory=list)
+    version: str = ""                 # número da versão nova (ampsim/version.py no GitHub)
+
+    def label(self):
+        return f"{self.version} ({self.remote[:7]})" if self.version else self.remote[:7]
 
 
 def _run(args, root, timeout=60):
@@ -188,9 +192,28 @@ def apply(info, root=ROOT, download=None):
     return notes
 
 
+RAW_VERSION_URL = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/ampsim/version.py"
+
+
+def remote_version(info, root=ROOT):
+    """Número da versão que está no GitHub (só para mostrar; falha = vazio)."""
+    from .version import parse_version
+
+    try:
+        if info.mode == "git":
+            src = _git(Path(root), "show", f"origin/{BRANCH}:ampsim/version.py")
+        else:
+            src = _http_get(RAW_VERSION_URL, 6, 20000).decode("utf-8", "replace")
+    except (RuntimeError, OSError, ValueError, subprocess.SubprocessError):
+        return ""
+    return parse_version(src)
+
+
 def check_and_apply(root=ROOT, auto=True, remote=remote_commit, download=None):
     """Usado pela interface (numa thread). -> UpdateInfo (notes preenchido se instalou)."""
     info = check(root, remote)
+    if info.available:
+        info.version = remote_version(info, root)
     if info.available and auto:
         info.notes = apply(info, root, download) or ["ok"]
     return info

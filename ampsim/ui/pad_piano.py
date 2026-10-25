@@ -694,7 +694,7 @@ class PadPianoView(QWidget):
 
     def set_device(self, name):
         self.inst.device = name
-        self.refresh()
+        self.win.refresh_sounds()               # também a barra de baixo (Configurações)
 
     def _knob(self, func, v):
         if self._updating:

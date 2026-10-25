@@ -562,3 +562,40 @@ def test_rotation_speed_slider_and_bpm_checkbox(win, app):
     from ampsim.dsp.keysfx import K_ROT_HZ
     win.inst.set_bpm(120)
     assert win.engine.keys_fx[0].KP[K_ROT_HZ] == pytest.approx(4.0)
+
+
+# ------------------------------------------------------------------ versão e "Sobre"
+def test_version_in_corner_opens_about(win, app, monkeypatch):
+    from ampsim.ui import about
+    from ampsim.version import VERSION, version_text
+    assert win.topbar.version_btn.text() == f"v{version_text()}" and VERSION in win.windowTitle()
+    opened = []
+    monkeypatch.setattr(about.AboutDialog, "exec", lambda self: opened.append(self) or 0)
+    QTest.mouseClick(win.topbar.version_btn, Qt.LeftButton)
+    assert opened and VERSION in opened[0].version_label.text()
+
+
+def test_about_shows_project_data_and_copies_diagnostics(win, app):
+    from PySide6.QtWidgets import QLabel, QPushButton
+
+    from ampsim.ui.about import AboutDialog
+    from ampsim.version import LICENSE, REPO_URL, version_text
+    dlg = AboutDialog(win)
+    texts = " ".join(lab.text() for lab in dlg.findChildren(QLabel))
+    for want in (version_text(), LICENSE, REPO_URL, "igrejas", "homenagens", "FluidSynth", "GeneralUser GS"):
+        assert want in texts, want
+    keys = [k for k, _ in dlg.sys_lines]
+    assert keys[:3] == ["Versão", "Windows", "Python"]
+    copy = next(b for b in dlg.findChildren(QPushButton) if "Copiar" in b.text())
+    copy.click()
+    assert app.clipboard().text().startswith(f"Versão: {version_text()}")
+    dlg.reject()
+
+
+def test_screen_instrument_matches_settings_box(win):
+    win.tabs.setCurrentIndex(2)
+    win.pad_view.device.setCurrentText("M-VAVE SMK-25")
+    win.pad_view.device.activated.emit(win.pad_view.device.currentIndex())
+    assert win.dock.device.currentText() == "M-VAVE SMK-25"
+    win.pad_view.set_device("Teclado simples")
+    assert win.dock.device.currentText() == "Teclado simples"

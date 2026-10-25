@@ -453,7 +453,7 @@ class BottomDock(QFrame):
         about = QPushButton(" Sobre e licenças")
         about.setIcon(icon("info", C["text"], 15))
         about.setFocusPolicy(Qt.NoFocus)
-        about.clicked.connect(lambda: self.win.file_menu.about())
+        about.clicked.connect(lambda *_: self.win.show_about())
         row.addWidget(about)
         row.addStretch(1)
         col.addLayout(row)
@@ -514,6 +514,8 @@ class BottomDock(QFrame):
             for i, c in enumerate(self.button_combos):
                 c.setCurrentText(inst.button_funcs[i])
             self.use_amp.setChecked(bool(self.engine.tracks["pads"].values["track"].get("use_amp", False)))
+            from .pad_piano import SIMPLE, is_simple
+            self.device.setCurrentText(SIMPLE if is_simple(inst.device) else inst.device)
             self.power_btn.setText("Desligar áudio" if self.engine.running else "Ligar áudio")
         finally:
             self._updating = False

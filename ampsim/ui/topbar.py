@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 from .icons import icon, pixmap
+from ..version import version_text
 from .theme import ACCENT, C
 
 NAV = (("guitar", "Guitarra", "guitar"), ("bass", "Baixo", "bass"), ("pads", "Pad/Piano", "keys"))
@@ -53,11 +54,21 @@ class TopBar(QFrame):
         lay.addWidget(logo)
         names = QVBoxLayout()
         names.setSpacing(0)
+        trow = QHBoxLayout()
+        trow.setSpacing(6)
         t = QLabel("AmpSim")
         t.setObjectName("apptitle")
+        trow.addWidget(t)
+        self.version_btn = QPushButton(f"v{version_text()}")
+        self.version_btn.setObjectName("version")
+        self.version_btn.setFocusPolicy(Qt.NoFocus)
+        self.version_btn.setCursor(Qt.PointingHandCursor)
+        self.version_btn.setToolTip("Sobre o AmpSim: versão, licença, créditos e atualizações")
+        trow.addWidget(self.version_btn, 0, Qt.AlignVCenter)
+        trow.addStretch(1)
+        names.addLayout(trow)
         sub = QLabel("Live Performance")
         sub.setObjectName("appsub")
-        names.addWidget(t)
         names.addWidget(sub)
         lay.addLayout(names)
         lay.addSpacing(18)

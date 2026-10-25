@@ -87,6 +87,9 @@ QPushButton#tab:checked {{ background: {accent_soft}; color: white; font-weight:
 QPushButton#power:checked {{ background: #1d5e3b; border-color: {green}; }}
 QPushButton#quit, QPushButton#danger {{ font-weight: 600; }}
 QPushButton::menu-indicator {{ width: 0; image: none; }}
+QPushButton#version {{ background: {accent_soft}; border: 1px solid {accent}; border-radius: 8px;
+    padding: 0px 7px; font-size: 8pt; font-weight: 600; color: #cfe0ff; }}
+QPushButton#version:hover {{ background: {accent}; color: white; }}
 QToolButton#action {{ background: {card2}; border: 1px solid {border2}; border-radius: 8px; color: {text};
     font-size: 8pt; font-weight: 600; padding: 4px 2px; }}
 QToolButton#action:hover {{ background: #20345a; border-color: #3a5687; }}
@@ -131,5 +134,11 @@ QScrollBar::handle:vertical {{ background: {border2}; border-radius: 3px; min-he
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 2px; }}
 QScrollBar::handle:horizontal {{ background: {border2}; border-radius: 3px; min-width: 30px; }}
-QTabWidget::pane {{ border: none; }}
+QTabWidget::pane {{ border: 1px solid {border}; border-radius: 8px; background: {panel}; top: -1px; }}
+QTabBar::tab {{ background: {card}; color: {dim}; border: 1px solid {border2}; border-bottom: none;
+    border-top-left-radius: 7px; border-top-right-radius: 7px; padding: 6px 16px; margin-right: 3px; }}
+QTabBar::tab:hover {{ color: {text}; background: {card2}; }}
+QTabBar::tab:selected {{ background: {accent}; border-color: {accent}; color: white; font-weight: 600; }}
+QTextBrowser, QTextEdit, QPlainTextEdit {{ background: {card}; color: {text}; border: 1px solid {border2};
+    border-radius: 7px; selection-background-color: {accent}; }}
 """.format(**C)
