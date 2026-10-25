@@ -46,6 +46,12 @@ class SoundFontEngine:
         lib = C.CDLL(dll)
         self._bind(lib)
         self.lib = lib
+        # o render roda no callback de áudio: PyDLL não solta o GIL durante a chamada (ver
+        # kernels.JIT); noteon/cc vêm da UI e do MIDI e continuam pelo CDLL
+        proc = C.PyDLL(dll).fluid_synth_process
+        proc.argtypes = [C.c_void_p, C.c_int, C.c_int, C.c_void_p, C.c_int, C.c_void_p]
+        proc.restype = C.c_int
+        self._process = proc
         self.settings = lib.new_fluid_settings()
         for key, val in (("synth.sample-rate", float(fs)), ("synth.gain", 0.55)):
             lib.fluid_settings_setnum(self.settings, key.encode(), val)
@@ -67,6 +73,8 @@ class SoundFontEngine:
             *[self.buf[i].ctypes.data_as(C.POINTER(C.c_float)) for i in range(N_OUT)])
         self._fx_ptrs = (C.POINTER(C.c_float) * N_FX)(
             *[self.buf[N_OUT + i].ctypes.data_as(C.POINTER(C.c_float)) for i in range(N_FX)])
+        self._out_arg = C.cast(self._out_ptrs, C.c_void_p)
+        self._fx_arg = C.cast(self._fx_ptrs, C.c_void_p)
         self.presets = self._list_presets()
 
     @staticmethod
@@ -146,8 +154,7 @@ class SoundFontEngine:
         """Gera n amostras em self.buf: linhas 2g, 2g+1 = grupo g seco (L, R);
         8 + 4g .. 8 + 4g + 3 = reverb L, R e chorus L, R do grupo g."""
         self.buf[:, :n] = 0.0
-        self.lib.fluid_synth_process(self.synth, n, N_FX, C.cast(self._fx_ptrs, C.c_void_p),
-                                     N_OUT, C.cast(self._out_ptrs, C.c_void_p))
+        self._process(self.synth, n, N_FX, self._fx_arg, N_OUT, self._out_arg)
 
     def close(self):
         if self.synth:

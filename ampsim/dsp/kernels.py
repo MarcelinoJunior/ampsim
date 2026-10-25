@@ -39,7 +39,9 @@ from .layout import (
     V_IC1, V_IC2, V_NOTE, V_PH1, V_PH2, V_PHS, V_VEL,
 )
 
-JIT = dict(cache=True, fastmath=True, nogil=True, error_model="numpy")
+# nogil=True de propósito: o callback chama ~10 kernels por bloco e cada retomada do GIL espera a
+# thread de UI (repintar o instrumento leva ~9 ms). Segurando o GIL o bloco todo, a espera é uma só.
+JIT = dict(cache=True, fastmath=True, nogil=False, error_model="numpy")
 TWO_PI = 2.0 * math.pi
 
 

@@ -10,7 +10,7 @@ from numba import njit
 
 from .layout import RV_AP_TUNING, RV_COMB_TUNING, RV_STEREO_SPREAD
 
-JIT = dict(cache=True, fastmath=True, nogil=True, error_model="numpy")
+JIT = dict(cache=True, fastmath=True, nogil=False, error_model="numpy")   # ver kernels.JIT
 TWO_PI = 2.0 * math.pi
 
 # ------------------------------------------------------------------ bateria sintetizada

@@ -7,7 +7,7 @@ import math
 import numpy as np
 from numba import njit
 
-JIT = dict(cache=True, fastmath=True, nogil=True, error_model="numpy")
+JIT = dict(cache=True, fastmath=True, nogil=False, error_model="numpy")   # ver kernels.JIT
 TWO_PI = 2.0 * math.pi
 
 # parâmetros (KP)

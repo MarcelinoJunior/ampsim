@@ -561,7 +561,8 @@ class KeysView(QWidget):
                 c.setCurrentText(inst.button_funcs[i])
         finally:
             self._updating = False
-        self.sound_status.setText(inst.error or "Botão direito no controlador: escolher sons e funções.")
+        self.sound_status.setText(inst.error or "Botão direito: pads, knobs e botões escolhem funções; "
+                                  "numa tecla troca o timbre ou divide o teclado.")
         c = self.ctrl
         c.display = (inst.display_text(), inst.display_line2())
         names = list(READY)

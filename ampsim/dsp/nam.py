@@ -14,7 +14,7 @@ import os
 import numpy as np
 from numba import njit
 
-JIT = dict(cache=True, fastmath=True, nogil=True, error_model="numpy")
+JIT = dict(cache=True, fastmath=True, nogil=False, error_model="numpy")   # ver kernels.JIT
 NAM_SAMPLE_RATE = 48000
 BUF_EXTRA = 8192               # amostras escritas antes de "rebobinar" o histórico
 TARGET_RMS_DB = -18.0          # normalização de volume entre capturas

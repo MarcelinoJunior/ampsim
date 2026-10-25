@@ -11,7 +11,7 @@ import math
 import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from ..instruments import BUTTONS, PAD_COUNT, note_name
@@ -157,11 +157,11 @@ class ControllerWidget(QWidget):
     # ------------------------------------------------------------------ API
     def flash_pad(self, i):
         self.pad_glow[i % PAD_COUNT] = 1.0
-        self.update()
+        self._update_keys()
 
     def set_key(self, note, on):
         (self.active.add if on else self.active.discard)(note)
-        self.update()
+        self._update_keys()
 
     def set_knob(self, i, value):
         self.knob_values[i] = value
@@ -173,8 +173,10 @@ class ControllerWidget(QWidget):
             if g > 0:
                 self.pad_glow[i] = max(0.0, g - 0.08)
                 changed = True
-        if self.learn_target is not None or changed:
-            self.update()
+        if self.learn_target is not None:
+            self.update()                   # contorno piscando no controle a mapear
+        elif changed:
+            self._update_keys()             # brilho dos pads é desenhado por cima do cache
 
     # ------------------------------------------------------------------ mouse
     def _hit(self, v):
@@ -256,19 +258,14 @@ class ControllerWidget(QWidget):
                 tip = f"Knob {i + 1}: {self.knob_labels[i]}\n(arraste para mudar · botão direito: função)"
             elif kind == "button":
                 tip = f"{BUTTONS[i]}: {self.button_labels[i]}\n(botão direito: função)"
-            elif kind == "key":
-                if self.split_note is not None:
-                    left = i < self.split_note
-                    tip = (f"{note_name(i)} · mão {'esquerda' if left else 'direita'}: "
-                           f"{self.zone_names[0 if left else 1]}\n(botão direito: trocar timbre ou dividir aqui)")
-                else:
-                    tip = f"{note_name(i)}\n(botão direito: trocar timbre ou dividir o teclado aqui)"
+            # teclas sem dica de propósito: recriar a janela da dica a cada tecla tocada com o
+            # mouse travava a UI (e o GIL) por alguns ms e dava estalos no áudio
             elif kind == "pad":
                 tip = (f"Pad {i + 1} B: {self.pad_keys_b[i]}" if self.bank else
                        f"Pad {i + 1}: {self.pad_labels[i]}") + "\n(botão direito: trocar)"
         if tip:
             QToolTip.showText(gpos, tip, self)
-        else:
+        elif QToolTip.isVisible():
             QToolTip.hideText()
 
     def mouseReleaseEvent(self, e):
@@ -291,8 +288,124 @@ class ControllerWidget(QWidget):
         f.setBold(bold)
         return f
 
+    # ------------------------------------------------------------------ pintura
+    # O instrumento inteiro leva ~10 ms para pintar (e a thread de áudio disputa o GIL com a UI):
+    # ele fica numa imagem em cache, e tocar teclas só redesenha as teclas apertadas por cima.
+    def update(self, *args):
+        self._cache = None
+        super().update(*args)
+
+    def _update_keys(self):
+        super().update()                    # sem invalidar o cache
+
     def paintEvent(self, _):
+        dpr = self.devicePixelRatioF()
+        key = (self.width(), self.height(), dpr)
+        if getattr(self, "_cache", None) is None or self._cache_key != key:
+            pm = QPixmap(max(1, round(self.width() * dpr)), max(1, round(self.height() * dpr)))
+            pm.setDevicePixelRatio(dpr)
+            pm.fill(Qt.transparent)
+            active, self.active = self.active, set()
+            glow, self.pad_glow = self.pad_glow, [0.0] * PAD_COUNT
+            p = QPainter(pm)
+            self._paint_scene(p)
+            p.end()
+            self.active, self.pad_glow = active, glow
+            self._cache, self._cache_key = pm, key
         qp = QPainter(self)
+        qp.drawPixmap(0, 0, self._cache)
+        if self.active or any(self.pad_glow):
+            self._paint_active_keys(qp)
+
+    def _paint_active_keys(self, qp):
+        qp.setRenderHint(QPainter.Antialiasing)
+        s, ox, oy = self._transform()
+        qp.translate(ox, oy)
+        qp.scale(s, s)
+        for i, r in self.m["pads"]:
+            if self.pad_glow[i] > 0:
+                self._draw_pad(qp, i, r)
+        qp.setFont(self._font(10))
+        keys = self._keys()
+        lit = [r for n, r, w in keys if w and n in self.active]
+        for note, r, white in keys:
+            if white and note in self.active:
+                self._draw_white(qp, note, r)
+        for note, r, white in keys:
+            if not white and (note in self.active or any(r.intersects(w) for w in lit)):
+                self._draw_black(qp, note, r)
+        if lit and self.split_note is not None:
+            self._paint_zones(qp, keys)
+
+    def _draw_pad(self, qp, i, r):
+        style = self.m["pad_style"]
+        if self.bank:
+            key = self.pad_keys_b[i]
+            base = QColor("#ffd27a") if (key == self.cont_key and key != "Parar") else \
+                (QColor("#f3b2b2") if key == "Parar" else QColor("#fde7c0"))
+        elif style == "smk":
+            base = QColor("#8fe9f0") if i < 4 else QColor("#d7c2ff")
+        elif style == "reg":
+            base = QColor("#d63a3a") if i % 2 == 0 else QColor("#f2f2f2")
+        else:
+            base = QColor("#f2f2f2")
+        glow = self.pad_glow[i]
+        col = QColor(int(base.red() + (255 - base.red()) * glow),
+                     int(base.green() + (255 - base.green()) * glow),
+                     int(base.blue() + (255 - base.blue()) * glow))
+        pg = QLinearGradient(r.topLeft(), r.bottomLeft())
+        pg.setColorAt(0, col.lighter(110))
+        pg.setColorAt(1, col)
+        pen = self._blink("pads_b" if self.bank else "pads", i) or QPen(QColor("#6b7280"), 1)
+        qp.setPen(pen)
+        qp.setBrush(pg)
+        qp.drawRoundedRect(r, 6, 6)
+        text = self.pad_keys_b[i] if self.bank else self.pad_labels[i]
+        px = min(r.height() * (0.45 if self.bank else 0.22), 30 if self.bank else 11)
+        qp.setFont(self._font(px, True))
+        qp.setPen(QColor("#2a1d0d") if (self.bank or style != "reg" or i % 2) else QColor("#ffffff"))
+        qp.drawText(r.adjusted(3, 2, -3, -2), Qt.AlignCenter | Qt.TextWordWrap,
+                    text if self.bank or r.height() > 60 else _short2(text, 12))
+
+    def _draw_white(self, qp, note, r):
+        wg = QLinearGradient(r.topLeft(), r.bottomLeft())
+        if note in self.active:
+            wg.setColorAt(0, QColor("#9db4ff"))
+            wg.setColorAt(1, QColor("#6f8ff5"))
+        elif self.split_note is not None and note < self.split_note:
+            wg.setColorAt(0, QColor("#ead9b4"))        # zona da mão esquerda
+            wg.setColorAt(0.12, QColor("#f7ead0"))
+            wg.setColorAt(1, QColor("#e0cba0"))
+        else:
+            wg.setColorAt(0, QColor("#e9eaec"))
+            wg.setColorAt(0.12, QColor("#fbfbfb"))
+            wg.setColorAt(1, QColor("#e2e3e6"))
+        qp.setPen(QPen(QColor("#8d939b"), 1))
+        qp.setBrush(wg)
+        qp.drawRoundedRect(r.adjusted(0.5, 0, -0.5, 0), 2, 2)
+        if note % 12 == 0:
+            qp.setPen(QColor("#777"))
+            qp.drawText(r.adjusted(0, 0, 0, -4), Qt.AlignHCenter | Qt.AlignBottom, note_name(note))
+
+    def _draw_black(self, qp, note, r):
+        qp.setPen(Qt.NoPen)
+        qp.setBrush(QColor(0, 0, 0, 70))
+        qp.drawRoundedRect(r.adjusted(1, 0, 3, 3), 2, 2)       # sombra
+        bg = QLinearGradient(r.topLeft(), r.bottomLeft())
+        if note in self.active:
+            bg.setColorAt(0, QColor("#6f86e0"))
+            bg.setColorAt(1, QColor("#3e56b8"))
+        else:
+            bg.setColorAt(0, QColor("#2c2c30"))
+            bg.setColorAt(0.85, QColor("#0b0b0d"))
+            bg.setColorAt(1, QColor("#303035"))
+        qp.setPen(QPen(QColor("#000"), 1))
+        qp.setBrush(bg)
+        qp.drawRoundedRect(r, 2, 2)
+        qp.setPen(QPen(QColor(255, 255, 255, 40), 1))
+        qp.drawLine(QPointF(r.left() + 3, r.top() + 2), QPointF(r.left() + 3, r.bottom() - 8))
+
+    def _paint_scene(self, qp):
         qp.setRenderHint(QPainter.Antialiasing)
         s, ox, oy = self._transform()
         qp.translate(ox, oy)
@@ -497,77 +610,18 @@ class ControllerWidget(QWidget):
         qp.setPen(ink)
         qp.drawText(QRectF(cap.x(), cap.y(), 420, 14), Qt.AlignLeft,
                     "BANCO B — pad contínuo" if self.bank else "BANCO A — bateria")
-        style = m["pad_style"]
         for i, r in m["pads"]:
-            if self.bank:
-                key = self.pad_keys_b[i]
-                base = QColor("#ffd27a") if (key == self.cont_key and key != "Parar") else \
-                    (QColor("#f3b2b2") if key == "Parar" else QColor("#fde7c0"))
-            elif style == "smk":
-                base = QColor("#8fe9f0") if i < 4 else QColor("#d7c2ff")
-            elif style == "reg":
-                base = QColor("#d63a3a") if i % 2 == 0 else QColor("#f2f2f2")
-            else:
-                base = QColor("#f2f2f2")
-            glow = self.pad_glow[i]
-            col = QColor(int(base.red() + (255 - base.red()) * glow),
-                         int(base.green() + (255 - base.green()) * glow),
-                         int(base.blue() + (255 - base.blue()) * glow))
-            pg = QLinearGradient(r.topLeft(), r.bottomLeft())
-            pg.setColorAt(0, col.lighter(110))
-            pg.setColorAt(1, col)
-            pen = self._blink("pads_b" if self.bank else "pads", i) or QPen(QColor("#6b7280"), 1)
-            qp.setPen(pen)
-            qp.setBrush(pg)
-            qp.drawRoundedRect(r, 6, 6)
-            text = self.pad_keys_b[i] if self.bank else self.pad_labels[i]
-            px = min(r.height() * (0.45 if self.bank else 0.22), 30 if self.bank else 11)
-            qp.setFont(self._font(px, True))
-            qp.setPen(QColor("#2a1d0d") if (self.bank or style != "reg" or i % 2) else QColor("#ffffff"))
-            qp.drawText(r.adjusted(3, 2, -3, -2), Qt.AlignCenter | Qt.TextWordWrap,
-                        text if self.bank or r.height() > 60 else _short2(text, 12))
+            self._draw_pad(qp, i, r)
 
         # teclas
         keys = self._keys()
         qp.setFont(self._font(10))
         for note, r, white in keys:
             if white:
-                wg = QLinearGradient(r.topLeft(), r.bottomLeft())
-                if note in self.active:
-                    wg.setColorAt(0, QColor("#9db4ff"))
-                    wg.setColorAt(1, QColor("#6f8ff5"))
-                elif self.split_note is not None and note < self.split_note:
-                    wg.setColorAt(0, QColor("#ead9b4"))        # zona da mão esquerda
-                    wg.setColorAt(0.12, QColor("#f7ead0"))
-                    wg.setColorAt(1, QColor("#e0cba0"))
-                else:
-                    wg.setColorAt(0, QColor("#e9eaec"))
-                    wg.setColorAt(0.12, QColor("#fbfbfb"))
-                    wg.setColorAt(1, QColor("#e2e3e6"))
-                qp.setPen(QPen(QColor("#8d939b"), 1))
-                qp.setBrush(wg)
-                qp.drawRoundedRect(r.adjusted(0.5, 0, -0.5, 0), 2, 2)
-                if note % 12 == 0:
-                    qp.setPen(QColor("#777"))
-                    qp.drawText(r.adjusted(0, 0, 0, -4), Qt.AlignHCenter | Qt.AlignBottom, note_name(note))
+                self._draw_white(qp, note, r)
         for note, r, white in keys:
             if not white:
-                qp.setPen(Qt.NoPen)
-                qp.setBrush(QColor(0, 0, 0, 70))
-                qp.drawRoundedRect(r.adjusted(1, 0, 3, 3), 2, 2)       # sombra
-                bg = QLinearGradient(r.topLeft(), r.bottomLeft())
-                if note in self.active:
-                    bg.setColorAt(0, QColor("#6f86e0"))
-                    bg.setColorAt(1, QColor("#3e56b8"))
-                else:
-                    bg.setColorAt(0, QColor("#2c2c30"))
-                    bg.setColorAt(0.85, QColor("#0b0b0d"))
-                    bg.setColorAt(1, QColor("#303035"))
-                qp.setPen(QPen(QColor("#000"), 1))
-                qp.setBrush(bg)
-                qp.drawRoundedRect(r, 2, 2)
-                qp.setPen(QPen(QColor(255, 255, 255, 40), 1))
-                qp.drawLine(QPointF(r.left() + 3, r.top() + 2), QPointF(r.left() + 3, r.bottom() - 8))
+                self._draw_black(qp, note, r)
         self._paint_zones(qp, keys)
 
     def _paint_zones(self, qp, keys):
