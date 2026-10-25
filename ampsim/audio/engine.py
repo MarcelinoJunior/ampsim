@@ -187,7 +187,7 @@ class AudioEngine:
             if pk > self.sf_peak:
                 self.sf_peak = pk
             if shimmer > 0.0 or inst.cont_key is not None or inst._cp:
-                self.shimmer.process(shim, frames, mix, 0.55 + 0.6 * shimmer, 0.35 + 0.35 * shimmer)
+                self.shimmer.process(shim, frames, mix, 0.5 + 0.5 * shimmer, 0.3 + 0.6 * shimmer)
         # bateria worship sintetizada + sala da bateria
         q = inst.drum_events
         ev = self._drum_ev

@@ -543,6 +543,8 @@ def write_output(mix, n, out, off, master):
             out[i, c] = 0.0
         for k in range(2):
             v = mix[i, k] * master
+            if not (abs(v) < 1e6):         # NaN/inf de algum efeito: silencia esta amostra
+                v = 0.0
             a = abs(v)
             if a > 0.9:
                 v = math.copysign(0.9 + 0.1 * math.tanh((a - 0.9) * 10.0), v)

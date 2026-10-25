@@ -166,3 +166,71 @@ def test_learning_bank_b(engine):
     inst.handle_midi(0x99, 60, 100)
     assert inst.mapping["pads_b"][0] == [9, 60]
     inst.stop_learning()
+
+
+def test_shimmer_tail_dies_out_even_at_max():
+    """O laço do Shimmer tem ganho < 1: depois de um impulso, o rastro some (sem disparar)."""
+    import numpy as np
+
+    from ampsim.dsp.worship import ShimmerDSP
+
+    sh = ShimmerDSP(48000.0)
+    n = 512
+    x = np.zeros(n)
+    peaks = []
+    for blk in range(int(48000 * 60 / n)):
+        x[:] = 0.0
+        if blk == 0:
+            x[0] = 1.0
+        out = np.zeros((n, 2))
+        sh.process(x, n, out, 1.0, 0.9)            # mais realimentação do que o app usa
+        peaks.append(np.abs(out).max())
+    peaks = np.array(peaks)
+    assert np.all(np.isfinite(peaks))
+    assert peaks[-200:].max() < peaks[:200].max() * 0.01
+
+
+def test_shimmer_recovers_from_nan_and_output_never_nan():
+    import numpy as np
+
+    from ampsim.dsp.kernels import write_output
+    from ampsim.dsp.worship import ShimmerDSP
+
+    sh = ShimmerDSP(48000.0)
+    sh.B[100] = np.nan
+    x = np.full(256, 0.1)
+    for _ in range(50):
+        out = np.zeros((256, 2))
+        sh.process(x, 256, out, 1.0, 0.6)
+    assert np.all(np.isfinite(out)) and np.abs(out).max() > 0
+    mix = np.full((64, 2), np.nan)
+    dev = np.zeros((64, 2), dtype=np.float32)
+    write_output(mix, 64, dev, 0, 1.0)
+    assert np.all(dev == 0) and np.all(mix == 0)
+
+
+def test_long_worship_session_stays_stable(engine):
+    """Notas longas + pad contínuo + Shimmer no máximo por 60 s: nível estável."""
+    import numpy as np
+
+    inst = engine.instruments
+    engine.master = 1.0
+    inst.set_ready("Coral Etéreo")
+    inst.levels.update(keys=80, pad=70, drums=85, shimmer=100)
+    for k in (48, 55, 60, 64, 67):
+        inst.key_on(k, 127)
+    inst.pad_hit(8, 120)
+    n = 256
+    out = np.zeros((n, 2), np.float32)
+    peaks = []
+    for blk in range(int(48000 * 60 / n)):
+        engine._render(None, out, n)
+        inst.tick(n / 48000)
+        peaks.append(float(np.abs(out).max()))
+    inst.all_off()
+    inst.stop_cont_pad(immediate=True)
+    peaks = np.array(peaks)
+    assert np.all(np.isfinite(peaks))
+    third = len(peaks) // 3
+    assert peaks[-third:].max() < 0.9                       # não encosta no limitador
+    assert peaks[-third:].max() < peaks[third:2 * third].max() * 1.5   # não cresce sozinho

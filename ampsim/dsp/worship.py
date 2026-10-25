@@ -148,14 +148,27 @@ PS_WIN = 3072          # janela (~64 ms a 48 kHz)
 def fx_shimmer(x, n, mix, B, OFF, LEN, POS, FS_, PS, ST, room, damp, wet, fb):
     """Reverb estéreo (Freeverb) com pitch shift de +1 oitava realimentado (fb = 0: só reverb).
 
-    x: envio mono; o resultado molhado é somado em mix. ST: [ps_pos, fase, saída do shift].
+    x: envio mono; o resultado molhado é somado em mix.
+    ST: [posição do shift, fase, saída do shift, passa-baixa da realimentação, passa-alta].
+
+    Estabilidade: as janelas do pitch shifter somam 1 (sen² + cos²), a realimentação passa por
+    passa-alta/passa-baixa e por um limitador suave, e o ganho do laço fica abaixo de 1. Se
+    mesmo assim algo sair do normal (NaN/inf ou nível absurdo), o efeito zera e se recupera.
     """
     pos = int(ST[0])
     phase = ST[1]
     shift_out = ST[2]
+    fb_lp = ST[3]
+    fb_hp = ST[4]
     mask = PS_BUF - 1
+    lp_c = 0.35                    # ~4 kHz a 48 kHz: tira o "brilho" acumulado no laço
+    hp_c = 0.004                   # ~30 Hz: tira DC/grave acumulado
     for i in range(n):
-        inp = (x[i] + shift_out * fb) * 0.015
+        f = shift_out * fb * 0.5
+        fb_lp += (f - fb_lp) * lp_c
+        fb_hp += (fb_lp - fb_hp) * hp_c
+        back = math.tanh((fb_lp - fb_hp) * 2.0) * 0.5
+        inp = (x[i] + back) * 0.015
         outs_l = 0.0
         outs_r = 0.0
         for side in range(2):
@@ -164,11 +177,11 @@ def fx_shimmer(x, n, mix, B, OFF, LEN, POS, FS_, PS, ST, room, damp, wet, fb):
                 u = side * 8 + c
                 pp = OFF[u] + POS[u]
                 o = B[pp]
-                f = o * (1.0 - damp) + FS_[u] * damp
-                if -1e-15 < f < 1e-15:
-                    f = 0.0
-                FS_[u] = f
-                B[pp] = inp + f * room
+                fs_ = o * (1.0 - damp) + FS_[u] * damp
+                if -1e-15 < fs_ < 1e-15:
+                    fs_ = 0.0
+                FS_[u] = fs_
+                B[pp] = inp + fs_ * room
                 POS[u] += 1
                 if POS[u] >= LEN[u]:
                     POS[u] = 0
@@ -187,18 +200,27 @@ def fx_shimmer(x, n, mix, B, OFF, LEN, POS, FS_, PS, ST, room, damp, wet, fb):
                 outs_l = acc
             else:
                 outs_r = acc
+        if not (abs(outs_l) < 20.0 and abs(outs_r) < 20.0):     # NaN, inf ou disparo
+            B[:] = 0.0
+            FS_[:] = 0.0
+            PS[:] = 0.0
+            shift_out = 0.0
+            fb_lp = 0.0
+            fb_hp = 0.0
+            continue
         mix[i, 0] += outs_l * wet
         mix[i, 1] += outs_r * wet
-        # pitch shifter (+12): duas cabeças de leitura com janela, atraso caindo 1 amostra/amostra
+        # pitch shifter (+12): duas cabeças de leitura, atraso caindo 1 amostra/amostra,
+        # janelas sen²/cos² (somam 1: sem ganho extra no laço)
         PS[pos] = (outs_l + outs_r) * 0.5
         d1 = PS_WIN * (1.0 - phase)
         p2 = phase + 0.5
         if p2 >= 1.0:
             p2 -= 1.0
         d2 = PS_WIN * (1.0 - p2)
-        r1 = PS[(pos - int(d1)) & mask]
-        r2 = PS[(pos - int(d2)) & mask]
-        shift_out = r1 * math.sin(math.pi * phase) + r2 * math.sin(math.pi * p2)
+        w1 = math.sin(math.pi * phase)
+        w1 *= w1
+        shift_out = PS[(pos - int(d1)) & mask] * w1 + PS[(pos - int(d2)) & mask] * (1.0 - w1)
         phase += 1.0 / PS_WIN
         if phase >= 1.0:
             phase -= 1.0
@@ -206,6 +228,8 @@ def fx_shimmer(x, n, mix, B, OFF, LEN, POS, FS_, PS, ST, room, damp, wet, fb):
     ST[0] = pos
     ST[1] = phase
     ST[2] = shift_out if abs(shift_out) > 1e-15 else 0.0
+    ST[3] = fb_lp if abs(fb_lp) > 1e-15 else 0.0
+    ST[4] = fb_hp if abs(fb_hp) > 1e-15 else 0.0
 
 
 class ShimmerDSP:
@@ -224,7 +248,7 @@ class ShimmerDSP:
         self.POS = np.zeros(len(lens), dtype=np.int64)
         self.FS = np.zeros(16)
         self.PS = np.zeros(PS_BUF)
-        self.ST = np.zeros(4)
+        self.ST = np.zeros(6)
         self.room = room
         self.damp = damp
 
