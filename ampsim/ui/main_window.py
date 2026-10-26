@@ -1,10 +1,11 @@
 """Janela principal: barra superior, Banco de Presets à esquerda, a aba aberta no centro e a
-barra inferior (Pads, Mixer, MIDI / Controlador, Configurações).
+barra inferior (Pads, Faders / Pads, MIDI / Controlador, Configurações).
 """
 import math
 import os
 import subprocess
 import threading
+import time
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -18,6 +19,7 @@ from ..audio.hotplug import DeviceWatcher, audio_outputs, find_instrument_output
 from ..audio.engine import TRACKS
 from ..midi import winmm
 from ..instruments import READY
+from .health import HealthDialog, style_badge
 from .shortcuts import Shortcuts, ShortcutsDialog
 from ..presets import DEFAULT_PRESET, FACTORY
 from ..sharing import sound_state
@@ -156,6 +158,9 @@ class MainWindow(QMainWindow):
         self.midi = winmm.MidiInput(inst.handle_midi) if winmm.available else None
 
         self.shortcuts = Shortcuts(self)
+        self._want_audio = False            # o usuário quer o áudio ligado (para religar se cair)
+        self._reconnect_at = None           # próximo instante de tentar religar (None = não caiu)
+        self.topbar.health_btn.clicked.connect(lambda *_: HealthDialog(self.engine, self).exec())
         self._restore_state()
         self.bank.set_page(self.current_kind())
         self._update_kbd_label()
@@ -757,6 +762,8 @@ class MainWindow(QMainWindow):
         if on:
             self._start_audio()
         else:
+            self._want_audio = False
+            self._reconnect_at = None
             self.engine.stop()
             self._update_status()
 
@@ -767,6 +774,8 @@ class MainWindow(QMainWindow):
             return
         try:
             self.engine.start(cfg)
+            self._want_audio = True
+            self._reconnect_at = None
             if self.engine.start_notes:
                 QMessageBox.information(self, "Áudio ligado com ajustes", "\n\n".join(self.engine.start_notes))
         except Exception as exc:  # noqa: BLE001 - PortAudio pode falhar de muitas formas
@@ -786,6 +795,37 @@ class MainWindow(QMainWindow):
             self._start_audio()
         else:
             self._update_status()
+
+    def watch_audio(self, now):
+        """O áudio parou sozinho (cabo USB solto, driver travou)? Avisa e tenta religar a cada 3 s,
+        assim que a placa aparecer de novo. Quem desligou no botão não é religado."""
+        e = self.engine
+        if not self._want_audio or (e.running and not e.lost):
+            if self._reconnect_at is not None and e.running:
+                self._reconnect_at = None
+            return False
+        if self._reconnect_at is None:
+            self._reconnect_at = now
+            self.dock.log_midi("Áudio caiu: tentando religar sozinho")
+        self.topbar.set_audio(False, "Áudio caiu", "religando… (confira o cabo USB)", error=True)
+        if now < self._reconnect_at:
+            return False
+        self._reconnect_at = now + 3.0
+        cfg = e.config
+        try:
+            e.stop()
+            dev.refresh()                               # enxerga a placa reconectada
+            if dev.find_device(cfg.hostapi, cfg.output_device, "output") is None:
+                return False
+            e.start(cfg)
+        except Exception:  # noqa: BLE001 - placa ainda não voltou direito: tenta de novo depois
+            return False
+        self._reconnect_at = None
+        self._refresh_all()
+        self._update_status()
+        self.flash_status("Áudio religado sozinho")
+        self.dock.log_midi("Áudio religado sozinho")
+        return True
 
     def flash_status(self, text, ms=8000):
         self.topbar.info2.setText(text)
@@ -830,6 +870,10 @@ class MainWindow(QMainWindow):
         peaks["master"] = max(peaks.values()) * e.master
         self.dock.update_meters(peaks)
         self._cpu_tick = getattr(self, "_cpu_tick", 0) + 1
+        if self._cpu_tick % 30 == 0:                        # 1x por segundo: o áudio caiu?
+            self.watch_audio(time.monotonic())
+        if self._cpu_tick % 15 == 0:
+            style_badge(self.topbar.health_btn, e)
         if e.running and self._cpu_tick % 15 == 0:          # 2x por segundo basta
             cfg = e.config
             _, _, total = e.latency_ms()

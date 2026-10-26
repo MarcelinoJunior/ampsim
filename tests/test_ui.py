@@ -1135,3 +1135,28 @@ def test_new_midi_controller_warns_and_old_one_comes_back(win, monkeypatch):
     win._open_midi("2- Digital Keyboard-1")
     assert len(asked) == 1 and inst.mapping["knobs"][0] == [0, 74]
     assert any("de volta" in line for line in win.dock.midi_log)
+
+
+def test_audio_reconnects_by_itself(win, monkeypatch):
+    """Cabo USB solto: avisa "Áudio caiu" e religa quando a placa volta; desligado no botão não religa."""
+    from ampsim.audio import devices as dev
+    e = win.engine
+    state = {"running": True, "present": False, "starts": 0}
+    monkeypatch.setattr(type(e), "running", property(lambda self: state["running"]))
+    monkeypatch.setattr(type(e), "lost", property(lambda self: False))
+    monkeypatch.setattr(e, "stop", lambda: state.update(running=False))
+    monkeypatch.setattr(e, "start", lambda cfg: state.update(running=True, starts=state["starts"] + 1))
+    monkeypatch.setattr(dev, "refresh", lambda: None)
+    monkeypatch.setattr(dev, "find_device", lambda api, name, kind: object() if state["present"] else None)
+    win._want_audio = True
+    assert not win.watch_audio(0.0)                              # tudo ligado: nada a fazer
+    state["running"] = False                                     # o stream morreu (cabo solto)
+    assert not win.watch_audio(1.0) and win.topbar.power_title.text() == "Áudio desligado"
+    assert "caiu" in win.topbar.info1.text()
+    assert not win.watch_audio(2.0)                              # ainda dentro dos 3 s
+    assert not win.watch_audio(4.5)                              # tentou: placa ainda não voltou
+    state["present"] = True
+    assert win.watch_audio(8.0) and state["running"] and state["starts"] == 1
+    assert win._reconnect_at is None and any("religado" in line for line in win.dock.midi_log)
+    win.toggle_power(False)                                      # o usuário desligou: não religa
+    assert not win.watch_audio(20.0) and not state["running"]

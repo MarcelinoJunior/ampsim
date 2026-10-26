@@ -128,6 +128,13 @@ class TopBar(QFrame):
         self.info.setCursor(Qt.PointingHandCursor)
         self.info.clicked.connect(lambda *_: self.audioSettings.emit())
         lay.addWidget(self.info)
+        # saúde do áudio: falhas no último minuto (ui/health.py); clique abre o histórico
+        self.health_btn = QPushButton("")
+        self.health_btn.setFocusPolicy(Qt.NoFocus)
+        self.health_btn.setCursor(Qt.PointingHandCursor)
+        self.health_btn.setFixedWidth(96)
+        self.health_btn.setVisible(False)
+        lay.addWidget(self.health_btn)
         lay.addWidget(self._sep())
 
         # preset da aba aberta

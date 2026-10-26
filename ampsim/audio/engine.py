@@ -1,6 +1,7 @@
 """Motor de áudio: abre o stream PortAudio e roda o DSP no callback."""
 from collections import deque
 from threading import get_ident
+from time import perf_counter
 
 import numpy as np
 
@@ -35,6 +36,8 @@ class AudioEngine:
         self.stream = None
         self.n_in = 0
         self.xruns = 0
+        self.overloads = 0              # blocos que demoraram mais que o prazo (a CPU não deu conta)
+        self.events = deque(maxlen=400)  # (instante perf_counter, "falha" | "lento"): histórico de falhas
         self._rt_thread = None          # thread do driver já registrada no MMCSS
         self.last_error = None
         self._events = deque()
@@ -329,16 +332,46 @@ class AudioEngine:
     def _duplex_cb(self, indata, outdata, frames, time_info, status):
         if self._rt_thread != get_ident():
             self._rt_thread = promote_audio_thread()
+        t0 = perf_counter()
         if status:
-            self.xruns += 1
+            self._note_xrun(t0)
         self._render(indata, outdata, frames)
+        self._note_time(t0, frames)
 
     def _output_cb(self, outdata, frames, time_info, status):
         if self._rt_thread != get_ident():
             self._rt_thread = promote_audio_thread()
+        t0 = perf_counter()
         if status:
-            self.xruns += 1
+            self._note_xrun(t0)
         self._render(None, outdata, frames)
+        self._note_time(t0, frames)
+
+    # ------------------------------------------------------------------ saúde do áudio
+    def _note_xrun(self, t):
+        """O driver avisou que faltou (ou sobrou) som: um estalo/picote que dá para ouvir."""
+        self.xruns += 1
+        self.events.append((t, "falha"))
+
+    def _note_time(self, t0, frames):
+        if perf_counter() - t0 > frames / self.fs:
+            self.overloads += 1
+            self.events.append((t0, "lento"))
+
+    @property
+    def lost(self):
+        """O stream parou sozinho (placa desconectada, driver travou) sem ninguém mandar parar."""
+        s = self.stream
+        return s is not None and not s.active
+
+    def recent_events(self, seconds=60.0, now=None):
+        now = perf_counter() if now is None else now
+        return [(t, k) for t, k in list(self.events) if now - t <= seconds]
+
+    def reset_health(self):
+        self.xruns = 0
+        self.overloads = 0
+        self.events.clear()
 
 
 def _ring_write(buf, pos, x):
