@@ -671,3 +671,62 @@ def test_pitch_and_mod_move_on_the_drawing(win, app):
     app.processEvents()
     assert abs(c.pitch) < 0.01
     win.pad_view.set_device("Teclado simples")
+
+
+# ------------------------------------------------------------------ botão direito → mapear controle físico
+def test_live_learn_dialog_accepts_only_the_right_kind(win, app):
+    from ampsim.ui.midi_learn import MidiLearnDialog
+    br = win.pad_view.bridge
+    dlg = MidiLearnDialog(win.inst, br, "Knob 1 da tela", win, kinds=("cc",))
+    assert win.inst.capture                               # enquanto aberto, o teclado só é monitorado
+    br.monitor.emit("note", 0, 60, 100)                   # nota não serve para knob
+    assert not dlg.ok.isEnabled()
+    br.monitor.emit("cc", 0, 74, 90)                      # o knob girado
+    assert dlg.ok.isEnabled()
+    dlg._accept()
+    assert dlg.choice == ["cc", 0, 74] and not win.inst.capture
+
+
+def test_right_click_menus_offer_physical_mapping(win):
+    pv = win.pad_view
+    for kind, i in (("knob", 0), ("button", 7), ("pad", 2), ("pad", 8 + 1)):
+        texts = [a.text() for a in pv.context_menu(kind, i).actions()]
+        assert any(t.startswith("Mapear controle físico") for t in texts), (kind, i, texts)
+
+
+def test_map_pad_b_button_by_right_click(win, monkeypatch):
+    from ampsim.ui import pad_piano
+    pv, inst = win.pad_view, win.inst
+
+    class Fake:                                           # você aperta o PAD-B: chega uma nota
+        def __init__(self, *a, **k):
+            self.choice = ["note", 0, 98]
+
+        def exec(self):
+            return True
+    monkeypatch.setattr(pad_piano, "MidiLearnDialog", Fake)
+    pv.map_physical("button", 7)                          # botão direito no PAD-B da tela
+    assert inst.mapping["buttons"][7] == ["note", 0, 98]
+    inst.button_funcs[7] = "Banco de pads A/B (tela)"
+    inst.screen_bank = 0
+    keys = []
+    inst.on_key = lambda n, on: keys.append(n)
+    inst.handle_midi(0x90, 98, 100)                       # PAD-B: troca o banco, não toca tecla
+    assert inst.screen_bank == 1 and keys == []
+    inst.screen_bank = 0
+
+
+def test_assign_physical_rules(win):
+    pv, m = win.pad_view, win.inst.mapping
+    assert pv.assign_physical("knob", 0, ["cc", 0, 21])
+    assert m["knobs"][0] == [0, 21]
+    assert not pv.assign_physical("knob", 1, ["note", 0, 60])   # knob não aceita nota
+    assert pv.assign_physical("knob", 1, ["cc", 0, 21])         # o mesmo knob físico vai para o 2
+    assert m["knobs"][0] is None and m["knobs"][1] == [0, 21]
+    assert pv.assign_physical("button", 2, ["pc", 0, 7])        # botão aceita Program Change
+    assert m["buttons"][2] == ["pc", 0, 7]
+    assert pv.assign_physical("button", 2, [])                  # remover
+    assert m["buttons"][2] is None
+    assert pv.assign_physical("pad_b", 0, ["note", 9, 40])      # banco B pode repetir nota do A
+    assert m["pads_b"][0] == [9, 40]
+    assert pv.physical_key("knob", 1) == ["cc", 0, 21]

@@ -19,7 +19,7 @@ from ..instruments import CH_LAYERS, LAYER_ZONES, MAX_LAYERS
 from .controller import MODELS, TRADEMARKS, ControllerWidget
 from .funcs import func_param, func_value, set_func
 from .icons import icon
-from .midi_learn import Mapped, MidiLearnDialog
+from .midi_learn import Mapped, MidiLearnDialog, key_text
 from .theme import ACCENT, C
 from .widgets import ArtTile, Knob, PianoWidget, ToggleSwitch
 
@@ -871,22 +871,99 @@ class PadPianoView(QWidget):
 
     def _context(self, kind, i, pos):
         """Botão direito no instrumento desenhado."""
+        menu = self.context_menu(kind, i)
+        if menu is None:
+            return
+        menu.exec(pos)
+        self.win.refresh_sounds()
+
+    # alvo da tela -> (lista no mapeamento, tipos de mensagem aceitos, nome, pedido)
+    PHYSICAL = {"knob": ("knobs", ("cc",), "Knob", "gire o knob ou mova o fader"),
+                "button": ("buttons", ("note", "cc", "pc"), "Botão", "aperte o botão"),
+                "pad": ("pads", ("note",), "Pad", "toque o pad"),
+                "pad_b": ("pads_b", ("note",), "Pad do banco B", "aperte PAD-B no teclado e toque o pad")}
+
+    def physical_key(self, target, i):
+        """Mapeamento atual no formato [tipo, canal, nº] (para mostrar)."""
+        group, kinds, _, _ = self.PHYSICAL[target]
+        k = self.inst.mapping[group][i]
+        if not k:
+            return None
+        return list(k) if group == "buttons" else [kinds[0], k[0], k[1]]
+
+    def map_physical(self, target, i):
+        """Botão direito → "Mapear controle físico…": medidor ao vivo e liga ao controle da tela."""
+        group, kinds, name, want = self.PHYSICAL[target]
+        label = BUTTONS[i] if target == "button" else str(i + 1)
+        title = f"{name} {label} da tela"
+        if target == "knob":
+            title += f" ({self.inst.knob_funcs[i]})"
+        elif target == "button":
+            title += f" ({self.inst.button_funcs[i]})"
+        dlg = MidiLearnDialog(self.inst, self.bridge, title, self, kinds=kinds,
+                              current=self.physical_key(target, i), want=want)
+        if dlg.exec() and dlg.choice is not None:
+            self.assign_physical(target, i, dlg.choice)
+        self.win.refresh_sounds()
+
+    def assign_physical(self, target, i, key):
+        """key = [tipo, canal, nº] ou [] para remover. Um controle físico vale para um lugar só."""
+        m = self.inst.mapping
+        group, kinds, _, _ = self.PHYSICAL[target]
+        if key:
+            kind, ch, num = key
+            if kind not in kinds:
+                return False
+            stored = list(key) if group == "buttons" else [ch, num]
+            # um controle físico, um lugar: tira dos outros botões/knobs e dos atalhos livres
+            # (pads dos bancos A e B podem repetir notas: aí quem decide é o banco da tela)
+            for j, k in enumerate(m["buttons"]):
+                if k == list(key) and not (group == "buttons" and j == i):
+                    m["buttons"][j] = None
+            if kind == "cc":
+                for j, k in enumerate(m["knobs"]):
+                    if k == [ch, num] and not (group == "knobs" and j == i):
+                        m["knobs"][j] = None
+            for f, k in list(self.inst.free_map.items()):
+                if k == list(key):
+                    del self.inst.free_map[f]
+            m[group][i] = stored
+        elif group in ("knobs", "buttons"):
+            m[group][i] = None
+        self.inst.on_learn()
+        return True
+
+    def context_menu(self, kind, i):
+        """Menu do botão direito num controle desenhado (separado para dar para testar)."""
         menu = QMenu(self)
-        if kind == "pad" and i < PAD_COUNT:
-            self.win.choose_pad_sound(i)
-            return
         if kind == "pad":
-            self._cont_menu(i - PAD_COUNT)
-            return
+            bank_b = i >= PAD_COUNT
+            j = i - PAD_COUNT if bank_b else i
+            target = "pad_b" if bank_b else "pad"
+            cur = self.physical_key(target, j)
+            menu.addSection(f"Pad {j + 1}" + (" (banco B)" if bank_b else ""))
+            menu.addAction(f"Mapear controle físico…   (atual: {key_text(cur)})",
+                           lambda: self.map_physical(target, j))
+            if bank_b:
+                menu.addAction("Tom e timbre do pad contínuo…", lambda: self._cont_menu(j))
+            else:
+                menu.addAction("Trocar o som deste pad…", lambda: self.win.choose_pad_sound(j))
+            return menu
         if kind == "knob":
-            menu.addSection(f"Knob {i + 1}: função")
+            menu.addSection(f"Knob {i + 1}")
+            menu.addAction(f"Mapear controle físico…   (atual: {key_text(self.physical_key('knob', i))})",
+                           lambda: self.map_physical("knob", i))
+            menu.addSection("Função")
             for func in KNOB_FUNCS:
                 a = menu.addAction(func)
                 a.setCheckable(True)
                 a.setChecked(self.inst.knob_funcs[i] == func)
                 a.triggered.connect(lambda _, f=func: self.inst.knob_funcs.__setitem__(i, f))
         elif kind == "button":
-            menu.addSection(f"Botão {BUTTONS[i]}: função")
+            menu.addSection(f"Botão {BUTTONS[i]}")
+            menu.addAction(f"Mapear controle físico…   (atual: {key_text(self.physical_key('button', i))})",
+                           lambda: self.map_physical("button", i))
+            menu.addSection("Função")
             for func in BUTTON_FUNCS:
                 a = menu.addAction(func)
                 a.setCheckable(True)
@@ -894,8 +971,9 @@ class PadPianoView(QWidget):
                 a.triggered.connect(lambda _, f=func: self.inst.button_funcs.__setitem__(i, f))
         elif kind == "key":
             self._key_menu(menu, i)
-        menu.exec(pos)
-        self.win.refresh_sounds()
+        else:
+            return None
+        return menu
 
     def _piano_menu(self, pos):
         note, _ = self.piano._note_at(pos)

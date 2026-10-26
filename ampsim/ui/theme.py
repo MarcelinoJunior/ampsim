@@ -114,6 +114,9 @@ QTreeWidget::item:hover, QListWidget::item:hover {{ background: {card2}; }}
 QTreeWidget::item:selected, QListWidget::item:selected {{ background: {accent}; color: white; }}
 QTreeWidget::branch, QTreeWidget::branch:selected, QTreeWidget::branch:hover {{ background: transparent; }}
 QTreeView {{ show-decoration-selected: 0; selection-background-color: transparent; }}
+QHeaderView::section {{ background: {card2}; color: {dim}; border: none; border-right: 1px solid {border2};
+    padding: 4px 6px; font-weight: 600; }}
+QHeaderView {{ background: {card2}; }}
 QMenu {{ background: {card}; border: 1px solid {border2}; padding: 4px; }}
 QMenu::item {{ padding: 5px 22px 5px 12px; border-radius: 5px; }}
 QMenu::item:selected {{ background: {accent}; color: white; }}
