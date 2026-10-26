@@ -591,6 +591,20 @@ class MainWindow(QMainWindow):
             except RuntimeError as exc:
                 QMessageBox.warning(self, "MIDI", str(exc))
                 self.dock.midi_combo.setCurrentText(NO_MIDI)
+                return
+            status = self.inst.use_midi_device(name)      # cada controlador com o próprio mapeamento
+            self.refresh_sounds()
+            if status == "restaurado":
+                self.dock.log_midi(f"Mapeamento de “{name}” de volta (pads, knobs e botões dele)")
+            elif status == "novo":
+                self.dock.log_midi(f"“{name}”: controlador novo, mapeamento padrão")
+                if QMessageBox.question(
+                        self, "Controlador novo",
+                        f"“{name}” ainda não foi mapeado.\n\nOs mapeamentos do controlador anterior não valem "
+                        "para ele (eles voltam quando você usar o anterior de novo).\n\n"
+                        "Mapear os pads, knobs e botões deste agora?") == QMessageBox.Yes:
+                    self.dock.show_tab(2)
+                    self.inst.start_learning()
 
     # ------------------------------------------------------------------ atualização (GitHub)
     def _show_version(self, extra=""):

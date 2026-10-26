@@ -5,6 +5,7 @@ Pads do banco A disparam sons de bateria (de qualquer kit, ou da bateria worship
 pads do banco B ligam o pad contínuo no tom escolhido. Knobs e botões ganham funções
 aprendidas com o assistente de mapeamento.
 """
+import math
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -36,7 +37,7 @@ _SF2 = (
                        ("Pad Atmosfera", 0, 99), ("Pad Vozes", 0, 91), ("Pad Cristal", 0, 98),
                        ("Pad Sweep", 0, 95), ("Pad Vidro", 0, 92), ("Pad Chuva de Gelo", 0, 96),
                        ("Coral", 0, 52), ("Cordas Lentas", 0, 49), ("Cordas", 0, 48),
-                       ("Cordas Synth", 0, 50), ("Pad Orquestra", 8, 48))),
+                       ("Cordas Synth", 0, 50), ("Pad Orquestra", 8, 48), ("Pad Órgão", 8, 16))),
     ("Baixos", (("Baixo Finger", 0, 33), ("Baixo Palheta", 0, 34), ("Baixo Fretless", 0, 35),
                 ("Baixo Acústico", 0, 32), ("Baixo Synth", 0, 38), ("Baixo Synth 101", 1, 38),
                 ("Baixo FM", 8, 39))),
@@ -235,13 +236,17 @@ DEFAULT_PAD_PRESET = "Worship Moderno"
 KEY_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 PAD_B_CHOICES = KEY_NAMES + ("Parar",)
 DEFAULT_PAD_KEYS = ["C", "D", "E", "F", "G", "A", "B", "Parar"]
-CONT_PAD_SOUNDS = ("Pad Halo", "Pad Atmosfera", "Pad Quente", "Pad Vozes", "Pad Cristal", "Pad Sweep",
+CONT_PAD_SOUNDS = ("Pad Halo", "Pad Atmosfera", "Pad Quente", "Pad Vozes", "Pad Cristal", "Pad Órgão",
                    "Pad Vidro", "Coral", "Cordas Lentas", "Pad Orquestra")
 
 # no pad contínuo o som precisa se sustentar: o "Crystal" do GM é um sino que morre em ~4 s e o
 # "Bowed Glass" cai quase a zero depois do ataque. Aqui: (banco, programa, CC7, velocidade)
 CONT_PAD_PROGRAMS = {"Pad Cristal": (0, 102, 100, 90),       # Echo Drops: brilhante e sustentado
                      "Pad Vidro": (0, 93, 127, 120)}         # Metal Pad, com o volume compensado
+
+# pad contínuo que balança: (velocidade em Hz, quanto vai para cada lado no pan 0-63, vibrato CC1)
+# "Pad Órgão": órgão tonewheel com um giro lento de um lado para o outro, como uma caixa Leslie
+CONT_PAD_LFO = {"Pad Órgão": (0.45, 42, 24)}
 
 PAD_COUNT = 8
 KNOB_COUNT = 8
@@ -333,6 +338,8 @@ def clean_layer(d):
 DEFAULT_PADS = [[9, n] for n in (40, 41, 42, 43, 36, 37, 38, 39)]
 DEFAULT_PADS_B = [[9, n] for n in (48, 49, 50, 51, 44, 45, 46, 47)]
 OLD_DEFAULT_PADS = [[9, n] for n in range(36, 44)]          # padrão antigo (fileiras trocadas)
+# PSR-E473: knobs A e B do LIVE CONTROL (CC 74 e 71) nos knobs 1 e 2 da tela; ele não tem pads MIDI
+PSR_KNOBS = [[0, 74], [0, 71]]
 OLD_DEFAULT_PADS_B = [[9, n] for n in range(44, 52)]
 LATCH_GAP = 1.5     # s: o "0" de um botão comum chega ao soltar; depois disso é um toque novo
 # CCs de uso geral (modulação, volume, sustain, efeitos, banco, "all notes off"…): não são knobs
@@ -358,6 +365,8 @@ class Instruments:
         self.mapping = dict(pads=[list(p) for p in DEFAULT_PADS],
                             pads_b=[list(p) for p in DEFAULT_PADS_B],
                             knobs=[None] * KNOB_COUNT, buttons=[None] * len(BUTTONS))
+        self.midi_device = ""                # entrada MIDI cujo mapeamento está em self.mapping
+        self.device_maps = {}                # entrada MIDI -> {"mapping": ..., "free_map": ...}
         self.knob_funcs = list(DEFAULT_KNOB_FUNCS)
         self.button_funcs = list(DEFAULT_BUTTON_FUNCS)
         self.knob_values = [0] * KNOB_COUNT
@@ -383,6 +392,7 @@ class Instruments:
         self.on_control = lambda func, val: None
         self.cont_key = None                 # tom do pad contínuo ativo
         self._cp = {}                        # canal -> [nível atual, alvo, notas]
+        self._lfo_phase = 0.0                # balanço do pad contínuo (CONT_PAD_LFO)
         self._cp_next = 0
         self._pad_chan = [PAD_CHANNELS[0]] * PAD_COUNT
         self._melodic_off = []               # [(instante, canal, nota)]
@@ -796,6 +806,9 @@ class Instruments:
         bank, prog, vol, vel = CONT_PAD_PROGRAMS.get(self.cont_sound, (s.bank, s.prog, 100, 90))
         self.sf.program(ch, bank, prog)
         self.sf.cc(ch, 7, vol)
+        lfo = CONT_PAD_LFO.get(self.cont_sound)
+        self.sf.cc(ch, 10, 64)                # centro; o balanço (se houver) sai do tick
+        self.sf.cc(ch, 1, lfo[2] if lfo else 0)
         self.sf.cc(ch, 11, 0)
         self.sf.cc(ch, 91, int(pe["reverb"]))
         self.sf.cc(ch, 93, int(pe["chorus"]))
@@ -830,6 +843,15 @@ class Instruments:
                 for n in notes:
                     sf.noteoff(ch, n)
                 del self._cp[ch]
+        lfo = CONT_PAD_LFO.get(self.cont_sound)
+        if lfo and self._cp:
+            rate, depth, _ = lfo
+            if self.pitch_func == PITCH_FUNCS[1]:      # alavanca na rotação: acelera o balanço também
+                rate *= 4.0 ** self.bend
+            self._lfo_phase = (self._lfo_phase + rate * dt) % 1.0
+            pan = int(64 + depth * math.sin(2 * math.pi * self._lfo_phase))
+            for ch in self._cp:
+                sf.cc(ch, 10, pan)
         if self._melodic_off:
             now = time.monotonic()
             due = [x for x in self._melodic_off if x[0] <= now]
@@ -1097,6 +1119,62 @@ class Instruments:
         elif kind == 0xE0:
             self.handle_bend(d1 | (d2 << 7))
 
+    # ------------------------------------------------------------------ um mapeamento por controlador
+    @staticmethod
+    def default_mapping(name):
+        """Mapeamento inicial de um controlador pelo nome da entrada MIDI."""
+        from .audio.hotplug import instrument_of
+        m = dict(pads=[list(p) for p in DEFAULT_PADS], pads_b=[list(p) for p in DEFAULT_PADS_B],
+                 knobs=[None] * KNOB_COUNT, buttons=[None] * len(BUTTONS))
+        if instrument_of(name or "") == "Yamaha PSR-E473":
+            m["pads"] = [None] * PAD_COUNT          # as teclas do PSR não podem virar pads
+            m["pads_b"] = [None] * PAD_COUNT
+            m["knobs"][:len(PSR_KNOBS)] = [list(k) for k in PSR_KNOBS]
+        return m
+
+    def _device_maps_state(self):
+        maps = {k: v for k, v in self.device_maps.items()}
+        if self.midi_device:
+            maps[self.midi_device] = self._map_snapshot()
+        return maps
+
+    def _map_snapshot(self):
+        return {"mapping": {k: [list(x) if x else None for x in v] for k, v in self.mapping.items()},
+                "free_map": dict(self.free_map)}
+
+    def use_midi_device(self, name):
+        """Abriu outra entrada MIDI: guarda o mapeamento da anterior e põe o desta (ou o padrão dela).
+        Assim os pads do M-VAVE não viram teclas do PSR (e o contrário).
+        Devolve "mesmo", "assumido" (1ª vez nesta versão), "restaurado" ou "novo" (nunca mapeado)."""
+        if not name or name == self.midi_device:
+            return "mesmo"
+        from .audio.hotplug import instrument_of
+        if self.midi_device:
+            self.device_maps[self.midi_device] = self._map_snapshot()
+            saved = self.device_maps.get(name)
+        else:                                        # 1ª vez nesta versão: o mapeamento atual é dele
+            saved = self.device_maps.get(name) or self._map_snapshot()
+            if instrument_of(name) == "Yamaha PSR-E473":
+                saved["mapping"]["pads"] = [None] * PAD_COUNT
+                saved["mapping"]["pads_b"] = [None] * PAD_COUNT
+        status = "assumido" if not self.midi_device else ("restaurado" if saved else "novo")
+        self.midi_device = name
+        if saved:
+            m = saved.get("mapping", {})
+            for k, n in (("pads", PAD_COUNT), ("pads_b", PAD_COUNT), ("knobs", KNOB_COUNT),
+                         ("buttons", len(BUTTONS))):
+                v = m.get(k)
+                self.mapping[k] = [list(x) if x else None for x in v] if isinstance(v, list) and len(v) == n \
+                    else self.default_mapping(name)[k]
+            fm = saved.get("free_map", {})
+            self.free_map = {f: v for f, v in fm.items() if (f in KNOB_FUNCS or f in BUTTON_FUNCS)
+                             and isinstance(v, list) and len(v) == 3} if isinstance(fm, dict) else {}
+        else:
+            self.mapping = self.default_mapping(name)
+            self.free_map = {}
+        self.on_learn()
+        return status
+
     def describe_midi(self, kind, ch, num, val):
         """Texto do monitor MIDI: o que o AmpSim faz com esta mensagem."""
         m = self.mapping
@@ -1218,7 +1296,8 @@ class Instruments:
                     device=self.device, bpm=self.bpm, fx=dict(self.layer_fx[0]), free_map=dict(self.free_map),
                     layer_fx=[dict(f) for f in self.layer_fx], fx_layer=self.fx_layer,
                     extra_layers=[dict(x) for x in self.extra_layers],
-                    pad_eq=dict(self.pad_eq), pitch_func=self.pitch_func)
+                    pad_eq=dict(self.pad_eq), pitch_func=self.pitch_func,
+                    midi_device=self.midi_device, device_maps=self._device_maps_state())
 
     def load_state(self, st):
         if not st:
@@ -1274,6 +1353,11 @@ class Instruments:
             self.mapping["pads"] = [list(p) for p in DEFAULT_PADS]
         if self.mapping["pads_b"] == OLD_DEFAULT_PADS_B:
             self.mapping["pads_b"] = [list(p) for p in DEFAULT_PADS_B]
+        if isinstance(st.get("device_maps"), dict):
+            self.device_maps = {name: m for name, m in st["device_maps"].items()
+                                if isinstance(name, str) and isinstance(m, dict)}
+        if isinstance(st.get("midi_device"), str):
+            self.midi_device = st["midi_device"]
         for attr, valid, n in (("knob_funcs", KNOB_FUNCS, KNOB_COUNT),
                                ("button_funcs", BUTTON_FUNCS, len(BUTTONS))):
             v = st.get(attr)

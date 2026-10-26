@@ -280,3 +280,30 @@ def test_pitch_lever_functions(engine):
     inst.set_pitch_func(PITCH_FUNCS[0])                        # trocar volta tudo ao normal
     assert kp[K_DL_TIME] == pytest.approx(base) and inst.bend == 0.0
     assert inst.get_state()["pitch_func"] == PITCH_FUNCS[0]
+
+
+@needs_sf
+def test_organ_pad_swings_side_to_side(engine):
+    """Pad contínuo "Órgão" (no lugar do Sweep): o pan vai e volta e o vibrato fica ligado."""
+    from ampsim.instruments import CONT_PAD_SOUNDS
+    inst = engine.instruments
+    assert "Pad Órgão" in CONT_PAD_SOUNDS and "Pad Sweep" not in CONT_PAD_SOUNDS
+    sent = []
+    real = inst.sf.cc
+    inst.sf.cc = lambda ch, cc, v: (sent.append((ch, cc, v)), real(ch, cc, v))
+    try:
+        inst.set_cont_sound("Pad Órgão")
+        inst.start_cont_pad("D")
+        assert any(cc == 1 and v > 0 for _, cc, v in sent)
+        sent.clear()
+        for _ in range(70):                                   # ~2,3 s de tick a 30 Hz
+            inst.tick(1 / 30)
+        pans = [v for _, cc, v in sent if cc == 10]
+        assert min(pans) < 40 and max(pans) > 88               # foi de um lado ao outro
+        inst.set_cont_sound("Pad Halo")                        # outro timbre: centro e sem vibrato
+        sent.clear()
+        inst.start_cont_pad("E")
+        assert (10, 64) in [(cc, v) for _, cc, v in sent] and any(cc == 1 and v == 0 for _, cc, v in sent)
+    finally:
+        inst.sf.cc = real
+        inst.stop_cont_pad(immediate=True)

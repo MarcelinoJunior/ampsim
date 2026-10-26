@@ -1111,3 +1111,27 @@ def test_keys_learned_as_pads_can_be_removed(win):
     m["pads_b"][0] = [0, 76]
     pv.clear_pad_mapping()
     assert all(k is None for k in m["pads"] + m["pads_b"])
+
+
+def test_new_midi_controller_warns_and_old_one_comes_back(win, monkeypatch):
+    """Trocar de controlador: novo -> avisa e oferece mapear; antigo -> os mapeamentos dele voltam."""
+    class FakeMidi:
+        name = None
+
+        def open(self, name):
+            self.name = name
+
+        def close(self):
+            pass
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: asked.append(a[2]) or QMessageBox.No))
+    inst = win.inst
+    win.midi = FakeMidi()
+    inst.midi_device = "2- Digital Keyboard-1"
+    inst.mapping["knobs"][0] = [0, 74]
+    win._open_midi("SMK-25")
+    assert asked and "ainda não foi mapeado" in asked[0] and not inst.learn_steps
+    assert inst.mapping["knobs"][0] is None and inst.mapping["pads"][0] == [9, 40]
+    win._open_midi("2- Digital Keyboard-1")
+    assert len(asked) == 1 and inst.mapping["knobs"][0] == [0, 74]
+    assert any("de volta" in line for line in win.dock.midi_log)

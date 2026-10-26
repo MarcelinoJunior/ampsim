@@ -394,3 +394,38 @@ def test_button_that_sends_a_note_never_plays_sound(engine):
     assert inst.screen_bank == 1 and hits == [] and keys == []
     inst.mapping["buttons"] = [None] * 8
     inst.screen_bank = 0
+
+
+def test_each_midi_controller_keeps_its_own_mapping(engine):
+    """PSR e M-VAVE com mapeamentos separados: as teclas do PSR não viram os pads do M-VAVE."""
+    from ampsim.instruments import Instruments
+    inst = engine.instruments
+    psr, smk = "2- Digital Keyboard-1", "SMK-25"
+    # sessão antiga (um mapeamento para tudo), com teclas do PSR aprendidas como pads
+    inst.midi_device = ""
+    inst.mapping["pads"][3] = [0, 68]
+    inst.mapping["knobs"][0] = [0, 74]
+    assert inst.use_midi_device(psr) == "assumido"
+    assert all(p is None for p in inst.mapping["pads"])           # PSR não tem pads MIDI
+    assert inst.mapping["knobs"][0] == [0, 74]
+    assert inst.use_midi_device(smk) == "novo"                     # nunca usado: padrão do M-VAVE
+    assert inst.mapping["pads"][0] == [9, 40] and inst.mapping["knobs"][0] is None
+    inst.mapping["knobs"][2] = [0, 20]                              # aprende algo no M-VAVE
+    assert inst.use_midi_device(psr) == "restaurado"
+    assert inst.mapping["knobs"][0] == [0, 74] and inst.mapping["knobs"][2] is None
+    assert inst.mapping["pads"][0] is None
+    inst.use_midi_device(smk)
+    assert inst.mapping["knobs"][2] == [0, 20] and inst.mapping["pads"][0] == [9, 40]
+    st = inst.get_state()                                           # sobrevive a fechar e abrir
+    other = Instruments(engine)
+    other.load_state(st)
+    assert other.midi_device == smk and other.mapping["knobs"][2] == [0, 20]
+    other.use_midi_device(psr)
+    assert other.mapping["knobs"][0] == [0, 74] and other.mapping["pads"][3] is None
+
+
+def test_psr_default_mapping():
+    from ampsim.instruments import Instruments
+    m = Instruments.default_mapping("2- Digital Keyboard-1")
+    assert m["pads"] == [None] * 8 and m["knobs"][:2] == [[0, 74], [0, 71]]
+    assert Instruments.default_mapping("Arturia KeyStep")["pads"][0] == [9, 40]

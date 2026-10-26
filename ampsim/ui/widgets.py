@@ -549,7 +549,7 @@ PHOTO_BY_NAME = {
     "Pad Atmosfera": "pad-atmosfera", "Pad Vozes": "pad-vozes", "Pad Cristal": "pad-cristal",
     "Pad Sweep": "pad-sweep", "Pad Vidro": "pad-vidro", "Pad Chuva de Gelo": "pad-chuva-gelo", "Coral": "coral",
     "Cordas Lentas": "cordas-lentas", "Cordas": "cordas", "Cordas Synth": "cordas-synth",
-    "Pad Orquestra": "pad-orquestra",
+    "Pad Orquestra": "pad-orquestra", "Pad Órgão": "pad-orgao",
     "Baixo Finger": "baixo-finger", "Baixo Palheta": "baixo-palheta", "Baixo Fretless": "baixo-fretless",
     "Baixo Acústico": "baixo-acustico", "Baixo Synth": "baixo-synth", "Baixo Synth 101": "baixo-101",
     "Baixo FM": "baixo-fm",
