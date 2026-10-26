@@ -48,6 +48,19 @@ falhar, o script baixa das fontes oficiais listadas abaixo.
 | [ASIO4ALL](https://asio4all.org), Michael Tippach | Freeware |
 | [FlexASIO](https://github.com/dechamps/FlexASIO), Etienne Dechamps | MIT |
 
+## Timbres adicionais (pianos, baixados à parte)
+
+Baixados pela tela **Timbres adicionais** (ou pelo instalador) da Release
+[timbres-pianos-1](https://github.com/MarcelinoJunior/ampsim/releases/tag/timbres-pianos-1), cópias sem
+modificação dos pacotes do [FreePats](https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html).
+Cada pacote traz a própria licença.
+
+| Pacote | Origem | Licença |
+|---|---|---|
+| Upright Piano KW (Kawai de armário) | Gonzalo e Roberto, FreePats | CC0 1.0 |
+| YDP Grand Piano (Yamaha Disklavier Pro) | Roberto (FreePats), amostras Zenph Studios / OLPC | CC BY 3.0 |
+| Salamander Grand Piano V3 (Yamaha C5) | Alexander Holm; versão SF2 de Roberto (FreePats) | CC BY 3.0 |
+
 ## Imagens dos timbres (guardadas no repositório)
 
 Cada timbre tem uma miniatura própria (o quadrado ao lado do nome). As imagens ficam no repositório,
@@ -104,6 +117,9 @@ em `assets/timbres/`, recortadas em quadrado e reduzidas para 192×192 px.
 | `assets/timbres/piano-cp.jpg` | Piano Elétrico (CP) | [Yamaha CP-80 Electric Grand Piano, 88 keys, 1978.jpg](https://commons.wikimedia.org/wiki/File:Yamaha_CP-80_Electric_Grand_Piano,_88_keys,_1978.jpg) | haru__q | [CC BY-SA 2.0](https://creativecommons.org/licenses/by-sa/2.0) |
 | `assets/timbres/piano-fm.jpg` | Piano FM (DX) | [YAMAHA DX7.jpg](https://commons.wikimedia.org/wiki/File:YAMAHA_DX7.jpg) | Finnianhughes101 | Public domain |
 | `assets/timbres/piano-fm-chorus.jpg` | Piano FM com Chorus | [DX7II-D.jpg](https://commons.wikimedia.org/wiki/File:DX7II-D.jpg) | Niels Heidenreich from Hannover, Germany | [CC BY-SA 2.0](https://creativecommons.org/licenses/by-sa/2.0) |
+| `assets/timbres/piano-salamander.jpg` | Piano de Cauda Salamander | [Ruru Lin as Hinata Hyuga playing Yamaha grand piano (48665382582).jpg](https://commons.wikimedia.org/wiki/File:Ruru_Lin_as_Hinata_Hyuga_playing_Yamaha_grand_piano_(48665382582).jpg) | 玄史生 | [CC0](http://creativecommons.org/publicdomain/zero/1.0/deed.en) |
+| `assets/timbres/piano-upright.jpg` | Piano de Armário (Upright) | [Upright Piano KW (foto do piano gravado, no pacote do FreePats)](https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html#UprightKW) | Gonzalo e Roberto (FreePats) | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `assets/timbres/piano-ydp.jpg` | Piano de Cauda YDP | [Disklavier.jpg](https://commons.wikimedia.org/wiki/File:Disklavier.jpg) | Yamaha Music (Russia) LLC | [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0) |
 | `assets/timbres/rhodes.jpg` | Rhodes | [1977 Rhodes Mark I Suitcase Piano 73-key (serial no. K610578) (2005-01-29 09.27.49 by Daniel Spils).jpg](https://commons.wikimedia.org/wiki/File:1977_Rhodes_Mark_I_Suitcase_Piano_73-key_(serial_no._K610578)_(2005-01-29_09.27.49_by_Daniel_Spils).jpg) | Daniel Spils from Seattle, USA | [CC BY 2.0](https://creativecommons.org/licenses/by/2.0) |
 | `assets/timbres/rhodes-chorus.jpg` | Rhodes com Chorus | [(The Rhodes piano) (Photography by David Adam Kess) interior (an electric piano invented by Harold Rhodes).jpg](https://commons.wikimedia.org/wiki/File:(The_Rhodes_piano)_(Photography_by_David_Adam_Kess)_interior_(an_electric_piano_invented_by_Harold_Rhodes).jpg) | David Adam Kess | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) |
 | `assets/timbres/sinos-tubulares.jpg` | Sinos | [Adams Bass Chimes.jpg](https://commons.wikimedia.org/wiki/File:Adams_Bass_Chimes.jpg) | Xylosmygame / Xylosmygame at en.wikipedia | [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0) |

@@ -405,7 +405,9 @@ class PadPianoView(QWidget):
                 ("Sustain (segurar)", "SUST.", "music", "Sustain: segura as notas soltas (como o pedal)"),
                 ("Oitava −", "OIT −", "down", "Uma oitava abaixo"),
                 ("Oitava +", "OIT +", "up", "Uma oitava acima"),
-                ("Pânico (soltar notas)", "PARAR", "stop", "Solta todas as notas e para o pad contínuo")):
+                ("Pânico (soltar notas)", "PARAR", "stop", "Solta todas as notas e para o pad contínuo"),
+                ("Metrônomo liga/desliga", "CLICK", "tap",
+                 "Metrônomo no BPM (Ctrl+M). Botão direito: volume, compasso e saída do click")):
             b = QToolButton()
             b.setText(text)
             b.setObjectName("action")
@@ -415,9 +417,9 @@ class PadPianoView(QWidget):
             b.setFocusPolicy(Qt.NoFocus)
             b.setToolTip(tip + "\nBotão direito: mapear num botão do controlador")
             b.setFixedSize(60, 50)
-            b.setCheckable(func == "Sustain (segurar)")
+            b.setCheckable(func in ("Sustain (segurar)", "Metrônomo liga/desliga"))
             b.clicked.connect(lambda _, f=func: self._action(f))
-            w = Mapped(self, func, b)
+            w = Mapped(self, func, b, self._click_menu if func == "Metrônomo liga/desliga" else None)
             w.tag.setVisible(False)
             self.action_buttons[func] = b
             self.mapped[func] = w
@@ -745,8 +747,29 @@ class PadPianoView(QWidget):
             set_func(self.engine, func, v)
 
     def _action(self, func):
+        if func == "Metrônomo liga/desliga" and not self.engine.metronome.on and not self.win.click_output_ok():
+            self.refresh()
+            return
         self.inst.do_button(func)
         self.refresh()
+
+    def _click_menu(self, m):
+        """Botão direito no CLICK: volume, compasso e onde o click toca."""
+        met = self.engine.metronome
+        m.addSection("Metrônomo")
+        vol = m.addMenu(f"Volume ({round(met.volume * 100)}%)")
+        for pct in (25, 50, 75, 100):
+            a = vol.addAction(f"{pct}%")
+            a.setCheckable(True)
+            a.setChecked(round(met.volume * 100) == pct)
+            a.triggered.connect(lambda _, p=pct: setattr(met, "volume", p / 100))
+        beats = m.addMenu("Compasso")
+        for n, text in ((1, "Sem acento"), (2, "2 tempos"), (3, "3 tempos"), (4, "4 tempos"), (6, "6 tempos")):
+            a = beats.addAction(text)
+            a.setCheckable(True)
+            a.setChecked(met.beats == n)
+            a.triggered.connect(lambda _, k=n: setattr(met, "beats", k))
+        m.addAction("Saída do click (placa de som)…", lambda: self.win.open_audio_dialog())
 
     def _rot_speed(self, i):
         fx = self.inst.fx
@@ -808,6 +831,7 @@ class PadPianoView(QWidget):
         else:
             self.inst.set_sound(n, name)
         self.user_preset = ""
+        self.win.offer_pack(name)                   # piano gravado ainda não baixado: oferece baixar
 
     def _layer_volume(self, v):
         if self._updating:
@@ -1169,6 +1193,7 @@ class PadPianoView(QWidget):
             self.delay_div.setCurrentIndex(int(fx.get("delay_div", 0)))
             self.touch.setValue(int(inst.levels["touch"]))
             self.action_buttons["Sustain (segurar)"].setChecked(inst.sustain)
+            self.action_buttons["Metrônomo liga/desliga"].setChecked(self.engine.metronome.on)
             self.bpm.set_value(inst.bpm)
             vol = inst.layer_volume(self._layer_slot())       # um knob pode ter mexido no volume
             if vol is not None and vol != self.layer_vol.value():

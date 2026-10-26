@@ -130,10 +130,11 @@ class MidiLearnDialog(QDialog):
 class Mapped(QWidget):
     """Controle + etiqueta com o mapeamento físico; botão direito abre o mapeamento."""
 
-    def __init__(self, panel, func, inner):
+    def __init__(self, panel, func, inner, extra=None):
         super().__init__()
         self.panel = panel
         self.func = func
+        self.extra = extra                  # extra(menu): opções a mais no botão direito
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -149,6 +150,8 @@ class Mapped(QWidget):
 
     def _menu(self, _pos):
         m = QMenu(self)
+        if self.extra is not None:
+            self.extra(m)
         m.addSection(self.func)
         a = m.addAction("Mapear controle físico…")
         a.triggered.connect(lambda: self.panel.learn(self.func))

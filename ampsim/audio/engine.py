@@ -7,6 +7,7 @@ import numpy as np
 
 from . import devices as dev
 from .devices import promote_audio_thread, sd
+from .metronome import Metronome
 from .sampler import Recorder, Sampler
 from ..dsp import layout as Ly
 from ..dsp.kernels import (
@@ -54,6 +55,8 @@ class AudioEngine:
         self.start_notes = []           # avisos do último start (taxa ajustada, entrada desligada)
         self.recorder = Recorder()      # REC da aba Faders / Pads
         self.sampler = Sampler()        # gravações tocadas pelos pads
+        self.metronome = Metronome(self.fs, Ly.MAX_BLOCK)
+        self.click_offset = -2          # saída do click aberta agora (-2 nenhuma, -1 principal, n par n)
         self.sampler.set_fs(self.fs)
         self._route = channel_routes()
         # RTA da aba aberta: entrada seca e saída só desta trilha (anéis lidos pela UI)
@@ -104,8 +107,13 @@ class AudioEngine:
         self.config = config
 
         self._rebuild(config.samplerate)
-        n_out = min(out_dev.max_out, config.output_offset + 2)
+        click = config.click_offset
+        want = max(config.output_offset, click) + 2 if click >= 0 else config.output_offset + 2
+        n_out = min(out_dev.max_out, want)
         self.out_offset = min(config.output_offset, max(n_out - 2, 0))
+        # click num par próprio (fones da banda) só se a placa tem esse par e não é o principal
+        self.click_offset = click if click == -1 or (click >= 0 and click + 2 <= n_out
+                                                      and click != self.out_offset) else -2
         lat = config.blocksize / config.samplerate
         extra = None
         if config.hostapi == "Windows WASAPI" and config.wasapi_exclusive:
@@ -191,6 +199,7 @@ class AudioEngine:
         if float(fs) != self.fs:
             self.fs = float(fs)
             self.sampler.set_fs(self.fs)
+            self.metronome.set_fs(self.fs, Ly.MAX_BLOCK)
             for name in TRACKS:
                 old = self.tracks[name]
                 t = TrackDSP(self.fs)
@@ -300,6 +309,12 @@ class AudioEngine:
         write_output(mix, frames, outdata, self.out_offset, self._glide("master", 0.0 if self.muted else self.master))
         if rec.active and rec.source == "out":
             rec.feed(outdata[:frames, self.out_offset:self.out_offset + 2])
+        m = self.metronome
+        if m.on and m.render(frames, inst.bpm) and self.click_offset != -2:
+            off = self.out_offset if self.click_offset == -1 else self.click_offset
+            if off + 2 <= outdata.shape[1] and not (self.muted and self.click_offset == -1):
+                outdata[:frames, off] += m.buf[:frames]
+                outdata[:frames, off + 1] += m.buf[:frames]
 
     def _glide(self, key, target):
         """Ganho que anda ~35% do caminho por bloco (mute e fader sem estalo, ~13 ms)."""

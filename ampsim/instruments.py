@@ -24,6 +24,7 @@ class Sound:
     bank: int = 0
     prog: int = 0
     synth_preset: str = ""
+    pack: str = ""          # pacote de "Timbres adicionais" (audio/packs.py); "" = banco padrão
 
 
 _SF2 = (
@@ -51,6 +52,10 @@ _SF2 = (
 )
 
 SOUNDS = [Sound(name, cat, "sf2", b, p) for cat, items in _SF2 for name, b, p in items]
+# pianos gravados de instrumentos reais, baixados à parte (tela "Timbres adicionais")
+for _name, _pack in (("Piano de Armário (Upright)", "piano-upright"), ("Piano de Cauda YDP", "piano-ydp"),
+                     ("Piano de Cauda Salamander", "piano-salamander")):
+    SOUNDS.append(Sound(_name, "Pianos", "sf2", pack=_pack))
 for _preset in ("Baixo Pulsante", "Pad Quente", "Pad Escuro", "Cordas", "Saw Brilhante", "Órgão",
                 "Sino Suave"):
     SOUNDS.append(Sound(f"{_preset} (AmpSim)", "Synth AmpSim", "synth", synth_preset=_preset))
@@ -257,14 +262,14 @@ KNOB_FUNCS = ("Nenhuma", "Volume teclas", "Volume camada 1", "Volume camada 2", 
               "Reverb", "Shimmer", "Reverb da bateria", "Chorus", "Rotação (intensidade)",
               "Rotação (velocidade)", "Drive",
               "Delay (mix)", "Tempo do delay", "Repetições do delay", "Brilho", "Release", "Ataque",
-              "Sensibilidade ao toque", "BPM", "Master")
+              "Sensibilidade ao toque", "BPM", "Volume do metrônomo", "Master")
 DEFAULT_KNOB_FUNCS = ["Volume teclas", "Volume camada 2", "Volume bateria", "Volume pad contínuo",
                       "Reverb", "Shimmer", "Brilho", "Master"]
 BUTTON_FUNCS = ("Nenhuma", "Tap tempo (BPM)", "Timbre anterior", "Próximo timbre", "Preset de pads anterior",
                 "Próximo preset de pads", "Liga/desliga camada 2", "Parar pad contínuo",
                 "Banco de pads A/B (tela)", "Rotação lenta/rápida", "Rotação liga/desliga",
                 "Delay liga/desliga", "Drive liga/desliga", "Sustain (segurar)", "Oitava −", "Oitava +",
-                "Pânico (soltar notas)", "Próxima música", "Música anterior")
+                "Pânico (soltar notas)", "Próxima música", "Música anterior", "Metrônomo liga/desliga")
 # knob "Rotação (velocidade)": 0 = parada; girando, de 0,2 Hz (bem lenta) até 12 Hz (muito rápida)
 ROT_MIN_HZ, ROT_MAX_HZ = 0.2, 12.0
 
@@ -509,7 +514,25 @@ class Instruments:
         except (OSError, RuntimeError) as exc:
             self.error = str(exc)
             return
+        self.load_packs()
         self.apply_all()
+
+    def load_packs(self):
+        """Carrega os pacotes de "Timbres adicionais" instalados (pianos gravados)."""
+        from .audio import packs
+        if self.sf is None:
+            return
+        for pid, path in packs.installed().items():
+            self.sf.load_font(pid, path)
+
+    def pack_missing(self, name):
+        """O timbre precisa de um pacote ainda não instalado? -> o Pack, ou None."""
+        from .audio import packs
+        s = SOUND_BY_NAME.get(name or "")
+        if s is None or not s.pack:
+            return None
+        pack = packs.PACK_BY_ID.get(s.pack)
+        return pack if pack is not None and packs.sf2_path(pack) is None else None
 
     @staticmethod
     def _gain(level):
@@ -549,7 +572,7 @@ class Instruments:
         for chan, name in zip(CH_LAYERS, sounds):
             s = SOUND_BY_NAME.get(name or "")
             if s is not None and s.src == "sf2" and self.sf:
-                self.sf.program(chan, s.bank, s.prog)
+                self.sf.program(chan, s.bank, s.prog, s.pack)
             if s is not None and s.src == "synth":
                 self.engine.synth.apply_preset(s.synth_preset)
         self._assign_pad_channels()
@@ -962,6 +985,8 @@ class Instruments:
             lv["touch"] = pct
         elif func == "BPM":
             self.set_bpm(60 + value / 127 * 120)
+        elif func == "Volume do metrônomo":
+            self.engine.metronome.volume = value / 127
         elif func == "Reverb da bateria":
             lv["drumverb"] = value
             if self.sf:
@@ -989,6 +1014,7 @@ class Instruments:
             self._taps = []
         self._taps = (self._taps + [now])[-5:]
         self.engine.synth.restart_pulse()
+        self.engine.metronome.restart()            # o click também recomeça no toque
         if len(self._taps) >= 2:
             gaps = [b - a for a, b in zip(self._taps, self._taps[1:])]
             gaps.sort()
@@ -1033,6 +1059,11 @@ class Instruments:
             self.tap_tempo()
         elif func in ("Próxima música", "Música anterior"):
             self.on_song(1 if func == "Próxima música" else -1)
+        elif func == "Metrônomo liga/desliga":
+            m = self.engine.metronome
+            m.on = not m.on
+            m.restart()
+            self.on_change()
         elif func == "Timbre anterior":
             self.step_ready(-1)
         elif func == "Próximo timbre":
@@ -1326,6 +1357,7 @@ class Instruments:
                     layer_fx=[dict(f) for f in self.layer_fx], fx_layer=self.fx_layer,
                     extra_layers=[dict(x) for x in self.extra_layers],
                     pad_eq=dict(self.pad_eq), pitch_func=self.pitch_func,
+                    metronome=dict(volume=self.engine.metronome.volume, beats=self.engine.metronome.beats),
                     midi_device=self.midi_device, device_maps=self._device_maps_state())
 
     def load_state(self, st):
@@ -1360,6 +1392,13 @@ class Instruments:
             self.fx_layer = max(0, min(st["fx_layer"], self.layer_count() - 1))
         if isinstance(st.get("pad_eq"), dict):
             self.pad_eq.update(clean_pad_eq(st["pad_eq"]))
+        met = st.get("metronome")
+        if isinstance(met, dict):
+            m = self.engine.metronome
+            if isinstance(met.get("volume"), (int, float)):
+                m.volume = max(0.0, min(1.0, float(met["volume"])))
+            if met.get("beats") in (1, 2, 3, 4, 6):
+                m.beats = met["beats"]
         if st.get("pitch_func") in PITCH_FUNCS:
             self.pitch_func = st["pitch_func"]
             self.bend = 0.0

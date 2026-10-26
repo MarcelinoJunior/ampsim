@@ -46,6 +46,10 @@ class AudioDialog(QDialog):
         form.addRow("", self.in_hint)
         self.out_pair = QComboBox()
         form.addRow("Canais de saída:", self.out_pair)
+        self.click_pair = QComboBox()
+        self.click_pair.setToolTip("Onde o metrônomo (CLICK) toca. Num par de saídas só dele (ex.: 3-4 ligado nos\n"
+                                   "fones da banda) o click não vaza para o PA.")
+        form.addRow("Saída do metrônomo:", self.click_pair)
         self.g_ch = QComboBox()
         form.addRow("Canal da guitarra:", self.g_ch)
         self.b_ch = QComboBox()
@@ -90,6 +94,7 @@ class AudioDialog(QDialog):
 
         self.api.currentTextChanged.connect(self._api_changed)
         self.out.currentIndexChanged.connect(self._out_changed)
+        self.out_pair.currentIndexChanged.connect(lambda *_: self._click_choices())
         self.inp.currentIndexChanged.connect(self._in_changed)
         self.sr.currentIndexChanged.connect(self._update_latency)
         self.excl.toggled.connect(lambda *_: self._update_rates())
@@ -106,6 +111,7 @@ class AudioDialog(QDialog):
         self._out_changed()
         self._in_changed()
         self._select(self.out_pair, cfg.output_offset, data=True)
+        self._click_choices(cfg.click_offset)
         self._select(self.g_ch, engine.input_channel["guitar"], data=True)
         self._select(self.b_ch, engine.input_channel["bass"], data=True)
         self._update_rates()
@@ -190,6 +196,26 @@ class AudioDialog(QDialog):
         for off in range(0, max(n - 1, 1), 2):
             self.out_pair.addItem(f"{off + 1}-{off + 2}" if off + 1 < n else f"{off + 1}", off)
         self._select(self.out_pair, cur, data=True)
+        self._click_choices()
+
+    def _click_choices(self, keep=None):
+        """Metrônomo: nenhuma saída, a principal (vai para o PA) ou um par livre da placa."""
+        if not hasattr(self, "click_pair"):
+            return
+        keep = self.click_pair.currentData() if keep is None else keep
+        d = self.out.currentData()
+        n = d.max_out if d else 2
+        main = self.out_pair.currentData() or 0
+        self.click_pair.blockSignals(True)
+        self.click_pair.clear()
+        self.click_pair.addItem("Nenhuma (o click não toca)", -2)
+        self.click_pair.addItem("Saída principal (vai junto para o PA)", -1)
+        for off in range(0, n - 1, 2):
+            if off != main:
+                self.click_pair.addItem(f"Saídas {off + 1}-{off + 2} (ex.: fones da banda)", off)
+        i = self.click_pair.findData(keep)
+        self.click_pair.setCurrentIndex(i if i >= 0 else 0)
+        self.click_pair.blockSignals(False)
 
     @staticmethod
     def _keyboard_input(d):
@@ -271,6 +297,7 @@ class AudioDialog(QDialog):
             blocksize=self.bs.currentData(),
             wasapi_exclusive=self.excl.isChecked(),
             output_offset=self.out_pair.currentData() or 0,
+            click_offset=self.click_pair.currentData() if self.click_pair.currentData() is not None else -2,
         )
         channels = {"guitar": self.g_ch.currentData() or 0, "bass": self.b_ch.currentData() or 0}
         return cfg, channels

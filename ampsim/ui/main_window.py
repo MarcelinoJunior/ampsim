@@ -20,6 +20,7 @@ from ..audio.engine import TRACKS
 from ..midi import winmm
 from ..instruments import READY
 from .health import HealthDialog, style_badge
+from .packs_dialog import PacksDialog
 from .setlist_panel import SetlistPanel
 from .shortcuts import Shortcuts, ShortcutsDialog
 from ..presets import DEFAULT_PRESET, FACTORY
@@ -250,6 +251,7 @@ class MainWindow(QMainWindow):
         m.addAction(icon("midi", C["text"], 14), "MIDI / Controlador", lambda: self.dock.show_tab(2))
         m.addAction(icon("mixer", C["text"], 14), "Faders / Pads", lambda: self.dock.show_tab(1))
         m.addAction(icon("tap", C["text"], 14), "Teclas de atalho…", self.open_shortcuts)
+        m.addAction(icon("download", C["text"], 14), "Timbres adicionais (pianos)…", lambda: self.open_packs())
         m.addAction(icon("stop", C["text"], 14), "Pânico (soltar todas as notas)", self.panic)
         m.addSeparator()
         m.addAction(icon("info", C["text"], 14), "Sobre o AmpSim…", lambda: self.show_about())
@@ -329,6 +331,43 @@ class MainWindow(QMainWindow):
         e.muted = (not e.muted) if on is None else bool(on)
         self.mute_banner.setVisible(e.muted)
 
+    def click_output_ok(self):
+        """Antes de ligar o click: ele tem por onde sair? Sem saída escolhida, pergunta se pode tocar
+        na saída principal (aí ele vai junto para o PA)."""
+        e = self.engine
+        if e.click_offset != -2 or e.config.click_offset == -1:
+            return True
+        ans = QMessageBox.question(
+            self, "Metrônomo",
+            "O click ainda não tem saída escolhida.\n\nTocar o click na saída principal? (Ele vai junto "
+            "para o PA: bom para ensaiar em casa.)\n\nPara mandar só para os fones da banda, escolha um par de "
+            "saídas livre da placa em Placa de som e driver → Saída do metrônomo.")
+        if ans != QMessageBox.Yes:
+            return False
+        e.config.click_offset = -1
+        e.click_offset = -1
+        return True
+
+    def open_packs(self, start=None):
+        """Tela "Timbres adicionais"; start = pacote para já começar a baixar."""
+        dlg = PacksDialog(self)
+        if start is not None:
+            dlg.download(start)
+        dlg.exec()
+
+    def offer_pack(self, sound_name):
+        """Escolheu um timbre de pacote não instalado: toca o piano padrão e oferece baixar."""
+        pack = self.inst.pack_missing(sound_name)
+        if pack is None:
+            return False
+        if QMessageBox.question(
+                self, "Timbre adicional",
+                f"“{sound_name}” é um piano gravado que ainda não está no computador "
+                f"(download de {pack.download_mb} MB).\n\nEnquanto isso toca o Piano de Cauda normal.\n\n"
+                "Baixar agora?") == QMessageBox.Yes:
+            self.open_packs(start=pack)
+        return True
+
     def open_shortcuts(self):
         ShortcutsDialog(self.shortcuts, self).exec()
 
@@ -353,6 +392,10 @@ class MainWindow(QMainWindow):
             rec.stop() if self.engine.recorder.active else rec.start()
         elif action == "tap":
             inst.tap_tempo()
+        elif action == "click":
+            if self.engine.metronome.on or self.click_output_ok():
+                inst.do_button("Metrônomo liga/desliga")
+                self.pad_view.refresh_values()
         elif action in ("song_next", "song_prev"):
             self.setlist.step(1 if action == "song_next" else -1)
         elif action == "stop_pad":

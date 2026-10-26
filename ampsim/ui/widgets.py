@@ -541,7 +541,8 @@ PHOTO_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 # uma imagem por timbre (fotos do Wikimedia Commons; as "synth-*" são geradas por tools/gerar_artes_synth.py)
 PHOTO_BY_NAME = {
     "Piano de Cauda": "piano-cauda", "Piano Brilhante": "piano-brilhante", "Piano Elétrico (CP)": "piano-cp",
-    "Piano Honky-tonk": "honky-tonk", "Rhodes": "rhodes", "Rhodes com Chorus": "rhodes-chorus",
+    "Piano Honky-tonk": "honky-tonk", "Piano de Armário (Upright)": "piano-upright",
+    "Piano de Cauda YDP": "piano-ydp", "Piano de Cauda Salamander": "piano-salamander", "Rhodes": "rhodes", "Rhodes com Chorus": "rhodes-chorus",
     "Piano FM (DX)": "piano-fm", "Piano FM com Chorus": "piano-fm-chorus", "Clavinet": "clavinet",
     "Órgão Hammond": "orgao-hammond", "Órgão Percussivo": "orgao-percussivo", "Órgão Rock": "orgao-rock",
     "Órgão de Tubos": "orgao-tubos", "Órgão de Tubos 2": "orgao-tubos-2",

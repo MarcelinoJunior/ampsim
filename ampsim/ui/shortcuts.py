@@ -29,6 +29,7 @@ ACTIONS = (
     ("panic", "Pânico (solta as notas e para o pad)", "Esc"),
     ("rec", "Gravador: REC / STOP", "Ctrl+R"),
     ("tap", "Tap tempo (BPM)", "Ctrl+T"),
+    ("click", "Metrônomo liga/desliga", "Ctrl+M"),
     ("stop_pad", "Parar o pad contínuo", "Ctrl+Space"),
 )
 DEFAULTS = {a: k for a, _, k in ACTIONS}

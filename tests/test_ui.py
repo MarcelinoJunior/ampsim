@@ -1160,3 +1160,68 @@ def test_audio_reconnects_by_itself(win, monkeypatch):
     assert win._reconnect_at is None and any("religado" in line for line in win.dock.midi_log)
     win.toggle_power(False)                                      # o usuário desligou: não religa
     assert not win.watch_audio(20.0) and not state["running"]
+
+
+def test_click_button_asks_for_output_and_dialog_choices(win, monkeypatch):
+    from ampsim.audio import devices as dev
+    from ampsim.ui.audio_dialog import AudioDialog
+    e, pv = win.engine, win.pad_view
+    answers = [QMessageBox.No, QMessageBox.Yes]
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: answers.pop(0)))
+    e.click_offset = -2
+    e.config.click_offset = -2
+    pv._action("Metrônomo liga/desliga")                         # sem saída: pergunta; "Não" = continua desligado
+    assert not e.metronome.on
+    pv._action("Metrônomo liga/desliga")                         # "Sim": toca na saída principal
+    assert e.metronome.on and e.config.click_offset == -1
+    assert pv.action_buttons["Metrônomo liga/desliga"].isChecked()
+    win.shortcut_action("click")                                  # Ctrl+M desliga
+    assert not e.metronome.on
+    menu_items = []
+    from PySide6.QtWidgets import QMenu
+    m = QMenu()
+    pv._click_menu(m)
+    menu_items = [a.text() for a in m.actions()]
+    assert any(t.startswith("Volume") for t in menu_items) and "Compasso" in menu_items
+    D = dev.Device
+    devs = {"ASIO": [D(1, "Placa 4", 0, 4, 48000.0)]}
+    monkeypatch.setattr(dev, "hostapis", lambda: ["ASIO"])
+    monkeypatch.setattr(dev, "devices", lambda api, kind: [d for d in devs.get(api, [])
+                                                         if (d.max_out if kind == "output" else d.max_in)])
+    monkeypatch.setattr(dev, "supported_rates", lambda *a, **k: [48000])
+    e.config = dev.AudioConfig(hostapi="ASIO", output_device="Placa 4", samplerate=48000, click_offset=2)
+    dlg = AudioDialog(e, win)
+    datas = [dlg.click_pair.itemData(i) for i in range(dlg.click_pair.count())]
+    assert datas == [-2, -1, 2] and dlg.click_pair.currentData() == 2
+    cfg, _ = dlg.result_config()
+    assert cfg.click_offset == 2
+    dlg.reject()
+
+
+def test_packs_dialog_install_and_offer(win, monkeypatch, tmp_path):
+    import hashlib
+    import zipfile
+    from ampsim.audio import packs
+    from ampsim.ui.packs_dialog import PacksDialog
+    monkeypatch.setenv("AMPSIM_PACKS_DIR", str(tmp_path / "timbres"))
+    src = tmp_path / "p.zip"
+    with zipfile.ZipFile(src, "w") as z:
+        z.writestr("x/UprightPianoKW-20220221.sf2", b"RIFF-falso")
+    real = packs.PACK_BY_ID["piano-upright"]
+    fake = packs.Pack(real.id, real.nome, real.descricao, real.licenca, 1, 1, real.url,
+                      hashlib.sha256(src.read_bytes()).hexdigest(), real.arquivo, real.sound)
+    monkeypatch.setattr(packs, "PACKS", (fake,) + packs.PACKS[1:])
+    monkeypatch.setitem(packs.PACK_BY_ID, fake.id, fake)
+    dlg = PacksDialog(win)
+    status, bar, btn = dlg.rows[fake.id]
+    assert btn.text() == "Baixar" and "Não instalado" in status.text()
+    dlg.download(fake, source=src, wait=True)
+    QApplication.processEvents()
+    assert dlg.busy is None and btn.text() == "Remover" and "Instalado" in status.text()
+    dlg.toggle(fake)                                             # remover (a confirmação responde Sim)
+    assert btn.text() == "Baixar" and packs.sf2_path(fake) is None
+    dlg.reject()
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: asked.append(a[2]) or QMessageBox.No))
+    assert win.offer_pack("Piano de Cauda Salamander") and "ainda não está no computador" in asked[0]
+    assert not win.offer_pack("Piano de Cauda")                  # timbre normal: nada a oferecer

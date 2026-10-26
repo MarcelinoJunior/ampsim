@@ -22,6 +22,7 @@ class AudioConfig:
     blocksize: int = 128
     wasapi_exclusive: bool = True
     output_offset: int = 0          # primeiro canal do par de saída estéreo
+    click_offset: int = -2          # metrônomo: -2 = sem saída, -1 = saída principal, n = par n, n+1
 
     def to_dict(self):
         return asdict(self)

@@ -76,6 +76,7 @@ class SoundFontEngine:
         self._out_arg = C.cast(self._out_ptrs, C.c_void_p)
         self._fx_arg = C.cast(self._fx_ptrs, C.c_void_p)
         self.presets = self._list_presets()
+        self.fonts = {}                  # pacote extra -> (id no FluidSynth, (banco, programa) do 1º preset)
 
     @staticmethod
     def _bind(lib):
@@ -109,9 +110,9 @@ class SoundFontEngine:
             fn.argtypes = args
             fn.restype = res
 
-    def _list_presets(self):
+    def _list_presets(self, sfont_id=None):
         lib = self.lib
-        sf = lib.fluid_synth_get_sfont_by_id(self.synth, self.sfont_id)
+        sf = lib.fluid_synth_get_sfont_by_id(self.synth, self.sfont_id if sfont_id is None else sfont_id)
         lib.fluid_sfont_iteration_start(sf)
         out = {}
         while True:
@@ -123,7 +124,25 @@ class SoundFontEngine:
         return out
 
     # ------------------------------------------------------------------ controle (qualquer thread)
-    def program(self, chan, bank, prog):
+    def load_font(self, key, path):
+        """Carrega um SoundFont extra (pacote de "Timbres adicionais"). -> True se carregou."""
+        if key in self.fonts:
+            return True
+        i = self.lib.fluid_synth_sfload(self.synth, os.path.abspath(str(path)).encode(), 0)
+        if i < 0:
+            return False
+        presets = self._list_presets(i)
+        self.fonts[key] = (i, min(presets) if presets else (0, 0))
+        return True
+
+    def program(self, chan, bank, prog, font=""):
+        """font = pacote extra: usa o 1º preset dele; pacote não instalado: o piano de cauda padrão."""
+        if font:
+            f = self.fonts.get(font)
+            if f is None:
+                return self.lib.fluid_synth_program_select(self.synth, chan, self.sfont_id, 0, 0) == 0
+            i, (bank, prog) = f
+            return self.lib.fluid_synth_program_select(self.synth, chan, i, bank, prog) == 0
         return self.lib.fluid_synth_program_select(self.synth, chan, self.sfont_id, bank, prog) == 0
 
     def noteon(self, chan, key, vel):

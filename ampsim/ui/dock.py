@@ -39,7 +39,8 @@ STRIPS = (("L1", "func", "Volume camada 1", 1, True), ("L2", "func", "Volume cam
           ("Pad\ncontínuo", "func", "Volume pad contínuo", None, True),
           ("Pads", "func", "Volume bateria", None, True),
           ("Teclas\n(todas)", "func", "Volume teclas", None, False), ("Guitarra", "track", "guitar", None, False),
-          ("Baixo", "track", "bass", None, False), ("Master", "func", "Master", None, False))
+          ("Baixo", "track", "bass", None, False), ("Click", "func", "Volume do metrônomo", None, False),
+          ("Master", "func", "Master", None, False))
 
 
 def _title(text):
@@ -256,7 +257,7 @@ class BottomDock(QFrame):
             name = QLabel(label)
             name.setObjectName("small")
             name.setAlignment(Qt.AlignCenter)
-            name.setFixedSize(56, 26)
+            name.setFixedSize(50, 26)
             sl = QHBoxLayout()
             sl.setSpacing(2)
             sl.addStretch(1)
@@ -275,7 +276,7 @@ class BottomDock(QFrame):
             val = QLabel("")
             val.setObjectName("small")
             val.setAlignment(Qt.AlignCenter)
-            val.setFixedWidth(56)
+            val.setFixedWidth(50)
             box.addWidget(name)
             box.addLayout(sl, 1)
             box.addWidget(val)
@@ -283,7 +284,7 @@ class BottomDock(QFrame):
                 mute = QPushButton("M")
                 mute.setCheckable(True)
                 mute.setFocusPolicy(Qt.NoFocus)
-                mute.setFixedSize(48, 20)
+                mute.setFixedSize(44, 20)
                 mute.setStyleSheet(MUTE_OFF)
                 mute.setToolTip("Mute de emergência: silencia sem mexer no fader (clique de novo para voltar)")
                 mute.clicked.connect(lambda on, f=arg: self._mute(f, on))
@@ -654,6 +655,11 @@ class BottomDock(QFrame):
         panic.setFocusPolicy(Qt.NoFocus)
         panic.clicked.connect(self.win.panic)
         row.addWidget(panic)
+        packs_btn = QPushButton(" Timbres adicionais…")
+        packs_btn.setIcon(icon("download", C["text"], 15))
+        packs_btn.setFocusPolicy(Qt.NoFocus)
+        packs_btn.setToolTip("Pianos gravados de instrumentos reais (Upright, YDP, Salamander): baixar ou remover")
+        packs_btn.clicked.connect(lambda *_: self.win.open_packs())
         about = QPushButton(" Sobre e licenças")
         about.setIcon(icon("info", C["text"], 15))
         about.setFocusPolicy(Qt.NoFocus)
@@ -661,6 +667,7 @@ class BottomDock(QFrame):
         row.addWidget(about)
         row.addStretch(1)
         col.addLayout(row)
+        col.addWidget(packs_btn, 0, Qt.AlignLeft)
         col.addStretch(1)
         lay.addLayout(col, 1)
         lay.addWidget(_vsep())
