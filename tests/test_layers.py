@@ -37,9 +37,15 @@ def render(e, notes, secs=0.6):
 
 
 def test_each_layer_has_its_own_output_route():
+    from ampsim.audio.soundfont import N_FX_GROUPS, N_GROUPS
+    from ampsim.instruments import CH_CPAD, PAD_CHANNELS, ROUTE_DRUMS, ROUTE_PAD
+
     r = channel_routes()
+    assert len(r) == N_GROUPS == N_FX_GROUPS == 8           # 16 saídas picotavam o som (CPU)
     for i, ch in enumerate(CH_LAYERS):
-        assert r[ch] == i
+        assert r[ch % N_GROUPS] == i
+    assert all(r[ch % N_GROUPS] == ROUTE_PAD for ch in CH_CPAD)
+    assert all(r[ch % N_GROUPS] == ROUTE_DRUMS for ch in PAD_CHANNELS)
     assert len(set(CH_LAYERS)) == MAX_LAYERS == 4
 
 

@@ -3,9 +3,10 @@
 O FluidSynth é usado só como "motor de vozes": nada de driver de áudio próprio. O AmpSim
 chama fluid_synth_process() dentro do callback de áudio, então não há latência extra.
 
-Uma saída estéreo por canal MIDI (audio-groups = 16, grupo = canal), cada uma com reverb e
-chorus próprios. O destino de cada canal (camada 1-4 das teclas, pad contínuo, bateria) fica em
-instruments.channel_routes(); kernels.mix_soundfont soma cada um no lugar certo.
+8 saídas estéreo (audio-groups = 8, grupo = canal % 8), cada uma com reverb e chorus próprios.
+Com 16 grupos o FluidSynth gastava o dobro de CPU (16 reverbs/chorus por bloco) e o som picotava
+em placas USB de teclado. O destino de cada grupo (camada 1-4 das teclas, pad contínuo, bateria)
+fica em instruments.channel_routes(); kernels.mix_soundfont soma cada um no lugar certo.
 """
 import ctypes as C
 import glob
@@ -16,9 +17,10 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SF2_DEFAULT = os.path.join(ROOT, "third_party", "soundfonts", "GeneralUser-GS.sf2")
 DRUM_CHANNEL = 9
-N_GROUPS = 16             # um grupo por canal: cada camada das teclas tem os próprios efeitos
+N_GROUPS = 8              # canal -> grupo = canal % 8: cada camada das teclas tem os próprios efeitos
 N_OUT = 2 * N_GROUPS      # grupos estéreo
-N_FX = 4 * N_GROUPS       # grupos x (reverb, chorus) x estéreo
+N_FX_GROUPS = N_GROUPS    # unidades de reverb/chorus (tem de ser igual: menos derruba o FluidSynth)
+N_FX = 4 * N_FX_GROUPS    # unidades x (reverb, chorus) x estéreo
 
 
 def _find_dll():
@@ -54,7 +56,7 @@ class SoundFontEngine:
         for key, val in (("synth.sample-rate", float(fs)), ("synth.gain", 0.55)):
             lib.fluid_settings_setnum(self.settings, key.encode(), val)
         for key, val in (("synth.audio-channels", N_GROUPS), ("synth.audio-groups", N_GROUPS),
-                         ("synth.effects-groups", N_GROUPS), ("synth.polyphony", 256),
+                         ("synth.effects-groups", N_FX_GROUPS), ("synth.polyphony", 256),
                          ("synth.cpu-cores", 1), ("synth.reverb.active", 1),
                          ("synth.chorus.active", 1)):
             lib.fluid_settings_setint(self.settings, key.encode(), val)

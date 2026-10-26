@@ -909,11 +909,11 @@ def warmup(fs=48000.0):
     write_output(mix, n, out, 0, 1.0)
     so = np.zeros((n, 1), dtype=np.float32)
     sh = np.zeros(n)
-    route = np.full(16, -1, dtype=np.int64)
-    route[0], route[1], route[4], route[9] = 0, 1, 4, 5
+    route = np.full(8, -1, dtype=np.int64)
+    route[0], route[1], route[4], route[5] = 0, 1, 4, 5
     kbs = np.zeros((4, n, 2))
     for chain in (True, False):
-        mix_soundfont(np.zeros((96, n), dtype=np.float32), n, mix, so, sh, kbs, route, chain, 1.0, 1.0, 1.0,
+        mix_soundfont(np.zeros((48, n), dtype=np.float32), n, mix, so, sh, kbs, route, chain, 1.0, 1.0, 1.0,
                       0.5, 0.5, np.zeros((14, 5)), np.zeros((14, 2)), np.array([1.0, 1.0, 1.0]))
     from .keysfx import warmup as warmup_keysfx
     from .worship import warmup as warmup_worship

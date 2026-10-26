@@ -264,23 +264,25 @@ DEFAULT_BUTTON_FUNCS = ["Timbre anterior", "Próximo timbre", "Parar pad contín
 MAX_LAYERS = 4
 CH_LAYERS = (0, 1, 2, 3)                    # um canal (e uma saída de áudio) por camada das teclas
 CH_KEYS1, CH_KEYS2 = CH_LAYERS[0], CH_LAYERS[1]
-CH_CPAD = (4, 6)                            # pad contínuo (dois canais para o crossfade entre tons)
-PAD_CHANNELS = (9, 5, 7, 8, 10, 11, 12, 13)  # pads da bateria (o último também é o da prévia)
+# o FluidSynth tem 8 saídas (canal % 8): canais 8-11 cairiam nas saídas das camadas, então não são usados
+CH_CPAD = (4, 12)                           # pad contínuo (dois canais para o crossfade entre tons)
+PAD_CHANNELS = (5, 6, 7, 13, 14, 15)        # pads da bateria (o último também é o da prévia)
 ROUTE_PAD, ROUTE_DRUMS = 4, 5
 LAYER_ZONES = ("all", "left", "right")      # camadas 3 e 4: teclado todo / abaixo / a partir da divisão
 
 
 def channel_routes():
-    """Destino de cada canal do FluidSynth no mixer (kernels.mix_soundfont)."""
+    """Destino de cada saída (grupo) do FluidSynth no mixer (kernels.mix_soundfont)."""
     import numpy as np
 
-    r = np.full(16, -1, dtype=np.int64)
-    for i, ch in enumerate(CH_LAYERS):
-        r[ch] = i
-    for ch in CH_CPAD:
-        r[ch] = ROUTE_PAD
-    for ch in PAD_CHANNELS:
-        r[ch] = ROUTE_DRUMS
+    from .audio.soundfont import N_GROUPS
+
+    r = np.full(N_GROUPS, -1, dtype=np.int64)
+    dests = [(ch, i) for i, ch in enumerate(CH_LAYERS)] + [(ch, ROUTE_PAD) for ch in CH_CPAD]         + [(ch, ROUTE_DRUMS) for ch in PAD_CHANNELS]
+    for ch, dest in dests:
+        g = ch % N_GROUPS
+        assert r[g] in (-1, dest), f"canal {ch} cai na saída de outro destino"
+        r[g] = dest
     return r
 MELODIC_HOLD = 4.0                          # s até o note-off de pads melódicos
 
