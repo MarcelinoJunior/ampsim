@@ -890,3 +890,50 @@ def test_recorder_panel_rec_stop_bank_and_pads(win, monkeypatch):
     assert inst.pad_sounds[2] == list(PAD_PRESETS.values())[0][2] and rec.current() is None
     rec.start()
     assert rec.stop() is None                                  # só silêncio: nada vai para o banco
+
+
+def test_pad_eq_drag_points_on_the_curve(win):
+    """EQ do pad contínuo: arrastar os pontos na curva muda o EQ e os knobs; knob move o ponto."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent, QWheelEvent
+    from PySide6.QtCore import QEvent, QPoint
+
+    from ampsim.ui.analyzer import PadEqDialog, _fx
+    inst = win.inst
+    inst.set_pad_eq(on=False)
+    dlg = PadEqDialog(inst, "#e8a33d", win)
+    dlg.resize(760, 470)
+    dlg.show()
+    QApplication.processEvents()
+    g = dlg.graph
+    r = g._area()
+
+    def drag(i, to):
+        start = g._handle_pos(g.handles[i], r)
+        for kind, pos, btn in ((QEvent.MouseButtonPress, start, Qt.LeftButton),
+                               (QEvent.MouseMove, to, Qt.LeftButton),
+                               (QEvent.MouseButtonRelease, to, Qt.NoButton)):
+            ev = QMouseEvent(kind, pos, g.mapToGlobal(pos), Qt.LeftButton, btn, Qt.NoModifier)
+            QApplication.sendEvent(g, ev)
+
+    labels = [h.label for h in g.handles]
+    mid = labels.index("Médios")
+    drag(mid, QPointF(_fx(1000.0, r.left(), r.width()), g._y(6.0, r)))
+    pe = inst.pad_eq
+    assert pe["on"] and dlg.on.isChecked()                     # mexeu na curva: liga o EQ
+    assert pe["mid"] == pytest.approx(6.0, abs=0.5) and pe["mid_f"] == pytest.approx(1000.0, rel=0.05)
+    assert dlg.knobs["mid"].value() == pytest.approx(pe["mid"]) and dlg.knobs["mid_f"].value() == pytest.approx(pe["mid_f"])
+    drag(labels.index("Corte grave"), QPointF(_fx(200.0, r.left(), r.width()), r.center().y()))
+    assert pe["lowcut"] == pytest.approx(200.0, rel=0.05) and dlg.knobs["lowcut"].value() == pytest.approx(pe["lowcut"])
+    drag(labels.index("Agudos"), QPointF(_fx(4500.0, r.left(), r.width()), g._y(-9.0, r)))
+    assert pe["high"] == pytest.approx(-9.0, abs=0.5)
+    q0 = pe["mid_q"]
+    c = g._handle_pos(g.handles[mid], r)
+    QApplication.sendEvent(g, QWheelEvent(c, g.mapToGlobal(c), QPoint(), QPoint(0, 120), Qt.NoButton,
+                                          Qt.NoModifier, Qt.NoScrollPhase, False))
+    assert pe["mid_q"] > q0 and dlg.knobs["mid_q"].value() == pytest.approx(pe["mid_q"])
+    QTest.mouseDClick(g, Qt.LeftButton, pos=c.toPoint())
+    assert pe["mid"] == 0.0 and pe["mid_f"] == 900.0           # duplo-clique: volta ao padrão
+    dlg.knobs["high"].setValue(3.0, emit=True)                 # knob -> ponto acompanha
+    assert g.values["high"] == 3.0
+    dlg.close()

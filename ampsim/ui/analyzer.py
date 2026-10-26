@@ -1,4 +1,5 @@
 """Curvas de EQ e analisador de espectro (RTA) para as abas de guitarra/baixo e o pad contínuo."""
+import dataclasses
 import math
 
 import numpy as np
@@ -27,6 +28,30 @@ def _fx(f, x0, w):
 def _fpos(x, x0, w):
     return F_LO * (F_HI / F_LO) ** min(max((x - x0) / w, 0.0), 1.0)
 
+
+class Handle:
+    """Ponto de um EQ paramétrico no gráfico: arrasta a frequência (freq_key), o ganho (gain_key) ou os
+    dois; a roda do mouse muda a largura (q_key). fixed_freq: banda de frequência fixa (só ganho)."""
+
+    def __init__(self, label, freq_key=None, gain_key=None, q_key=None, fixed_freq=None):
+        self.label = label
+        self.freq_key = freq_key
+        self.gain_key = gain_key
+        self.q_key = q_key
+        self.fixed_freq = fixed_freq
+
+    def keys(self):
+        return [k for k in (self.freq_key, self.gain_key, self.q_key) if k]
+
+
+# nomes curtos nos knobs do pad contínuo (os completos ficam na dica)
+SHORT_LABELS = {"lowcut": "Corte grave", "mid_f": "Médios Hz", "mid_q": "Largura", "highcut": "Corte agudo",
+                "width": "Estéreo", "gain": "Volume", "fade_in": "Fade-in", "fade_out": "Fade-out"}
+
+# pontos do EQ do pad contínuo (dsp/padeq.py: graves em 220 Hz e agudos em 4,5 kHz são prateleiras)
+PAD_HANDLES = (Handle("Corte grave", freq_key="lowcut"), Handle("Graves", gain_key="low", fixed_freq=220.0),
+               Handle("Médios", freq_key="mid_f", gain_key="mid", q_key="mid_q"),
+               Handle("Agudos", gain_key="high", fixed_freq=4500.0), Handle("Corte agudo", freq_key="highcut"))
 
 def _bq_mag(c, z):
     b0, b1, b2, a1, a2 = c
@@ -67,6 +92,7 @@ class EqGraph(QWidget):
     """
 
     bandMoved = Signal(int, float)          # índice da banda, ganho em dB
+    handleMoved = Signal(dict)              # EQ paramétrico: {parâmetro: valor novo}
 
     def __init__(self, accent="#e8a33d", db_range=15.0, bands=(), parent=None):
         super().__init__(parent)
@@ -79,8 +105,42 @@ class EqGraph(QWidget):
         self.rta_out = None
         self.rta_in = None
         self._drag = None
+        self.handles = []                   # EQ paramétrico: [Handle]
+        self.values = {}                    # valores atuais dos parâmetros dos handles
+        self.params = {}                    # chave -> Param (faixa e padrão)
+        self._hdrag = None
         self.setMinimumHeight(110)
         self.setMouseTracking(True)
+
+    def set_handles(self, handles, params):
+        self.handles = list(handles)
+        self.params = {p.key: p for p in params}
+
+    def _handle_pos(self, h, r):
+        f = self.values.get(h.freq_key, h.fixed_freq) if h.freq_key else h.fixed_freq
+        x = _fx(min(max(f, F_LO), F_HI), r.left(), r.width())
+        if h.gain_key:
+            g = self.values.get(h.gain_key, 0.0)
+        elif self.curve is not None:                 # corte: o ponto fica em cima da curva
+            g = float(np.interp(math.log(f), np.log(self.freqs), self.curve))
+        else:
+            g = 0.0
+        y = min(max(self._y(g, r), r.top()), r.bottom())
+        return QPointF(x, y)
+
+    def _handle_at(self, pos):
+        r = self._area()
+        best, bd = None, 16.0
+        for i, h in enumerate(self.handles):
+            c = self._handle_pos(h, r)
+            d = math.hypot(pos.x() - c.x(), pos.y() - c.y())
+            if d < bd:
+                best, bd = i, d
+        return best
+
+    def _clamp(self, key, v):
+        p = self.params.get(key)
+        return v if p is None else min(max(v, p.lo), p.hi)
 
     def _area(self):
         return QRectF(34, 6, self.width() - 42, self.height() - 22)
@@ -151,6 +211,16 @@ class EqGraph(QWidget):
             qp.setPen(QPen(QColor("#111"), 1))
             qp.setBrush(self.accent if self._drag != i else QColor("#ffffff"))
             qp.drawEllipse(c, 6, 6)
+        f.setPointSizeF(7.0)
+        qp.setFont(f)
+        for i, h in enumerate(self.handles):
+            c = self._handle_pos(h, r)
+            qp.setPen(QPen(QColor("#111"), 1))
+            qp.setBrush(QColor("#ffffff") if self._hdrag == i else self.accent)
+            qp.drawEllipse(c, 7, 7)
+            qp.setPen(QColor("#c9d1dc"))
+            ty = c.y() - 22 if c.y() - 22 > r.top() else c.y() + 9
+            qp.drawText(QRectF(c.x() - 40, ty, 80, 13), Qt.AlignCenter, h.label)
 
     def _band_at(self, pos):
         r = self._area()
@@ -162,10 +232,51 @@ class EqGraph(QWidget):
         return best
 
     def mousePressEvent(self, e):
+        if self.handles:
+            self._hdrag = self._handle_at(e.position())
+            self.update()
+            return
         self._drag = self._band_at(e.position())
         self.mouseMoveEvent(e)
 
+    def _move_handle(self, h, pos):
+        r = self._area()
+        out = {}
+        if h.freq_key:
+            out[h.freq_key] = round(self._clamp(h.freq_key, _fpos(pos.x(), r.left(), r.width())), 1)
+        if h.gain_key:
+            g = (r.center().y() - pos.y()) / (r.height() / 2) * self.db_range
+            out[h.gain_key] = round(self._clamp(h.gain_key, g) * 2) / 2
+        if out:
+            self.values.update(out)
+            self.handleMoved.emit(out)
+            self.update()
+
+    def wheelEvent(self, e):
+        i = self._handle_at(e.position()) if self.handles else None
+        h = self.handles[i] if i is not None else None
+        if h is None or not h.q_key:
+            return super().wheelEvent(e)
+        q = self.values.get(h.q_key, 1.0) * (1.12 if e.angleDelta().y() > 0 else 1 / 1.12)
+        out = {h.q_key: round(self._clamp(h.q_key, q), 2)}
+        self.values.update(out)
+        self.handleMoved.emit(out)
+        self.update()
+
     def mouseMoveEvent(self, e):
+        if self.handles:
+            if self._hdrag is not None:
+                self._move_handle(self.handles[self._hdrag], e.position())
+                return
+            i = self._handle_at(e.position())
+            h = self.handles[i] if i is not None else None
+            if h is None:
+                self.setCursor(Qt.ArrowCursor)
+            elif h.freq_key and h.gain_key:
+                self.setCursor(Qt.SizeAllCursor)
+            else:
+                self.setCursor(Qt.SizeHorCursor if h.freq_key else Qt.SizeVerCursor)
+            return
         if self._drag is None:
             i = self._band_at(e.position())
             self.setCursor(Qt.SizeVerCursor if i is not None else Qt.ArrowCursor)
@@ -177,9 +288,18 @@ class EqGraph(QWidget):
 
     def mouseReleaseEvent(self, _):
         self._drag = None
+        self._hdrag = None
         self.update()
 
     def mouseDoubleClickEvent(self, e):
+        if self.handles:
+            i = self._handle_at(e.position())
+            if i is not None:                        # volta o ponto ao padrão
+                out = {k: self.params[k].default for k in self.handles[i].keys() if k in self.params}
+                self.values.update(out)
+                self.handleMoved.emit(out)
+                self.update()
+            return
         i = self._band_at(e.position())
         if i is not None:
             self.bandMoved.emit(i, 0.0)
@@ -370,6 +490,10 @@ class PadEqDialog(QDialog):
         lay.addLayout(top)
         self.graph = EqGraph(accent, 15.0)
         self.graph.setMinimumHeight(170)
+        self.graph.set_handles(PAD_HANDLES, PAD_EQ_PARAMS)
+        self.graph.setToolTip("Arraste os pontos direto na curva (ou use os knobs) · roda do mouse nos "
+                              "Médios: largura · duplo-clique num ponto: volta ao padrão")
+        self.graph.handleMoved.connect(self._handle)
         lay.addWidget(self.graph, 1)
         self.knobs = {}
         grid = QGridLayout()
@@ -379,15 +503,16 @@ class PadEqDialog(QDialog):
             lab.setObjectName("fxtitle")
             grid.addWidget(lab, row, 0)
             for col, p in enumerate(params):
-                k = Knob(p, accent, size="small")
+                k = Knob(dataclasses.replace(p, label=SHORT_LABELS.get(p.key, p.label)), accent, size="small")
+                k.setToolTip(p.label)
                 k.valueChanged.connect(lambda v, key=p.key: self._set(**{key: v}))
                 self.knobs[p.key] = k
                 grid.addWidget(k, row, col + 1)
         grid.setColumnStretch(len(PAD_EQ_PARAMS) + 1, 1)
         lay.addLayout(grid)
         bottom = QHBoxLayout()
-        tip = QLabel("Corte de graves/agudos tiram harmônicos embaixo/em cima (24 dB/oitava). "
-                     "Vale para todos os tons do banco B.")
+        tip = QLabel("Arraste os pontos na curva ou use os knobs (roda do mouse nos Médios: largura). "
+                     "Os cortes tiram harmônicos embaixo/em cima. Vale para todos os tons do banco B.")
         tip.setObjectName("small")
         bottom.addWidget(tip, 1)
         reset = QPushButton("Restaurar padrão")
@@ -401,6 +526,20 @@ class PadEqDialog(QDialog):
 
     def _set(self, **values):
         self.inst.set_pad_eq(**values)
+        self._curve()
+
+    def _handle(self, values):
+        """Arrastou um ponto na curva: aplica, liga o EQ e move os knobs junto."""
+        if not self.inst.pad_eq["on"]:
+            values = dict(values, on=True)
+        self.inst.set_pad_eq(**values)
+        for key, v in values.items():
+            if key in self.knobs:
+                self.knobs[key].setValue(v)
+        if values.get("on"):
+            self.on.blockSignals(True)
+            self.on.setChecked(True)
+            self.on.blockSignals(False)
         self._curve()
 
     def _preset(self, _):
@@ -428,4 +567,5 @@ class PadEqDialog(QDialog):
         eq = self.inst.engine.pad_eq
         g = self.graph
         g.curve = eq.response(g.freqs) if self.inst.pad_eq["on"] else np.zeros_like(g.freqs)
+        g.values = dict(self.inst.pad_eq)
         g.update()
