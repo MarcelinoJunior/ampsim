@@ -1,4 +1,5 @@
 """Diálogo de configuração de áudio: API, dispositivos, taxa, buffer e canais."""
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
     QMessageBox, QPushButton, QVBoxLayout,
@@ -56,6 +57,10 @@ class AudioDialog(QDialog):
         self.lat = QLabel()
         self.lat.setObjectName("small")
         form.addRow("", self.lat)
+        self.rate_hint = QLabel()
+        self.rate_hint.setObjectName("warn")
+        self.rate_hint.setWordWrap(True)
+        form.addRow("", self.rate_hint)
         self.excl = QCheckBox("WASAPI modo exclusivo (menor latência)")
         form.addRow("", self.excl)
 
@@ -82,6 +87,7 @@ class AudioDialog(QDialog):
         self.out.currentIndexChanged.connect(self._out_changed)
         self.inp.currentIndexChanged.connect(self._in_changed)
         self.sr.currentIndexChanged.connect(self._update_latency)
+        self.excl.toggled.connect(lambda *_: self._update_rates())
         self.bs.currentIndexChanged.connect(self._update_latency)
 
         if cfg.hostapi in dev.hostapis():
@@ -97,14 +103,31 @@ class AudioDialog(QDialog):
         self._select(self.out_pair, cfg.output_offset, data=True)
         self._select(self.g_ch, engine.input_channel["guitar"], data=True)
         self._select(self.b_ch, engine.input_channel["bass"], data=True)
+        self._update_rates()
         self._update_latency()
         if suggest_output:
             self.suggest(suggest_output)
 
-    def suggest(self, short_name):
-        """Aparelho recém-conectado: WASAPI (funciona com qualquer interface USB) e a saída dele."""
-        from ..audio.hotplug import match_output
+    def _after_change(self):
+        if getattr(self, "rate_hint", None) is not None and self.out.count():
+            QTimer.singleShot(0, self._update_rates)        # depois de os dois combos se acertarem
 
+    def suggest(self, short_name):
+        """Aparelho recém-conectado: o ASIO do próprio fabricante se houver (ex.: Yamaha Steinberg
+        USB ASIO), senão WASAPI (funciona com qualquer interface USB) com a saída dele."""
+        from ..audio.hotplug import instrument_of, match_output
+
+        model = instrument_of(short_name)
+        if model and "ASIO" in dev.hostapis():
+            for d in dev.devices("ASIO", "output"):
+                if instrument_of(d.name) == model:
+                    self.api.setCurrentText("ASIO")
+                    self._api_changed("ASIO")
+                    self._select(self.out, d.name)
+                    self.hint.setText(f"{model}: usando o driver ASIO do fabricante ({d.name}), o de menor "
+                                      "atraso. Confira e clique em “Aplicar e iniciar”.")
+                    self._update_rates()
+                    return d.name
         keep_in = self.inp.currentText()
         for api in ("Windows WASAPI", self.api.currentText()):
             if api not in dev.hostapis():
@@ -148,6 +171,7 @@ class AudioDialog(QDialog):
         self._in_changed()
 
     def _out_changed(self, *_):
+        self._after_change()
         d = self.out.currentData()
         if dev.is_asio(self.api.currentText()) and d is not None and self.inp.currentIndex() != 0:
             # no ASIO entrada e saída precisam ser o mesmo driver
@@ -160,6 +184,7 @@ class AudioDialog(QDialog):
         self._select(self.out_pair, cur, data=True)
 
     def _in_changed(self, *_):
+        self._after_change()
         d = self.inp.currentData()
         if dev.is_asio(self.api.currentText()) and d is not None and d.name != self.out.currentText():
             self._select(self.out, d.name)
@@ -171,6 +196,27 @@ class AudioDialog(QDialog):
                 combo.addItem(f"Entrada {c + 1}", c)
             combo.setEnabled(d is not None)
             self._select(combo, default if cur is None else cur, data=True)
+
+    def _update_rates(self):
+        """Só deixa escolher as taxas que a saída e a entrada aceitam juntas."""
+        out, inp = self.out.currentData(), self.inp.currentData()
+        if out is None:
+            return
+        excl = self.api.currentText() == "Windows WASAPI" and self.excl.isChecked()
+        ok = dev.supported_rates(out.index, inp.index if inp is not None else None, exclusive=excl)
+        if not ok and inp is not None:
+            ok_out = dev.supported_rates(out.index, None, exclusive=excl)
+            self.rate_hint.setText("Esta entrada e esta saída não têm taxa em comum: escolha outra entrada "
+                                   "(ou “sem entrada”)." if ok_out else "")
+        else:
+            self.rate_hint.setText("")
+        model = self.sr.model()
+        for i in range(self.sr.count()):
+            item = model.item(i) if hasattr(model, "item") else None
+            if item is not None:
+                item.setEnabled(not ok or self.sr.itemData(i) in ok)
+        if ok and self.sr.currentData() not in ok:
+            self._select(self.sr, dev.best_rate(ok, self.sr.currentData()), data=True)
 
     def _update_latency(self, *_):
         sr = self.sr.currentData() or 48000

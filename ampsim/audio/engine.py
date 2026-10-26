@@ -44,6 +44,7 @@ class AudioEngine:
         self._shim_send = np.zeros(Ly.MAX_BLOCK)
         self._drum_send = np.zeros(Ly.MAX_BLOCK)
         self._drum_ev = np.zeros((64, 2), dtype=np.int64)
+        self.start_notes = []           # avisos do último start (taxa ajustada, entrada desligada)
         self._route = channel_routes()
         # RTA da aba aberta: entrada seca e saída só desta trilha (anéis lidos pela UI)
         self.rta_track = None
@@ -89,6 +90,8 @@ class AudioEngine:
                 raise RuntimeError(f"Dispositivo de entrada não encontrado: {config.input_device!r}")
         if config.blocksize > Ly.MAX_BLOCK:
             raise RuntimeError(f"Buffer máximo suportado: {Ly.MAX_BLOCK}")
+        config, in_dev = self._fit_rate(config, out_dev, in_dev)
+        self.config = config
 
         self._rebuild(config.samplerate)
         n_out = min(out_dev.max_out, config.output_offset + 2)
@@ -112,6 +115,35 @@ class AudioEngine:
         self.xruns = 0
         self.stream = stream
         stream.start()
+
+    def _fit_rate(self, config, out_dev, in_dev):
+        """Ajusta a taxa ao que a placa aceita (ex.: teclado USB só em 44,1 kHz). Se entrada e
+        saída não tiverem taxa em comum, abre só a saída. Os avisos ficam em start_notes."""
+        import dataclasses
+
+        self.start_notes = []
+        excl = config.hostapi == "Windows WASAPI" and config.wasapi_exclusive
+        in_index = in_dev.index if in_dev is not None else None
+        both = dev.supported_rates(out_dev.index, in_index, exclusive=excl)
+        if config.samplerate in both:
+            return config, in_dev
+        if not both and in_dev is not None:
+            outs = dev.supported_rates(out_dev.index, None, exclusive=excl)
+            if outs:
+                self.start_notes.append(
+                    f"A entrada “{in_dev.name}” e a saída “{out_dev.name}” não funcionam na mesma taxa: "
+                    "o áudio abriu só com a saída (sem guitarra/baixo). Para usar a entrada, escolha uma "
+                    "entrada da mesma placa ou um driver ASIO.")
+                config = dataclasses.replace(config, input_device="")
+                in_dev, both = None, outs
+        rate = dev.best_rate(both, config.samplerate)
+        if rate is None:
+            return config, in_dev                     # deixa o PortAudio explicar o erro
+        if rate != config.samplerate:
+            self.start_notes.append(f"Taxa ajustada para {rate:,} Hz: “{out_dev.name}” não aceita "
+                                    f"{config.samplerate:,} Hz.".replace(",", "."))
+            config = dataclasses.replace(config, samplerate=rate)
+        return config, in_dev
 
     def stop(self):
         s, self.stream = self.stream, None

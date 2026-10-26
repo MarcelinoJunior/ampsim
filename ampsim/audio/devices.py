@@ -75,6 +75,32 @@ def devices(hostapi_name, kind):
     return out
 
 
+def supported_rates(out_index, in_index=None, rates=SAMPLE_RATES, exclusive=False):
+    """Taxas que a saída (e a entrada, se houver) aceitam juntas. Placas USB de teclado
+    (ex.: Yamaha PSR-E473) costumam aceitar só 44.100 Hz."""
+    extra = sd.WasapiSettings(exclusive=True) if exclusive else None
+    ok = []
+    for r in rates:
+        try:
+            out = sd.query_devices(out_index)
+            sd.check_output_settings(device=out_index, samplerate=r, channels=min(2, out["max_output_channels"]),
+                                     extra_settings=extra)
+            if in_index is not None:
+                sd.check_input_settings(device=in_index, samplerate=r, channels=1, extra_settings=extra)
+            ok.append(r)
+        except Exception:  # noqa: BLE001 - PortAudio recusa com vários tipos de erro
+            pass
+    return ok
+
+
+def best_rate(rates, wanted):
+    """A pedida, se der; senão 48 kHz, 44,1 kHz ou a primeira aceita."""
+    for r in (wanted, 48000, 44100):
+        if r in rates:
+            return r
+    return rates[0] if rates else None
+
+
 def find_device(hostapi_name, name, kind):
     for d in devices(hostapi_name, kind):
         if d.name == name:

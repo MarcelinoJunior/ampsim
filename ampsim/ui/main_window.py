@@ -658,6 +658,8 @@ class MainWindow(QMainWindow):
             return
         try:
             self.engine.start(cfg)
+            if self.engine.start_notes:
+                QMessageBox.information(self, "Áudio ligado com ajustes", "\n\n".join(self.engine.start_notes))
         except Exception as exc:  # noqa: BLE001 - PortAudio pode falhar de muitas formas
             QMessageBox.warning(self, "Erro de áudio",
                                 f"Não foi possível abrir o dispositivo:\n\n{exc}\n\n"
