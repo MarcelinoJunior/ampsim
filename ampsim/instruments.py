@@ -264,7 +264,7 @@ BUTTON_FUNCS = ("Nenhuma", "Tap tempo (BPM)", "Timbre anterior", "Próximo timbr
                 "Próximo preset de pads", "Liga/desliga camada 2", "Parar pad contínuo",
                 "Banco de pads A/B (tela)", "Rotação lenta/rápida", "Rotação liga/desliga",
                 "Delay liga/desliga", "Drive liga/desliga", "Sustain (segurar)", "Oitava −", "Oitava +",
-                "Pânico (soltar notas)")
+                "Pânico (soltar notas)", "Próxima música", "Música anterior")
 # knob "Rotação (velocidade)": 0 = parada; girando, de 0,2 Hz (bem lenta) até 12 Hz (muito rápida)
 ROT_MIN_HZ, ROT_MAX_HZ = 0.2, 12.0
 
@@ -428,6 +428,7 @@ class Instruments:
         self.on_knob = lambda i, val: None
         self.on_change = lambda: None
         self.on_learn = lambda: None
+        self.on_song = lambda d: None        # setlist: próxima (+1) / anterior (-1) música
         self.on_unmapped = lambda ch, cc: None   # knob/fader que ainda não está ligado a nada
 
     # ------------------------------------------------------------------ camadas
@@ -1030,6 +1031,8 @@ class Instruments:
             self.on_change()
         elif func == "Tap tempo (BPM)":
             self.tap_tempo()
+        elif func in ("Próxima música", "Música anterior"):
+            self.on_song(1 if func == "Próxima música" else -1)
         elif func == "Timbre anterior":
             self.step_ready(-1)
         elif func == "Próximo timbre":

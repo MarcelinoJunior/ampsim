@@ -21,6 +21,8 @@ ACTIONS = (
     ("mute_drums", "Mute dos pads (bateria)", "Alt+B"),
     ("preset_next", "Próximo preset", "Ctrl+Right"),
     ("preset_prev", "Preset anterior", "Ctrl+Left"),
+    ("song_next", "Setlist: próxima música", "Ctrl+PgDown"),
+    ("song_prev", "Setlist: música anterior", "Ctrl+PgUp"),
     ("tab_guitar", "Aba Guitarra", "F1"),
     ("tab_bass", "Aba Baixo", "F2"),
     ("tab_pads", "Aba Pad/Piano", "F3"),

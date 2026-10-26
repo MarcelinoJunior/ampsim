@@ -20,6 +20,7 @@ from ..audio.engine import TRACKS
 from ..midi import winmm
 from ..instruments import READY
 from .health import HealthDialog, style_badge
+from .setlist_panel import SetlistPanel
 from .shortcuts import Shortcuts, ShortcutsDialog
 from ..presets import DEFAULT_PRESET, FACTORY
 from ..sharing import sound_state
@@ -74,7 +75,12 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         row.setSpacing(10)
         self.bank = PresetBank()
-        row.addWidget(self.bank)
+        left = QVBoxLayout()
+        left.setSpacing(10)
+        self.setlist = SetlistPanel(self)
+        left.addWidget(self.setlist)
+        left.addWidget(self.bank, 1)
+        row.addLayout(left)
 
         self.tabs = QStackedWidget()
         self.pages = {}
@@ -148,6 +154,8 @@ class MainWindow(QMainWindow):
         inst.on_knob = br.knob.emit
         inst.on_change = br.changed.emit
         inst.on_learn = br.learn.emit
+        inst.on_song = br.song.emit
+        br.song.connect(lambda d: self.setlist.step(d))
         inst.on_monitor = br.monitor.emit
         inst.on_control = br.control.emit
         inst.on_unmapped = br.unmapped.emit
@@ -345,6 +353,8 @@ class MainWindow(QMainWindow):
             rec.stop() if self.engine.recorder.active else rec.start()
         elif action == "tap":
             inst.tap_tempo()
+        elif action in ("song_next", "song_prev"):
+            self.setlist.step(1 if action == "song_next" else -1)
         elif action == "stop_pad":
             inst.stop_cont_pad()
             self.refresh_sounds()
