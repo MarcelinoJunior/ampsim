@@ -15,7 +15,7 @@ from ..instruments import (
     PAD_COUNT, PAD_SOUNDS, READY, READY_GROUPS, SOUND_BY_NAME, SOUNDS, note_name,
 )
 from ..dsp.keysfx import ROT_MULTS, rotation_hz
-from ..instruments import DEFAULT_FX, LAYER_ZONES, MAX_LAYERS, PITCH_FUNCS
+from ..instruments import DEFAULT_FX, LAYER_ZONES, MAX_LAYERS, PAD_FOLLOW, PITCH_FUNCS
 from .controller import MODELS, TRADEMARKS, ControllerWidget
 from .funcs import func_param, func_value, set_func
 from .icons import icon
@@ -1279,7 +1279,10 @@ class PadPianoView(QWidget):
         self.oct_label.setText("Oitava" if n >= 2 else "Oitava (teclado)")
         self.fx_title.setText(f"Efeitos da Layer {n}" + ("" if on else " (desligada)"))
 
-        self.cont_title.setText("Pad contínuo")
+        follow = inst.pad_follow != PAD_FOLLOW[0]
+        self.cont_title.setText("Pad contínuo · segue o acorde" if follow else "Pad contínuo")
+        self.cont_title.setToolTip("O tom acompanha o acorde da mão esquerda (aba Pads → Tom fixo / Segue o acorde)"
+                                   if follow else "")
         for name, b in self.cont_sound_buttons.items():
             b.setChecked(name == inst.cont_sound)
         for key, b in self.cont_buttons.items():

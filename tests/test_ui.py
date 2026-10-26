@@ -1225,3 +1225,15 @@ def test_packs_dialog_install_and_offer(win, monkeypatch, tmp_path):
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: asked.append(a[2]) or QMessageBox.No))
     assert win.offer_pack("Piano de Cauda Salamander") and "ainda não está no computador" in asked[0]
     assert not win.offer_pack("Piano de Cauda")                  # timbre normal: nada a oferecer
+
+
+def test_pad_follow_combo(win):
+    from ampsim.instruments import PAD_FOLLOW
+    d = win.dock
+    d.show_tab(0)
+    i = d.follow.findText(PAD_FOLLOW[1])
+    d.follow.setCurrentIndex(i)
+    d.follow.activated.emit(i)
+    assert win.inst.pad_follow == PAD_FOLLOW[1] and "segue o acorde" in win.pad_view.cont_title.text()
+    d.follow.activated.emit(0)
+    assert win.pad_view.cont_title.text() == "Pad contínuo"

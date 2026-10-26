@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (
 )
 
 from ..instruments import (
-    BUTTON_FUNCS, BUTTONS, CONT_PAD_SOUNDS, KNOB_COUNT, KNOB_FUNCS, PAD_B_CHOICES, PAD_COUNT, PAD_PRESETS, PITCH_FUNCS,
-    note_name,
+    BUTTON_FUNCS, BUTTONS, CONT_PAD_SOUNDS, KNOB_COUNT, KNOB_FUNCS, PAD_B_CHOICES, PAD_COUNT, PAD_FOLLOW,
+    PAD_PRESETS, PITCH_FUNCS, note_name,
 )
 from ..dsp.params import TRACK_PARAMS
 from .funcs import FUNC_RANGES, func_value, set_func
@@ -147,6 +147,12 @@ class BottomDock(QFrame):
         head = QHBoxLayout()
         head.addWidget(_title("Pads Contínuos"))
         head.addStretch(1)
+        self.follow = _combo(PAD_FOLLOW)
+        self.follow.setToolTip("Tom do pad contínuo: fixo (o botão escolhido) ou seguindo o acorde que você toca\n"
+                               "na mão esquerda (abaixo do ponto de divisão do teclado). “No tempo”: a troca\n"
+                               "espera a próxima batida do BPM. Só troca com o pad tocando.")
+        self.follow.activated.connect(lambda i: self._pad_follow(PAD_FOLLOW[i]))
+        head.addWidget(self.follow)
         eq = QPushButton(" EQ e ambiente")
         eq.setIcon(icon("eq", C["text"], 14))
         eq.setFocusPolicy(Qt.NoFocus)
@@ -222,6 +228,10 @@ class BottomDock(QFrame):
         col.addStretch(1)
         lay.addLayout(col, 1)
         return w
+
+    def _pad_follow(self, mode):
+        self.inst.set_pad_follow(mode)
+        self.win.refresh_sounds()
 
     def _cont_sound(self, name):
         self.inst.set_cont_sound(name)
@@ -715,6 +725,7 @@ class BottomDock(QFrame):
                 t.setToolTip(b.toolTip())
             self._sync_strips()
             self.pitch_combo.setCurrentText(inst.pitch_func)
+            self.follow.setCurrentText(inst.pad_follow)
             for i, c in enumerate(self.padb_combos):
                 c.setCurrentText(inst.pad_keys[i])
             pv = self.win.pad_view

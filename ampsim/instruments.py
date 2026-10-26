@@ -289,6 +289,35 @@ def rot_speed_value(hz):
     return round(1 + 126 * math.log(hz / ROT_MIN_HZ) / math.log(ROT_MAX_HZ / ROT_MIN_HZ))
 
 
+# pad contínuo: tom fixo (o botão escolhido) ou seguindo o acorde da mão esquerda
+PAD_FOLLOW = ("Tom fixo", "Segue o acorde", "Segue o acorde no tempo")
+CHORD_WAIT = 0.08          # s: espera o acorde terminar de ser montado antes de trocar o tom
+
+
+def chord_root(notes):
+    """Tônica do acorde (nome em KEY_NAMES) das notas tocadas; None sem notas.
+    Reconhece tríades maiores/menores (com ou sem sétima, em qualquer inversão) e quinta justa
+    (power chord); na dúvida, a nota mais grave."""
+    if not notes:
+        return None
+    pcs = {n % 12 for n in notes}
+    lowest = min(notes) % 12
+    best, score = None, 0
+    for r in pcs:
+        s = 0
+        if (r + 7) % 12 in pcs:
+            s += 2                                  # quinta
+        if (r + 4) % 12 in pcs or (r + 3) % 12 in pcs:
+            s += 3                                  # terça maior/menor
+        if (r + 10) % 12 in pcs or (r + 11) % 12 in pcs:
+            s += 1                                  # sétima
+        if r == lowest:
+            s += 0.5                                # empate: a do baixo
+        if s > score:
+            best, score = r, s
+    return KEY_NAMES[best if score >= 2 else lowest]
+
+
 # o que a alavanca/faixa de pitch do controlador faz
 PITCH_FUNCS = ("Pitch (tom)", "Rotação (velocidade)", "Delay (tempo)")
 DEFAULT_FX = dict(drive_on=False, drive=30, rot_on=False, rot_fast=False, rot_mix=100, delay_on=False,
@@ -385,6 +414,10 @@ class Instruments:
         self.pad_sounds = list(PAD_PRESETS[DEFAULT_PAD_PRESET])
         self.pad_keys = list(DEFAULT_PAD_KEYS)
         self.cont_sound = "Pad Halo"
+        self.pad_follow = PAD_FOLLOW[0]      # tom fixo ou seguindo o acorde da mão esquerda
+        self._chord_at = None                # instante da última mudança nas notas da mão esquerda
+        self._chord_pending = None           # (tom, instante) esperando a próxima batida
+        self._beat_ref = time.monotonic()    # grade das batidas (recomeça no tap tempo)
         self.levels = dict(keys=80, drums=85, pad=70, reverb=110, chorus=40, shimmer=65,
                            drumverb=35, bright=64, release=64, attack=0, touch=100)
         self.mapping = dict(pads=[list(p) for p in DEFAULT_PADS],
@@ -758,6 +791,8 @@ class Instruments:
         played = note + self.transpose
         targets = [(s, ch, played + 12 * o) for s, ch, o in self._targets(played)]
         self._held[note] = targets
+        if self.pad_follow != PAD_FOLLOW[0] and note < self.keys["split"]:
+            self._chord_at = time.monotonic()
         synth_done = False
         for s, ch, n in targets:
             if s.src == "synth":
@@ -769,6 +804,8 @@ class Instruments:
         self.on_key(note, True)
 
     def key_off(self, note):
+        if self.pad_follow != PAD_FOLLOW[0] and note < self.keys["split"] and note in self._held:
+            self._chord_at = time.monotonic()
         for s, ch, n in self._held.pop(note, []):
             if s.src == "synth":
                 self.engine.send_event(Ly.EV_NOTE_OFF, n, 0)
@@ -870,11 +907,48 @@ class Instruments:
                 del self._cp[ch]
         self.cont_key = None
 
+    def set_pad_follow(self, mode):
+        if mode in PAD_FOLLOW:
+            self.pad_follow = mode
+            self._chord_at = None
+            self._chord_pending = None
+            self.on_change()
+
+    def follow_chord(self, now=None):
+        """Pad seguindo o acorde: troca o tom quando a mão esquerda muda de acorde (ou na próxima
+        batida, no modo "no tempo"). Só com o pad contínuo tocando. -> tom aplicado ou None."""
+        if self.pad_follow == PAD_FOLLOW[0] or self.cont_key is None:
+            self._chord_at = None
+            self._chord_pending = None
+            return None
+        now = time.monotonic() if now is None else now
+        if self._chord_at is not None and now - self._chord_at >= CHORD_WAIT:
+            self._chord_at = None
+            root = chord_root([n for n in self._held if n < self.keys["split"]])
+            if root is not None and root != self.cont_key:
+                if self.pad_follow == PAD_FOLLOW[2]:
+                    spb = 60.0 / max(self.bpm, 30)
+                    k = math.ceil((now - self._beat_ref) / spb)
+                    self._chord_pending = (root, self._beat_ref + k * spb)
+                else:
+                    self.start_cont_pad(root)
+                    self.on_change()
+                    return root
+        if self._chord_pending is not None and now >= self._chord_pending[1]:
+            root, _ = self._chord_pending
+            self._chord_pending = None
+            if root != self.cont_key:
+                self.start_cont_pad(root)
+                self.on_change()
+                return root
+        return None
+
     def tick(self, dt):
         """Chamado pela interface ~30x/s: fades do pad contínuo e note-offs programados."""
         sf = self.sf
         if sf is None:
             return
+        self.follow_chord()
         for ch, st in list(self._cp.items()):
             cur, target, notes = st
             if cur == target:
@@ -1015,6 +1089,7 @@ class Instruments:
         self._taps = (self._taps + [now])[-5:]
         self.engine.synth.restart_pulse()
         self.engine.metronome.restart()            # o click também recomeça no toque
+        self._beat_ref = now                       # e a grade do pad "segue o acorde no tempo"
         if len(self._taps) >= 2:
             gaps = [b - a for a, b in zip(self._taps, self._taps[1:])]
             gaps.sort()
@@ -1358,6 +1433,7 @@ class Instruments:
                     extra_layers=[dict(x) for x in self.extra_layers],
                     pad_eq=dict(self.pad_eq), pitch_func=self.pitch_func,
                     metronome=dict(volume=self.engine.metronome.volume, beats=self.engine.metronome.beats),
+                    pad_follow=self.pad_follow,
                     midi_device=self.midi_device, device_maps=self._device_maps_state())
 
     def load_state(self, st):
@@ -1392,6 +1468,8 @@ class Instruments:
             self.fx_layer = max(0, min(st["fx_layer"], self.layer_count() - 1))
         if isinstance(st.get("pad_eq"), dict):
             self.pad_eq.update(clean_pad_eq(st["pad_eq"]))
+        if st.get("pad_follow") in PAD_FOLLOW:
+            self.pad_follow = st["pad_follow"]
         met = st.get("metronome")
         if isinstance(met, dict):
             m = self.engine.metronome

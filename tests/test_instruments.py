@@ -429,3 +429,57 @@ def test_psr_default_mapping():
     m = Instruments.default_mapping("2- Digital Keyboard-1")
     assert m["pads"] == [None] * 8 and m["knobs"][:2] == [[0, 74], [0, 71]]
     assert Instruments.default_mapping("Arturia KeyStep")["pads"][0] == [9, 40]
+
+
+def test_chord_root_recognition():
+    from ampsim.instruments import chord_root
+    assert chord_root([]) is None
+    assert chord_root([48, 52, 55]) == "C"                         # Dó maior
+    assert chord_root([45, 48, 52]) == "A"                         # Lá menor
+    assert chord_root([52, 55, 60]) == "C"                         # Dó com Mi no baixo (inversão)
+    assert chord_root([43, 47, 50, 53]) == "G"                     # Sol com sétima
+    assert chord_root([45, 48, 52, 55]) == "A"                     # Lá menor com sétima
+    assert chord_root([38, 45]) == "D"                             # power chord
+    assert chord_root([40]) == "E"                                 # nota sozinha
+
+
+def test_pad_follows_left_hand_chord(engine):
+    import time
+    from ampsim.instruments import CHORD_WAIT, PAD_FOLLOW
+    inst = engine.instruments
+    inst.keys["split"] = 48
+    inst.set_pad_follow(PAD_FOLLOW[1])
+    inst.start_cont_pad("C")
+    for n in (33, 36, 40):                                          # Lá menor na mão esquerda
+        inst.key_on(n, 90)
+    assert inst.follow_chord(time.monotonic()) is None              # ainda montando o acorde
+    assert inst.follow_chord(time.monotonic() + CHORD_WAIT + 0.01) == "A" and inst.cont_key == "A"
+    for n in (33, 36, 40):
+        inst.key_off(n)
+    inst.key_on(72, 90)                                             # mão direita não muda o pad
+    assert inst.follow_chord(time.monotonic() + 1) is None and inst.cont_key == "A"
+    inst.key_off(72)
+    # no tempo: espera a próxima batida
+    inst.set_pad_follow(PAD_FOLLOW[2])
+    inst.set_bpm(60)
+    inst._beat_ref = time.monotonic()
+    for n in (38, 42, 45):                                          # Ré maior
+        inst.key_on(n, 90)
+    t = time.monotonic() + 0.2
+    assert inst.follow_chord(t) is None and inst._chord_pending is not None
+    assert inst.cont_key == "A"
+    assert inst.follow_chord(inst._chord_pending[1] + 0.01) == "D" and inst.cont_key == "D"
+    for n in (38, 42, 45):
+        inst.key_off(n)
+    # tom fixo e pad parado: nada muda
+    inst.set_pad_follow(PAD_FOLLOW[0])
+    inst.key_on(43, 90)
+    assert inst.follow_chord(time.monotonic() + 1) is None and inst.cont_key == "D"
+    inst.key_off(43)
+    inst.set_pad_follow(PAD_FOLLOW[1])
+    inst.stop_cont_pad(immediate=True)
+    inst.key_on(43, 90)
+    assert inst.follow_chord(time.monotonic() + 1) is None and inst.cont_key is None
+    inst.key_off(43)
+    assert inst.get_state()["pad_follow"] == PAD_FOLLOW[1]
+    inst.set_pad_follow(PAD_FOLLOW[0])
