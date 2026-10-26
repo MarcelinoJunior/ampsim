@@ -22,6 +22,7 @@ FUNC_RANGES = {
     "Shimmer": ("Shimmer", 0, 100, "%"),
     "Reverb da bateria": ("Sala bateria", 0, 100, "%"),
     "Rotação (intensidade)": ("Rotação", 0, 100, "%"),
+    "Rotação (velocidade)": ("Veloc. rotação", 0, 100, "%"),
     "Drive": ("Drive", 0, 100, "%"),
     "Delay (mix)": ("Delay", 0, 100, "%"),
     "Tempo do delay": ("Tempo delay", 80, 1200, "ms"),
@@ -47,6 +48,12 @@ def func_value(engine, func):
               "Brilho": "bright", "Reverb da bateria": "drumverb"}
     if func in pct127:
         return lv[pct127[func]] / 1.27
+    if func == "Rotação (velocidade)":
+        from ..instruments import rot_speed_value
+        if not fx["rot_on"]:
+            return 0.0
+        hz = fx["rot_fast_hz" if fx["rot_fast"] else "rot_slow_hz"] if not fx["rot_sync"] else 0.0
+        return rot_speed_value(hz) / 1.27
     if func.startswith("Volume camada "):
         return (inst.layer_volume(int(func[-1])) or 0) / 1.27
     return {

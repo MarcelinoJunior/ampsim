@@ -784,7 +784,7 @@ class PadPianoView(QWidget):
             self.rot_rate_lab.setText(f"{m:g}×")
             self.rot_rate_lab.setToolTip(f"{m:g} volta(s) por tempo = {hz:.2f} Hz a {self.inst.bpm} BPM")
         else:
-            self.rot_rate_lab.setText(f"{hz:.1f} Hz")
+            self.rot_rate_lab.setText(f"{hz:.1f} Hz" if hz > 0 else "parada")
             self.rot_rate_lab.setToolTip("")
 
     def _delay_div(self, i):

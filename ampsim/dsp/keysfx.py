@@ -31,7 +31,7 @@ def rotation_hz(fx, bpm):
         hz = max(bpm, 30) / 60.0 * mult
     else:
         hz = fx.get("rot_fast_hz" if fast else "rot_slow_hz", HORN_FAST if fast else HORN_SLOW)
-    return min(max(hz, 0.1), 12.0)
+    return min(max(hz, 0.0), 12.0)              # 0 = corneta parada (knob "Rotação (velocidade)")
 
 
 @njit(**JIT)

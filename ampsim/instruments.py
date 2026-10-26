@@ -254,7 +254,8 @@ BUTTONS = ("PLAY", "STOP", "REC", "BT", "ARP", "SC/CH", "KNOB-B", "PAD-B")
 
 KNOB_FUNCS = ("Nenhuma", "Volume teclas", "Volume camada 1", "Volume camada 2", "Volume camada 3",
               "Volume camada 4", "Volume bateria", "Volume pad contínuo",
-              "Reverb", "Shimmer", "Reverb da bateria", "Chorus", "Rotação (intensidade)", "Drive",
+              "Reverb", "Shimmer", "Reverb da bateria", "Chorus", "Rotação (intensidade)",
+              "Rotação (velocidade)", "Drive",
               "Delay (mix)", "Tempo do delay", "Repetições do delay", "Brilho", "Release", "Ataque",
               "Sensibilidade ao toque", "BPM", "Master")
 DEFAULT_KNOB_FUNCS = ["Volume teclas", "Volume camada 2", "Volume bateria", "Volume pad contínuo",
@@ -264,6 +265,25 @@ BUTTON_FUNCS = ("Nenhuma", "Tap tempo (BPM)", "Timbre anterior", "Próximo timbr
                 "Banco de pads A/B (tela)", "Rotação lenta/rápida", "Rotação liga/desliga",
                 "Delay liga/desliga", "Drive liga/desliga", "Sustain (segurar)", "Oitava −", "Oitava +",
                 "Pânico (soltar notas)")
+# knob "Rotação (velocidade)": 0 = parada; girando, de 0,2 Hz (bem lenta) até 12 Hz (muito rápida)
+ROT_MIN_HZ, ROT_MAX_HZ = 0.2, 12.0
+
+
+def rot_speed_hz(value):
+    """Posição do knob (0-127) -> velocidade da rotação em Hz (curva exponencial: o ouvido sente assim)."""
+    if value <= 0:
+        return 0.0
+    return round(ROT_MIN_HZ * (ROT_MAX_HZ / ROT_MIN_HZ) ** ((min(value, 127) - 1) / 126.0), 2)
+
+
+def rot_speed_value(hz):
+    """O contrário de rot_speed_hz (para desenhar o knob/fader na posição certa)."""
+    if hz <= 0:
+        return 0
+    hz = min(max(hz, ROT_MIN_HZ), ROT_MAX_HZ)
+    return round(1 + 126 * math.log(hz / ROT_MIN_HZ) / math.log(ROT_MAX_HZ / ROT_MIN_HZ))
+
+
 # o que a alavanca/faixa de pitch do controlador faz
 PITCH_FUNCS = ("Pitch (tom)", "Rotação (velocidade)", "Delay (tempo)")
 DEFAULT_FX = dict(drive_on=False, drive=30, rot_on=False, rot_fast=False, rot_mix=100, delay_on=False,
@@ -911,6 +931,12 @@ class Instruments:
             lv["shimmer"] = pct
         elif func.startswith("Volume camada "):
             self.set_layer_volume(int(func[-1]), value)
+        elif func == "Rotação (velocidade)":
+            fx = self.fx                         # camada selecionada; liga a rotação e solta do BPM
+            fx["rot_on"] = True
+            fx["rot_sync"] = False
+            fx["rot_fast_hz" if fx["rot_fast"] else "rot_slow_hz"] = rot_speed_hz(value)
+            self.apply_fx()
         elif func == "Master":
             self.engine.master = (value / 127) ** 2 * 2.0
         elif func in ("Rotação (intensidade)", "Drive", "Delay (mix)", "Tempo do delay",

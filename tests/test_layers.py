@@ -307,3 +307,27 @@ def test_organ_pad_swings_side_to_side(engine):
     finally:
         inst.sf.cc = real
         inst.stop_cont_pad(immediate=True)
+
+
+def test_knob_rotation_speed_from_stopped_to_very_fast(engine):
+    """Knob "Rotação (velocidade)": 0 = parada; girando sobe até muito rápida (12 Hz)."""
+    from ampsim.instruments import KNOB_FUNCS, rot_speed_hz
+    from ampsim.ui.funcs import func_value
+    inst = engine.instruments
+    assert "Rotação (velocidade)" in KNOB_FUNCS
+    inst.fx_layer = 0
+    inst.layer_fx[0].update(rot_on=False, rot_sync=True, rot_fast=False)
+    kp = engine.keys_fx[0].KP
+    inst.apply_knob_func("Rotação (velocidade)", 0)
+    assert inst.fx["rot_on"] and not inst.fx["rot_sync"] and kp[K_ROT_HZ] == 0.0     # parada
+    speeds = []
+    for v in (1, 32, 64, 96, 127):
+        inst.apply_knob_func("Rotação (velocidade)", v)
+        speeds.append(kp[K_ROT_HZ])
+    assert speeds == sorted(speeds) and speeds[0] < 0.3 and speeds[-1] == pytest.approx(12.0)
+    assert rot_speed_hz(110) > 6.0                                 # perto do fim: rápida de Leslie
+    inst.apply_knob_func("Rotação (velocidade)", 64)
+    assert func_value(engine, "Rotação (velocidade)") == pytest.approx(64 / 1.27, abs=1.0)
+    inst.layer_fx[0]["rot_fast"] = True                            # na "Rápida", mexe na velocidade rápida
+    inst.apply_knob_func("Rotação (velocidade)", 127)
+    assert inst.fx["rot_fast_hz"] == 12.0 and inst.fx["rot_slow_hz"] == rot_speed_hz(64)
