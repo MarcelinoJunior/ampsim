@@ -16,13 +16,13 @@ from ..instruments import (
 from ..dsp.params import TRACK_PARAMS
 from .funcs import FUNC_RANGES, func_value, set_func
 from .icons import icon
+from .recorder import pad_label
 from .theme import C
 from .widgets import Meter, ToggleSwitch
 
-TABS = (("Pads", "pads"), ("Mixer", "mixer"), ("MIDI / Controlador", "midi"), ("Configurações", "gear"))
+TABS = (("Pads", "pads"), ("Faders / Pads", "mixer"), ("MIDI / Controlador", "midi"), ("Configurações", "gear"))
 DOCK_H = 196
 VOL_RANGE = next((p.lo, p.hi) for p in TRACK_PARAMS if p.key == "volume")
-# faders de volume da aba Configurações: (rótulo, função de knob, camada ou None)
 MUTE_ON = (f"QPushButton {{ background: {C['red']}; border: 1px solid #ff8a96; color: white; "
            "font-weight: 800; font-size: 8pt; border-radius: 5px; padding: 0; }")
 MUTE_OFF = (f"QPushButton {{ background: {C['card']}; border: 1px solid {C['border2']}; color: {C['dim']}; "
@@ -32,9 +32,12 @@ SLIDER_MUTED = (f"QSlider::groove:vertical {{ background: #5a1e2a; width: 4px; b
                 f"QSlider::handle:vertical {{ background: {C['red']}; border: 2px solid #ff8a96; height: 14px;"
                 " width: 14px; margin: 0 -6px; border-radius: 8px; }"
                 "QSlider::add-page:vertical, QSlider::sub-page:vertical { background: #5a1e2a; }")
-VOLUME_FADERS = (("L1", "Volume camada 1", 1), ("L2", "Volume camada 2", 2), ("L3", "Volume camada 3", 3),
-                 ("L4", "Volume camada 4", 4), ("Pad\ncontínuo", "Volume pad contínuo", None),
-                 ("Pads", "Volume bateria", None))
+# faders da aba Faders / Pads: (rótulo, tipo, função ou trilha, camada, tem mute de emergência)
+STRIPS = (("L1", "func", "Volume camada 1", 1, True), ("L2", "func", "Volume camada 2", 2, True),
+          ("L3", "func", "Volume camada 3", 3, True), ("L4", "func", "Volume camada 4", 4, True),
+          ("Pad\ncontínuo", "func", "Volume pad contínuo", None, True), ("Pads", "func", "Volume bateria", None, True),
+          ("Teclas\n(todas)", "func", "Volume teclas", None, False), ("Guitarra", "track", "guitar", None, False),
+          ("Baixo", "track", "bass", None, False), ("Master", "func", "Master", None, False))
 
 
 def _title(text):
@@ -227,44 +230,101 @@ class BottomDock(QFrame):
             self.inst.set_pad_preset(names[i])
         self.refresh()
 
-    # ------------------------------------------------------------------ Mixer
+    # ------------------------------------------------------------------ Faders / Pads
     def _build_mixer(self):
+        """Faders (com mute de emergência), os 8 pads para tocar e o gravador."""
+        from .recorder import RecorderPanel
+
         w = QWidget()
         lay = QHBoxLayout(w)
         lay.setContentsMargins(4, 0, 4, 0)
-        lay.setSpacing(8)
+        lay.setSpacing(10)
+
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        col.addWidget(_title("Faders"))
+        row = QHBoxLayout()
+        row.setSpacing(2)
         self.strips = []
-        chans = (("Guitarra", ("track", "guitar")), ("Baixo", ("track", "bass")),
-                 ("Teclas", ("func", "Volume teclas")), ("Camada 2", ("func", "Volume camada 2")),
-                 ("Bateria", ("func", "Volume bateria")), ("Pad contínuo", ("func", "Volume pad contínuo")),
-                 ("Sala bateria", ("func", "Reverb da bateria")), ("Trilha Pad/Piano", ("track", "pads")),
-                 ("Master", ("func", "Master")))
-        for label, target in chans:
-            box = QFrame()
-            box.setObjectName("card")
-            box.setFixedWidth(118 if label != "Master" else 130)
-            bl = QGridLayout(box)
-            bl.setContentsMargins(8, 6, 8, 6)
-            bl.setSpacing(2)
-            t = QLabel(label)
-            t.setAlignment(Qt.AlignCenter)
-            bl.addWidget(t, 0, 0, 1, 2)
+        self.vol_faders = []
+        self.mute_buttons = {}
+        for label, kind, arg, layer, mutable in STRIPS:
+            box = QVBoxLayout()
+            box.setSpacing(1)
+            name = QLabel(label)
+            name.setObjectName("small")
+            name.setAlignment(Qt.AlignCenter)
+            name.setFixedSize(56, 26)
+            sl = QHBoxLayout()
+            sl.setSpacing(2)
+            sl.addStretch(1)
             s = QSlider(Qt.Vertical)
-            s.setFocusPolicy(Qt.NoFocus)
             s.setRange(0, 100)
-            s.setMinimumHeight(86)
-            s.valueChanged.connect(lambda v, tg=target: self._mix(tg, v))
-            bl.addWidget(s, 1, 0, Qt.AlignHCenter)
-            m = Meter()
-            m.setMinimumHeight(86)
-            bl.addWidget(m, 1, 1, Qt.AlignHCenter)
+            s.setFocusPolicy(Qt.NoFocus)
+            s.setMinimumHeight(48)
+            s.valueChanged.connect(lambda v, tg=(kind, arg): self._mix(tg, v))
+            sl.addWidget(s)
+            m = None
+            if kind == "track" or arg == "Master":
+                m = Meter()
+                m.setMinimumHeight(48)
+                sl.addWidget(m)
+            sl.addStretch(1)
             val = QLabel("")
             val.setObjectName("small")
             val.setAlignment(Qt.AlignCenter)
-            bl.addWidget(val, 2, 0, 1, 2)
-            self.strips.append((target, s, val, m))
-            lay.addWidget(box)
-        lay.addStretch(1)
+            val.setFixedWidth(56)
+            box.addWidget(name)
+            box.addLayout(sl, 1)
+            box.addWidget(val)
+            if mutable:
+                mute = QPushButton("M")
+                mute.setCheckable(True)
+                mute.setFocusPolicy(Qt.NoFocus)
+                mute.setFixedSize(48, 20)
+                mute.setStyleSheet(MUTE_OFF)
+                mute.setToolTip("Mute de emergência: silencia sem mexer no fader (clique de novo para voltar)")
+                mute.clicked.connect(lambda on, f=arg: self._mute(f, on))
+                box.addWidget(mute, 0, Qt.AlignHCenter)
+                self.mute_buttons[arg] = mute
+                self.vol_faders.append((arg, layer, s, val, name))
+            else:
+                spacer = QLabel("")
+                spacer.setFixedHeight(20)
+                box.addWidget(spacer)
+            row.addLayout(box)
+            self.strips.append(((kind, arg), s, val, m, name, layer))
+        col.addLayout(row, 1)
+        lay.addLayout(col)
+        lay.addWidget(_vsep())
+
+        col = QVBoxLayout()
+        col.setSpacing(4)
+        col.addWidget(_title("Pads"))
+        grid = QGridLayout()
+        grid.setSpacing(5)
+        self.mix_pad_tiles = []
+        for i in range(PAD_COUNT):
+            b = QPushButton("")
+            b.setObjectName("tile")
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setFixedSize(94, 50)
+            b.pressed.connect(lambda i=i: self.inst.pad_hit(i, 110))
+            b.setContextMenuPolicy(Qt.CustomContextMenu)
+            b.customContextMenuRequested.connect(lambda _, i=i: self.win.choose_pad_sound(i))
+            self.mix_pad_tiles.append(b)
+            grid.addWidget(b, i // 4, i % 4)
+        col.addLayout(grid)
+        col.addStretch(1)
+        lay.addLayout(col)
+        lay.addWidget(_vsep())
+
+        col = QVBoxLayout()
+        col.setSpacing(4)
+        col.addWidget(_title("Gravador"))
+        self.recorder = RecorderPanel(self.win)
+        col.addWidget(self.recorder, 1)
+        lay.addLayout(col, 1)
         return w
 
     def _mix(self, target, v):
@@ -279,80 +339,36 @@ class BottomDock(QFrame):
         else:
             _, lo, hi, _ = FUNC_RANGES[arg]
             set_func(self.engine, arg, lo + (hi - lo) * v / 100)
-            self.win.refresh_sounds()
-        self._strip_text()
-
-    def _build_volume_faders(self):
-        """Volumes à mão: camadas L1-L4 das teclas, pad contínuo e sons dos pads."""
-        col = QVBoxLayout()
-        col.setSpacing(2)
-        col.addWidget(_title("Volumes"))
-        row = QHBoxLayout()
-        row.setSpacing(4)
-        self.vol_faders = []
-        self.mute_buttons = {}
-        for label, func, layer in VOLUME_FADERS:
-            box = QVBoxLayout()
-            box.setSpacing(1)
-            name = QLabel(label)
-            name.setObjectName("small")
-            name.setAlignment(Qt.AlignCenter)
-            name.setFixedHeight(26)
-            s = QSlider(Qt.Vertical)
-            s.setRange(0, 100)
-            s.setFocusPolicy(Qt.NoFocus)
-            s.setMinimumHeight(48)
-            s.setToolTip(func)
-            s.valueChanged.connect(lambda v, f=func: self._fader(f, v))
-            val = QLabel("")
-            val.setObjectName("small")
-            val.setAlignment(Qt.AlignCenter)
-            val.setFixedWidth(50)
-            mute = QPushButton("M")
-            mute.setCheckable(True)
-            mute.setFocusPolicy(Qt.NoFocus)
-            mute.setFixedSize(46, 20)
-            mute.setStyleSheet(MUTE_OFF)
-            mute.setToolTip("Mute de emergência: silencia sem mexer no fader (clique de novo para voltar)")
-            mute.clicked.connect(lambda on, f=func: self._mute(f, on))
-            box.addWidget(name)
-            box.addWidget(s, 1, Qt.AlignHCenter)
-            box.addWidget(val)
-            box.addWidget(mute, 0, Qt.AlignHCenter)
-            row.addLayout(box)
-            self.vol_faders.append((func, layer, s, val, name))
-            self.mute_buttons[func] = mute
-        col.addLayout(row, 1)
-        return col
+            self.win.pad_view.refresh_values()      # a barra Volume do painel da direita acompanha
+        self.refresh_levels()
 
     def _mute(self, func, on):
         self.inst.set_mute(func, on)
         self.refresh_levels()
         self.win.pad_view.refresh_values()          # o painel da direita também avisa "MUDO"
 
-    def _fader(self, func, v):
-        if self._updating:
-            return
-        set_func(self.engine, func, v)
-        for f, _layer, _s, val, _n in self.vol_faders:
-            if f == func and f not in self.inst.mutes:
-                val.setText(f"{v}%")
-        self.win.pad_view.refresh_values()          # a barra Volume do painel da direita acompanha
-        self.refresh_levels()
-
-    def _sync_faders(self):
+    def _sync_strips(self):
+        """Valor, camada existente e mute de cada fader (chamado com _updating ligado)."""
         count = self.inst.layer_count()
-        for func, layer, s, val, name in self.vol_faders:
+        for (kind, arg), s, val, _m, name, layer in self.strips:
             ok = layer is None or layer <= count
             s.setEnabled(ok)
             name.setEnabled(ok)
-            v = round(func_value(self.engine, func)) if ok else 0
+            if kind == "track":
+                lo, hi = VOL_RANGE
+                db = self.engine.tracks[arg].values["track"]["volume"]
+                s.setValue(round((db - lo) / (hi - lo) * 100))
+                val.setText(f"{db:+.0f} dB")
+                continue
+            _, lo, hi, _ = FUNC_RANGES[arg]
+            v = round((func_value(self.engine, arg) - lo) / (hi - lo) * 100) if ok else 0
             s.setValue(v)
-            muted = func in self.inst.mutes
-            mute = self.mute_buttons[func]
-            mute.setChecked(muted)
-            mute.setText("MUDO" if muted else "M")
-            mute.setStyleSheet(MUTE_ON if muted else MUTE_OFF)
+            muted = arg in self.inst.mutes
+            mute = self.mute_buttons.get(arg)
+            if mute is not None:
+                mute.setChecked(muted)
+                mute.setText("MUDO" if muted else "M")
+                mute.setStyleSheet(MUTE_ON if muted else MUTE_OFF)
             s.setStyleSheet(SLIDER_MUTED if muted else "")
             if muted:                                   # fader lá em cima e sem som: deixa bem claro
                 val.setText("SEM SOM")
@@ -362,40 +378,25 @@ class BottomDock(QFrame):
                 val.setText(f"{v}%" if ok else "—")
                 val.setStyleSheet("")
                 name.setStyleSheet("")
-            s.setToolTip(func + (" — MUDO (mute de emergência ligado)" if muted else "") if ok
-                         else f"{func}: adicione a camada {layer} no painel da direita (+)")
+            s.setToolTip(arg + (" — MUDO (mute de emergência ligado)" if muted else "") if ok
+                         else f"{arg}: adicione a camada {layer} no painel da direita (+)")
 
     def refresh_levels(self):
-        """Só as barras de volume (Mixer e Configurações): um knob ou fader mexeu em algum volume."""
+        """Só os faders: um knob, a barra do painel ou um fader mexeu em algum volume."""
         self._updating = True
         try:
-            self._sync_faders()
-            for (kind, arg), s, _val, _m in self.strips:
-                if kind == "func":
-                    _, lo, hi, _ = FUNC_RANGES[arg]
-                    s.setValue(round((func_value(self.engine, arg) - lo) / (hi - lo) * 100))
+            self._sync_strips()
         finally:
             self._updating = False
-        self._strip_text()
-
-    def _strip_text(self):
-        for (kind, arg), s, val, _m in self.strips:
-            if kind == "track":
-                val.setText(f"{self.engine.tracks[arg].values['track']['volume']:+.0f} dB")
-            else:
-                val.setText(f"{s.value()}%")
 
     def update_meters(self, peaks):
         """peaks: {"guitar": p, "bass": p, "pads": p, "master": p}"""
         if self.collapsed or self.stack.currentIndex() != 1:
             return
-        for (kind, arg), _s, _v, m in self.strips:
-            if kind == "track":
-                m.push(peaks.get(arg, 0.0))
-            elif arg == "Master":
-                m.push(peaks.get("master", 0.0))
-            else:
-                m.push(peaks.get("pads", 0.0))
+        for (kind, arg), _s, _v, m, _n, _l in self.strips:
+            if m is None:
+                continue
+            m.push(peaks.get(arg if kind == "track" else "master", 0.0))
 
     # ------------------------------------------------------------------ MIDI / Controlador
     def _build_midi(self):
@@ -572,8 +573,6 @@ class BottomDock(QFrame):
         col.addStretch(1)
         lay.addLayout(col, 1)
         lay.addWidget(_vsep())
-        lay.addLayout(self._build_volume_faders())
-        lay.addWidget(_vsep())
 
         col = QVBoxLayout()
         col.setSpacing(6)
@@ -658,17 +657,12 @@ class BottomDock(QFrame):
                     note = note_name(int(pads[i][1]))
                 except (IndexError, TypeError, ValueError):
                     pass
-                b.setText(f"{_short(inst.pad_sounds[i].split(' — ')[0], 14)}\n{note}")
+                b.setText(f"{_short(pad_label(inst.pad_sounds[i]), 14)}\n{note}")
                 b.setToolTip(f"Pad {i + 1}: {inst.pad_sounds[i]}\nClique: tocar · botão direito: trocar o som")
-            for (kind, arg), s, _val, _m in self.strips:
-                if kind == "track":
-                    lo, hi = VOL_RANGE
-                    db = self.engine.tracks[arg].values["track"]["volume"]
-                    s.setValue(round((db - lo) / (hi - lo) * 100))
-                else:
-                    _, lo, hi, _ = FUNC_RANGES[arg]
-                    s.setValue(round((func_value(self.engine, arg) - lo) / (hi - lo) * 100))
-            self._sync_faders()
+                t = self.mix_pad_tiles[i]
+                t.setText(f"Pad {i + 1}\n{_short(pad_label(inst.pad_sounds[i]), 15)}")
+                t.setToolTip(b.toolTip())
+            self._sync_strips()
             for i, c in enumerate(self.padb_combos):
                 c.setCurrentText(inst.pad_keys[i])
             for i, c in enumerate(self.knob_combos):
@@ -681,7 +675,7 @@ class BottomDock(QFrame):
             self.power_btn.setText("Desligar áudio" if self.engine.running else "Ligar áudio")
         finally:
             self._updating = False
-        self._strip_text()
+        self.recorder._sources()
         self.on_learn()
 
 

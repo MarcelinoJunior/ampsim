@@ -137,9 +137,9 @@ Todas as abas seguem o mesmo desenho:
 | **Banco de Presets** (esquerda) | busca e lista de tudo: timbres do Pad/Piano (prontos e os seus), presets de Guitarra e Baixo, amp/efeitos das teclas e os arquivos `.ampsim` de Documentos\AmpSim. Botão direito num item: exportar, copiar código, excluir |
 | **Centro** | a aba aberta |
 | **Painel da direita** | **Instrumento / Layer** no Pad/Piano; trilha e gabinete na Guitarra/Baixo |
-| **Barra de baixo** | **Pads** (pads contínuos e de bateria), **Mixer**, **MIDI / Controlador** e **Configurações**. A seta à direita recolhe a barra; cada aba lembra se ela fica aberta ou fechada |
+| **Barra de baixo** | **Pads** (pads contínuos e de bateria), **Faders / Pads** (faders com mute de emergência, os 8 pads e o gravador: REC/STOP grava o som do AmpSim ou uma entrada, e a gravação vai para um pad), **MIDI / Controlador** e **Configurações**. A seta à direita recolhe a barra; cada aba lembra se ela fica aberta ou fechada |
 
-![Mixer na barra de baixo](docs/img/mixer.png)
+![Faders / Pads na barra de baixo](docs/img/mixer.png)
 
 ## Guitarra e Baixo
 

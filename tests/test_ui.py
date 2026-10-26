@@ -440,7 +440,7 @@ def test_midi_learn_maps_screen_control(win, monkeypatch):
 # ------------------------------------------------------------------ barra inferior
 def test_mixer_moves_track_and_keys_volumes(win):
     win.dock.show_tab(1)
-    strips = {arg: s for (kind, arg), s, _v, _m in win.dock.strips}
+    strips = {arg: s for (kind, arg), s, *_ in win.dock.strips}
     strips["guitar"].setValue(50)
     vol = win.engine.tracks["guitar"].values["track"]["volume"]
     assert -30 < vol < -20
@@ -777,9 +777,12 @@ def test_knob_from_midi_thread_moves_volume_slider(win):
 
 
 @needs_sf
-def test_volume_faders_in_settings(win):
-    """Faders L1-L4, pad contínuo e pads na aba Configurações, ligados ao painel e aos knobs."""
+def test_volume_faders_in_faders_pads_tab(win):
+    """Faders L1-L4, pad contínuo e pads na aba Faders / Pads (não mais em Configurações)."""
+    from PySide6.QtWidgets import QSlider
     d, pv, inst = win.dock, win.pad_view, win.inst
+    assert d.tab_buttons[1].text().strip() == "Faders / Pads"
+    assert not d.stack.widget(3).findChildren(QSlider)                 # Configurações sem faders
     win.load_from_bank("ready", "Piano + Pad (culto)")
     f = {func: (s, val, layer) for func, layer, s, val, _n in d.vol_faders}
     assert set(f) == {"Volume camada 1", "Volume camada 2", "Volume camada 3", "Volume camada 4",
@@ -852,3 +855,38 @@ def test_big_photo_follows_selected_layer(win):
     assert pv.art.photo == "piano-cauda"
     pv.select_layer(2)
     assert pv.art.photo == "cordas-lentas" and pv.layer_art.photo == "cordas-lentas"
+
+
+
+def test_recorder_panel_rec_stop_bank_and_pads(win, monkeypatch):
+    """REC/STOP grava no banco; a gravação vai para um pad, pode ser renomeada e apagada."""
+    import numpy as np
+
+    from ampsim.audio.sampler import REC_PREFIX
+    from ampsim.instruments import PAD_PRESETS
+    d, inst, e = win.dock, win.inst, win.engine
+    d.show_tab(1)
+    rec = d.recorder
+    monkeypatch.setattr(type(e), "running", property(lambda self: True))
+    rec.refresh()
+    assert rec.source.itemData(0) == "out" and not rec.play_btn.isEnabled()
+    rec.start()
+    assert e.recorder.active and rec.rec_btn.text() == "● GRAVANDO" and rec.stop_btn.isEnabled()
+    t = np.arange(24000) / 48000.0
+    x = (0.3 * np.sin(2 * np.pi * 330 * t)).astype(np.float32)
+    e.recorder.feed(np.stack([x, x], axis=1))
+    name = rec.stop()
+    assert name == "Gravação 01" and rec.current() == name and name in e.sampler.samples
+    assert rec.rec_btn.text() == "● REC" and rec.play_btn.isEnabled()
+    rec.assign(2, name)
+    assert inst.pad_sounds[2] == REC_PREFIX + name and "● Gravação 01" in d.mix_pad_tiles[2].text()
+    inst.pad_hit(2, 120)
+    assert e.sampler.events                                    # o pad manda tocar a gravação
+    monkeypatch.setattr("ampsim.ui.recorder.QInputDialog.getText", staticmethod(lambda *a, **k: ("Intro", True)))
+    rec.rename()
+    assert inst.pad_sounds[2] == REC_PREFIX + "Intro" and "Intro" in e.sampler.samples
+    assert "Gravação 01" not in e.sampler.samples
+    rec.delete()                                               # a confirmação responde Sim (fixture)
+    assert inst.pad_sounds[2] == list(PAD_PRESETS.values())[0][2] and rec.current() is None
+    rec.start()
+    assert rec.stop() is None                                  # só silêncio: nada vai para o banco

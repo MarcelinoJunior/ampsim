@@ -9,6 +9,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 
+from .audio.sampler import REC_PREFIX
 from .dsp import layout as Ly
 from .dsp.padeq import DEFAULT_PAD_EQ, VOICINGS, clean_pad_eq
 from .dsp.worship import DRUM_TYPE_NAMES
@@ -702,7 +703,10 @@ class Instruments:
             self.on_pad(i, vel)
             self.on_change()
             return
-        s = PAD_SOUND_BY_NAME.get(self.pad_sounds[i])
+        name = self.pad_sounds[i]
+        if name.startswith(REC_PREFIX):
+            self.engine.sampler.trigger(name[len(REC_PREFIX):], vel)
+        s = PAD_SOUND_BY_NAME.get(name)
         if s is not None:
             if s.kind == "synth":
                 self.drum_events.append((s.synth, vel))
@@ -715,6 +719,9 @@ class Instruments:
 
     def preview_pad_sound(self, name, vel=110):
         """Toca um som de pad (usado no diálogo de escolha) sem alterar os pads."""
+        if name.startswith(REC_PREFIX):
+            self.engine.sampler.trigger(name[len(REC_PREFIX):], vel)
+            return
         s = PAD_SOUND_BY_NAME.get(name)
         if s is None:
             return

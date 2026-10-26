@@ -456,6 +456,7 @@ class MainWindow(QMainWindow):
         self.kbd.release_all()
         self.inst.all_off()
         self.inst.stop_cont_pad()
+        self.engine.sampler.stop_all()              # gravações tocando nos pads
         self.pad_view.piano.clear()
 
     def _kbd_toggled(self, on):

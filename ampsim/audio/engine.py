@@ -6,6 +6,7 @@ import numpy as np
 
 from . import devices as dev
 from .devices import promote_audio_thread, sd
+from .sampler import Recorder, Sampler
 from ..dsp import layout as Ly
 from ..dsp.kernels import (
     mix_soundfont, process_post, process_pre, process_track, render_synth, write_output,
@@ -47,6 +48,9 @@ class AudioEngine:
         self._drum_send = np.zeros(Ly.MAX_BLOCK)
         self._drum_ev = np.zeros((64, 2), dtype=np.int64)
         self.start_notes = []           # avisos do último start (taxa ajustada, entrada desligada)
+        self.recorder = Recorder()      # REC da aba Faders / Pads
+        self.sampler = Sampler()        # gravações tocadas pelos pads
+        self.sampler.set_fs(self.fs)
         self._route = channel_routes()
         # RTA da aba aberta: entrada seca e saída só desta trilha (anéis lidos pela UI)
         self.rta_track = None
@@ -182,6 +186,7 @@ class AudioEngine:
         """Recria os buffers de DSP se a taxa mudou; senão só zera o estado."""
         if float(fs) != self.fs:
             self.fs = float(fs)
+            self.sampler.set_fs(self.fs)
             for name in TRACKS:
                 old = self.tracks[name]
                 t = TrackDSP(self.fs)
@@ -227,6 +232,9 @@ class AudioEngine:
     def _render(self, indata, outdata, frames):
         mix = self._mix
         tracks = self.tracks
+        rec = self.recorder
+        if rec.active and rec.source != "out" and indata is not None and rec.source < indata.shape[1]:
+            rec.feed(indata[:frames, rec.source:rec.source + 1])
         if indata is not None:
             n_in = indata.shape[1]
             for name in INPUT_TRACKS:
@@ -282,14 +290,17 @@ class AudioEngine:
         send[:frames] = 0.0
         render_drums(mix, send, frames, ev, nev, d.DV, d.DT, self.fs, drums_g, d.DS)
         self.drumverb.process(send, frames, mix, 0.25 + inst.levels["drumverb"] / 127.0, 0.0)
+        self.sampler.render(mix, frames, drums_g)        # gravações nos pads: volume/mute dos pads
         if t.D[Ly.T_ON] > 0.5:
             self._run_track(t, self._synth_out, 0, frames, mix)
         write_output(mix, frames, outdata, self.out_offset, self.master)
+        if rec.active and rec.source == "out":
+            rec.feed(outdata[:frames, self.out_offset:self.out_offset + 2])
 
     def _glide(self, key, target):
         """Ganho que anda ~35% do caminho por bloco (mute e fader sem estalo, ~13 ms)."""
         g = self._gains.get(key, target)
-        g = target if abs(target - g) < 1e-4 else g + (target - g) * 0.35
+        g = target if abs(target - g) < 1e-3 else g + (target - g) * 0.35
         self._gains[key] = g
         return g
 

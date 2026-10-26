@@ -157,6 +157,23 @@ class PadSoundDialog(QDialog):
         self.tree.setHeaderHidden(True)
         current = inst.pad_sounds[pad_index]
         self._items = []
+        from ..audio.sampler import REC_PREFIX, list_recordings
+        recs = list_recordings()
+        if recs:                                   # gravações do banco (aba Faders / Pads)
+            top = QTreeWidgetItem(["Gravações"])
+            top.setFlags(Qt.ItemIsEnabled)
+            f = top.font(0)
+            f.setBold(True)
+            top.setFont(0, f)
+            self.tree.addTopLevelItem(top)
+            for name in recs:
+                it = QTreeWidgetItem(["● " + name])
+                it.setData(0, Qt.UserRole, REC_PREFIX + name)
+                top.addChild(it)
+                self._items.append(it)
+                if REC_PREFIX + name == current:
+                    self.tree.setCurrentItem(it)
+            top.setExpanded(True)
         for cat in PAD_CATEGORIES:
             top = QTreeWidgetItem([cat])
             top.setFlags(Qt.ItemIsEnabled)
