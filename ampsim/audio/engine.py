@@ -38,6 +38,7 @@ class AudioEngine:
         self._events = deque()
         self._mix = np.zeros((Ly.MAX_BLOCK, 2))
         self._synth_out = np.zeros((Ly.MAX_BLOCK, 1), dtype=np.float32)
+        self._synth_gain = 1.0          # volume da camada que usa o synth (rampa quando muda)
         self._ev = np.zeros((256, 3), dtype=np.int32)
         self.sf_peak = 0.0
         self.out_offset = 0
@@ -240,6 +241,14 @@ class AudioEngine:
                      self.fs)
         t = tracks["pads"]
         inst = self.instruments
+        g0 = self._synth_gain
+        g = inst.synth_layer_gain()
+        if g is None:
+            g = g0
+        if g != 1.0 or g0 != 1.0:
+            buf = self._synth_out[:frames, 0]
+            buf *= g if g == g0 else np.linspace(g0, g, frames, dtype=np.float32)
+        self._synth_gain = g
         sf = inst.sf
         shim = self._shim_send
         shimmer = inst.shimmer_amount()

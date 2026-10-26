@@ -154,3 +154,28 @@ def test_clean_layer_rejects_garbage():
     assert clean_layer("x") is None
     lay = clean_layer({"sound": "Coral", "vol": 999, "oct": -9, "on": "sim", "zone": "rm"})
     assert lay == dict(sound="Coral", vol=127, oct=-2, on=True, zone="all")
+
+
+def test_layer_volume_controls_ampsim_synth(engine):
+    """Timbre "(AmpSim)" numa camada: a barra Volume manda nele; com 0% não sai som."""
+    inst = engine.instruments
+    inst.set_ready("Baixo Pulsante (BPM)")                  # camada 1 = Baixo Pulsante (AmpSim)
+    assert inst.keys["sound1"] == "Baixo Pulsante (AmpSim)"
+
+    def peak(vol):
+        inst.set_layer_volume(1, vol)
+        out = np.zeros((N, 2), np.float32)
+        for _ in range(int(48000 * 1.0 / N)):              # deixa a cauda anterior e a rampa acabarem
+            engine._render(None, out, N)
+        inst.key_on(48, 110)
+        p = 0.0
+        for _ in range(int(48000 * 0.4 / N)):
+            engine._render(None, out, N)
+            p = max(p, float(np.abs(out).max()))
+        inst.key_off(48)
+        return p
+
+    full, half, mute = peak(127), peak(64), peak(0)
+    assert full > 0.02
+    assert mute < 1e-4
+    assert 0.15 < half / full < 0.4                          # mesma curva do CC7: (64/127)² ≈ 0,25

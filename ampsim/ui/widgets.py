@@ -1,10 +1,11 @@
 """Widgets desenhados à mão: knob, medidor de nível, botão LED e teclado de piano."""
 import math
+import os
 import time
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPolygonF, QRadialGradient,
+    QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QPolygonF, QRadialGradient,
 )
 from PySide6.QtWidgets import QAbstractButton, QSizePolicy, QWidget
 
@@ -534,27 +535,61 @@ ART = {
 }
 
 
+# fotos dos timbres (assets/timbres, licenças em CREDITS.md)
+PHOTO_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                         "assets", "timbres")
+PHOTO_BY_CAT = {"Pianos": "piano", "Pianos elétricos": "epiano", "Órgãos": "organ", "Pads e cordas": "pad",
+                "Baixos": "baixo", "Violões e guitarras": "guitarra", "Sinos e outros": "sinos",
+                "Synth AmpSim": "synth", "guitar": "guitarra", "bass": "baixo"}
+_photos = {}
+
+
+def photo_for(cat, name=""):
+    """Nome da foto (sem extensão) que lembra o timbre: pelo nome primeiro, depois pela categoria."""
+    n = name.lower()
+    for word, photo in (("tubos", "tubos"), ("coral", "coral"), ("cordas", "cordas"), ("violão", "violao"),
+                        ("synth lead", "synth")):
+        if word in n:
+            return photo
+    return PHOTO_BY_CAT.get(cat, "pad")
+
+
+def _photo(name):
+    if name not in _photos:
+        pm = QPixmap(os.path.join(PHOTO_DIR, name + ".jpg"))
+        _photos[name] = None if pm.isNull() else pm
+    return _photos[name]
+
+
 class ArtTile(QWidget):
-    """Miniatura decorativa (céu + montanhas) com as cores da categoria do timbre."""
+    """Miniatura do timbre: foto do instrumento (ou, sem a foto, céu + montanhas nas cores da categoria)."""
 
     def __init__(self, size=96, parent=None):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self.palette_key = "Pads e cordas"
+        self.photo = "pad"
 
-    def set_kind(self, key):
-        if key != self.palette_key:
+    def set_kind(self, key, name=""):
+        photo = photo_for(key, name)
+        if key != self.palette_key or photo != self.photo:
             self.palette_key = key
+            self.photo = photo
             self.update()
 
     def paintEvent(self, _):
         qp = QPainter(self)
         qp.setRenderHint(QPainter.Antialiasing)
-        top, light, deep = (QColor(c) for c in ART.get(self.palette_key, ART["Pads e cordas"]))
+        qp.setRenderHint(QPainter.SmoothPixmapTransform)
         r = QRectF(self.rect())
         clip = QPainterPath()
         clip.addRoundedRect(r, 10, 10)
         qp.setClipPath(clip)
+        pm = _photo(self.photo)
+        if pm is not None:
+            qp.drawPixmap(r, pm, QRectF(pm.rect()))
+            return
+        top, light, deep = (QColor(c) for c in ART.get(self.palette_key, ART["Pads e cordas"]))
         sky = QLinearGradient(r.topLeft(), r.bottomLeft())
         sky.setColorAt(0, top)
         sky.setColorAt(0.55, light)

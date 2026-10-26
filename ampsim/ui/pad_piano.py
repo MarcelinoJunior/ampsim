@@ -796,6 +796,9 @@ class PadPianoView(QWidget):
             return
         self.inst.set_layer_volume(self._layer_slot(), v)
         self.layer_vol_lab.setText(f"{round(v / 1.27)}%")
+        dock = getattr(self.win, "dock", None)
+        if dock is not None:
+            dock.refresh_levels()                   # faders de volume da aba Configurações
 
     def _layer_octave(self, i):
         o = i - 2
@@ -1103,7 +1106,7 @@ class PadPianoView(QWidget):
         elif mode == "split":
             sub = f"{k['sound2']} (esq.) | {k['sound1']} (dir.)"
         self.subtitle.setText(sub)
-        self.art.set_kind(s1.cat if s1 else "Pianos")
+        self.art.set_kind(s1.cat if s1 else "Pianos", k["sound1"] or "")
         count = inst.layer_count()
         self.layer = max(1, min(self.layer, count))
         inst.fx_layer = self.layer - 1
@@ -1145,7 +1148,7 @@ class PadPianoView(QWidget):
                                                  "right": "mão direita"}[inst.extra_layers[n - 3]["zone"]]
         self.layer_name.setText(_short(sname or "—", 22))
         self.layer_sub.setText(" · ".join(x for x in ((snd.cat if snd else ""), where) if x))
-        self.layer_art.set_kind(snd.cat if snd else "Pianos")
+        self.layer_art.set_kind(snd.cat if snd else "Pianos", sname or "")
         i = self.layer_sound.findData(sname)
         if i >= 0:
             self.layer_sound.setCurrentIndex(i)

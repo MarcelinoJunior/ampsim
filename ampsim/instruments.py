@@ -803,6 +803,18 @@ class Instruments:
         if self.sf:
             self.sf.cc(CH_LAYERS[n - 1], 7, value)
 
+    def synth_layer_gain(self):
+        """Ganho do synth AmpSim: volume da camada ligada que usa um timbre "(AmpSim)", na mesma
+        curva do CC7 do FluidSynth ((v/127)²). None = nenhuma camada usa o synth (fica o anterior)."""
+        k = self.keys
+        layers = [(k["sound1"], k["vol1"], True), (k["sound2"], k["vol2"], bool(k["sound2"] and k["layer2_on"]))]
+        layers += [(x["sound"], x["vol"], x.get("on", True)) for x in self.extra_layers]
+        for name, vol, on in layers:
+            s = SOUND_BY_NAME.get(name or "")
+            if on and s is not None and s.src == "synth":
+                return (vol / 127.0) ** 2
+        return None
+
     def apply_knob_func(self, func, value):
         lv = self.levels
         pct = round(value / 127 * 100)

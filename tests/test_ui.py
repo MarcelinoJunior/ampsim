@@ -753,3 +753,65 @@ def test_knob_moves_layer_volume_slider(win):
     inst.knob_funcs[2] = "Volume camada 4"      # camada que não existe: nada acontece
     inst.set_knob(2, 90)
     assert len(inst.extra_layers) == 0
+
+
+@needs_sf
+def test_knob_from_midi_thread_moves_volume_slider(win):
+    """O knob chega pela thread do MIDI (como no PSR): a barra Volume acompanha sem chamar nada à mão."""
+    import threading
+    import time
+    pv, inst = win.pad_view, win.inst
+    win.load_from_bank("ready", "Piano + Pad (culto)")
+    inst.mapping["knobs"][1] = [1, 71]
+    inst.knob_funcs[1] = "Volume camada 2"
+    pv.select_layer(2)
+    t = threading.Thread(target=lambda: [inst.handle_midi(0xB1, 71, v) for v in (20, 60, 100, 127)])
+    t.start()
+    t.join()
+    end = time.monotonic() + 2.0
+    while time.monotonic() < end and pv.layer_vol.value() != 127:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert inst.keys["vol2"] == 127
+    assert pv.layer_vol.value() == 127 and pv.ctrl.knob_values[1] == 127
+
+
+@needs_sf
+def test_volume_faders_in_settings(win):
+    """Faders L1-L4, pad contínuo e pads na aba Configurações, ligados ao painel e aos knobs."""
+    d, pv, inst = win.dock, win.pad_view, win.inst
+    win.load_from_bank("ready", "Piano + Pad (culto)")
+    f = {func: (s, val, layer) for func, layer, s, val, _n in d.vol_faders}
+    assert set(f) == {"Volume camada 1", "Volume camada 2", "Volume camada 3", "Volume camada 4",
+                      "Volume pad contínuo", "Volume bateria"}
+    assert not f["Volume camada 3"][0].isEnabled()          # só 2 camadas: L3/L4 esperando o "+"
+    pv.select_layer(1)
+    f["Volume camada 1"][0].setValue(50)
+    assert inst.keys["vol1"] == round(0.5 * 127) and pv.layer_vol.value() == inst.keys["vol1"]
+    pv.layer_vol.setValue(127)                               # barra do painel -> fader acompanha
+    assert f["Volume camada 1"][0].value() == 100
+    f["Volume bateria"][0].setValue(30)
+    assert inst.levels["drums"] == 30
+    inst.add_layer()
+    win.refresh_sounds()
+    assert f["Volume camada 3"][0].isEnabled()
+
+
+def test_every_timbre_has_a_photo(app):
+    """Cada timbre mostra uma foto que lembra o instrumento (arquivo existe e abre)."""
+    import os
+
+    from ampsim.instruments import SOUNDS
+    from ampsim.ui.widgets import PHOTO_DIR, ArtTile, _photo, photo_for
+    for s in SOUNDS:
+        name = photo_for(s.cat, s.name)
+        assert _photo(name) is not None, (s.name, name)
+    assert photo_for("Órgãos", "Órgão de Tubos") == "tubos" and photo_for("Pads e cordas", "Coral") == "coral"
+    assert photo_for("Pianos", "Piano de Cauda") == "piano" and photo_for("Violões e guitarras", "Violão Nylon") == "violao"
+    t = ArtTile(84)
+    t.set_kind("Pianos elétricos", "Rhodes")
+    assert t.photo == "epiano"
+    assert t.grab().toImage().pixelColor(42, 42).isValid()
+    credits = open(os.path.join(os.path.dirname(PHOTO_DIR), "..", "CREDITS.md"), encoding="utf-8").read()
+    for f in os.listdir(PHOTO_DIR):
+        assert f"assets/timbres/{f}" in credits, f"{f} sem crédito no CREDITS.md"

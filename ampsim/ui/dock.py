@@ -22,6 +22,10 @@ from .widgets import Meter, ToggleSwitch
 TABS = (("Pads", "pads"), ("Mixer", "mixer"), ("MIDI / Controlador", "midi"), ("Configurações", "gear"))
 DOCK_H = 196
 VOL_RANGE = next((p.lo, p.hi) for p in TRACK_PARAMS if p.key == "volume")
+# faders de volume da aba Configurações: (rótulo, função de knob, camada ou None)
+VOLUME_FADERS = (("L1", "Volume camada 1", 1), ("L2", "Volume camada 2", 2), ("L3", "Volume camada 3", 3),
+                 ("L4", "Volume camada 4", 4), ("Pad\ncontínuo", "Volume pad contínuo", None),
+                 ("Pads", "Volume bateria", None))
 
 
 def _title(text):
@@ -269,10 +273,65 @@ class BottomDock(QFrame):
             self.win.refresh_sounds()
         self._strip_text()
 
+    def _build_volume_faders(self):
+        """Volumes à mão: camadas L1-L4 das teclas, pad contínuo e sons dos pads."""
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        col.addWidget(_title("Volumes"))
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        self.vol_faders = []
+        for label, func, layer in VOLUME_FADERS:
+            box = QVBoxLayout()
+            box.setSpacing(1)
+            name = QLabel(label)
+            name.setObjectName("small")
+            name.setAlignment(Qt.AlignCenter)
+            name.setFixedHeight(26)
+            s = QSlider(Qt.Vertical)
+            s.setRange(0, 100)
+            s.setFocusPolicy(Qt.NoFocus)
+            s.setMinimumHeight(70)
+            s.setToolTip(func)
+            s.valueChanged.connect(lambda v, f=func: self._fader(f, v))
+            val = QLabel("")
+            val.setObjectName("small")
+            val.setAlignment(Qt.AlignCenter)
+            val.setFixedWidth(46)
+            box.addWidget(name)
+            box.addWidget(s, 1, Qt.AlignHCenter)
+            box.addWidget(val)
+            row.addLayout(box)
+            self.vol_faders.append((func, layer, s, val, name))
+        col.addLayout(row, 1)
+        return col
+
+    def _fader(self, func, v):
+        if self._updating:
+            return
+        set_func(self.engine, func, v)
+        for f, _layer, _s, val, _n in self.vol_faders:
+            if f == func:
+                val.setText(f"{v}%")
+        self.win.pad_view.refresh_values()          # a barra Volume do painel da direita acompanha
+        self.refresh_levels()
+
+    def _sync_faders(self):
+        count = self.inst.layer_count()
+        for func, layer, s, val, name in self.vol_faders:
+            ok = layer is None or layer <= count
+            s.setEnabled(ok)
+            name.setEnabled(ok)
+            v = round(func_value(self.engine, func)) if ok else 0
+            s.setValue(v)
+            val.setText(f"{v}%" if ok else "—")
+            s.setToolTip(func if ok else f"{func}: adicione a camada {layer} no painel da direita (+)")
+
     def refresh_levels(self):
-        """Só as barras do Mixer (um knob do controlador mexeu em algum volume)."""
+        """Só as barras de volume (Mixer e Configurações): um knob ou fader mexeu em algum volume."""
         self._updating = True
         try:
+            self._sync_faders()
             for (kind, arg), s, _val, _m in self.strips:
                 if kind == "func":
                     _, lo, hi, _ = FUNC_RANGES[arg]
@@ -475,6 +534,8 @@ class BottomDock(QFrame):
         col.addStretch(1)
         lay.addLayout(col, 1)
         lay.addWidget(_vsep())
+        lay.addLayout(self._build_volume_faders())
+        lay.addWidget(_vsep())
 
         col = QVBoxLayout()
         col.setSpacing(6)
@@ -569,6 +630,7 @@ class BottomDock(QFrame):
                 else:
                     _, lo, hi, _ = FUNC_RANGES[arg]
                     s.setValue(round((func_value(self.engine, arg) - lo) / (hi - lo) * 100))
+            self._sync_faders()
             for i, c in enumerate(self.padb_combos):
                 c.setCurrentText(inst.pad_keys[i])
             for i, c in enumerate(self.knob_combos):
