@@ -798,23 +798,25 @@ def test_volume_faders_in_settings(win):
 
 
 def test_every_timbre_has_a_photo(app):
-    """Cada timbre mostra uma foto que lembra o instrumento (arquivo existe e abre)."""
+    """Cada timbre tem a própria imagem (arquivo existe, abre, não se repete) e crédito no CREDITS.md."""
     import os
 
     from ampsim.instruments import SOUNDS
-    from ampsim.ui.widgets import PHOTO_DIR, ArtTile, _photo, photo_for
-    for s in SOUNDS:
-        name = photo_for(s.cat, s.name)
-        assert _photo(name) is not None, (s.name, name)
-    assert photo_for("Órgãos", "Órgão de Tubos") == "tubos" and photo_for("Pads e cordas", "Coral") == "coral"
-    assert photo_for("Pianos", "Piano de Cauda") == "piano" and photo_for("Violões e guitarras", "Violão Nylon") == "violao"
+    from ampsim.ui.widgets import PHOTO_BY_NAME, PHOTO_DIR, ArtTile, _photo, photo_for
+    names = [photo_for(s.cat, s.name) for s in SOUNDS]
+    assert len(set(names)) == len(SOUNDS), "dois timbres com a mesma foto"
+    for s, name in zip(SOUNDS, names):
+        assert s.name in PHOTO_BY_NAME and _photo(name) is not None, (s.name, name)
     t = ArtTile(84)
     t.set_kind("Pianos elétricos", "Rhodes")
-    assert t.photo == "epiano"
-    assert t.grab().toImage().pixelColor(42, 42).isValid()
+    assert t.photo == "rhodes"
+    assert photo_for("Pianos", "Timbre novo") == "piano-cauda"
     credits = open(os.path.join(os.path.dirname(PHOTO_DIR), "..", "CREDITS.md"), encoding="utf-8").read()
-    for f in os.listdir(PHOTO_DIR):
-        assert f"assets/timbres/{f}" in credits, f"{f} sem crédito no CREDITS.md"
+    files = sorted(os.listdir(PHOTO_DIR))
+    assert len(files) == len(SOUNDS)
+    for f in files:
+        if not f.startswith("synth-"):                 # synth-*: arte gerada pelo próprio AmpSim
+            assert f"assets/timbres/{f}" in credits, f"{f} sem crédito no CREDITS.md"
 
 
 @needs_sf
@@ -847,6 +849,6 @@ def test_big_photo_follows_selected_layer(win):
     pv = win.pad_view
     win.load_from_bank("ready", "Piano de Concerto")             # piano + cordas lentas
     pv.select_layer(1)
-    assert pv.art.photo == "piano"
+    assert pv.art.photo == "piano-cauda"
     pv.select_layer(2)
-    assert pv.art.photo == "cordas" and pv.layer_art.photo == "cordas"
+    assert pv.art.photo == "cordas-lentas" and pv.layer_art.photo == "cordas-lentas"

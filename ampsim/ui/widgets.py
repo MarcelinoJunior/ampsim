@@ -538,20 +538,42 @@ ART = {
 # fotos dos timbres (assets/timbres, licenças em CREDITS.md)
 PHOTO_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                          "assets", "timbres")
-PHOTO_BY_CAT = {"Pianos": "piano", "Pianos elétricos": "epiano", "Órgãos": "organ", "Pads e cordas": "pad",
-                "Baixos": "baixo", "Violões e guitarras": "guitarra", "Sinos e outros": "sinos",
-                "Synth AmpSim": "synth", "guitar": "guitarra", "bass": "baixo"}
+# uma imagem por timbre (fotos do Wikimedia Commons; as "synth-*" são geradas por tools/gerar_artes_synth.py)
+PHOTO_BY_NAME = {
+    "Piano de Cauda": "piano-cauda", "Piano Brilhante": "piano-brilhante", "Piano Elétrico (CP)": "piano-cp",
+    "Piano Honky-tonk": "honky-tonk", "Rhodes": "rhodes", "Rhodes com Chorus": "rhodes-chorus",
+    "Piano FM (DX)": "piano-fm", "Piano FM com Chorus": "piano-fm-chorus", "Clavinet": "clavinet",
+    "Órgão Hammond": "orgao-hammond", "Órgão Percussivo": "orgao-percussivo", "Órgão Rock": "orgao-rock",
+    "Órgão de Tubos": "orgao-tubos", "Órgão de Tubos 2": "orgao-tubos-2",
+    "Pad Quente": "pad-quente", "Pad Halo": "pad-halo", "Pad Polysynth": "pad-polysynth",
+    "Pad Atmosfera": "pad-atmosfera", "Pad Vozes": "pad-vozes", "Pad Cristal": "pad-cristal",
+    "Pad Sweep": "pad-sweep", "Pad Vidro": "pad-vidro", "Pad Chuva de Gelo": "pad-chuva-gelo", "Coral": "coral",
+    "Cordas Lentas": "cordas-lentas", "Cordas": "cordas", "Cordas Synth": "cordas-synth",
+    "Pad Orquestra": "pad-orquestra",
+    "Baixo Finger": "baixo-finger", "Baixo Palheta": "baixo-palheta", "Baixo Fretless": "baixo-fretless",
+    "Baixo Acústico": "baixo-acustico", "Baixo Synth": "baixo-synth", "Baixo Synth 101": "baixo-101",
+    "Baixo FM": "baixo-fm",
+    "Violão Nylon": "violao-nylon", "Violão Aço": "violao-aco", "Violão 12 Cordas": "violao-12",
+    "Guitarra Limpa": "guitarra-limpa", "Guitarra com Chorus": "guitarra-chorus", "Guitarra Jazz": "guitarra-jazz",
+    "Guitarra Overdrive": "guitarra-overdrive", "Guitarra Distorcida": "guitarra-distorcida",
+    "Celesta": "celesta", "Sinos": "sinos-tubulares", "Caixinha de Música": "caixinha", "Vibrafone": "vibrafone",
+    "Marimba": "marimba", "Kalimba": "kalimba", "Synth Lead": "synth-lead",
+    "Baixo Pulsante (AmpSim)": "synth-baixo-pulsante", "Pad Quente (AmpSim)": "synth-pad-quente",
+    "Pad Escuro (AmpSim)": "synth-pad-escuro", "Cordas (AmpSim)": "synth-cordas",
+    "Saw Brilhante (AmpSim)": "synth-saw-brilhante", "Órgão (AmpSim)": "synth-orgao",
+    "Sino Suave (AmpSim)": "synth-sino-suave",
+}
+# timbre sem foto própria (ex.: um novo): a da categoria
+PHOTO_BY_CAT = {"Pianos": "piano-cauda", "Pianos elétricos": "rhodes", "Órgãos": "orgao-hammond",
+                "Pads e cordas": "pad-atmosfera", "Baixos": "baixo-finger", "Violões e guitarras": "guitarra-chorus",
+                "Sinos e outros": "vibrafone", "Synth AmpSim": "synth-saw-brilhante", "guitar": "guitarra-chorus",
+                "bass": "baixo-finger"}
 _photos = {}
 
 
 def photo_for(cat, name=""):
-    """Nome da foto (sem extensão) que lembra o timbre: pelo nome primeiro, depois pela categoria."""
-    n = name.lower()
-    for word, photo in (("tubos", "tubos"), ("coral", "coral"), ("cordas", "cordas"), ("violão", "violao"),
-                        ("synth lead", "synth")):
-        if word in n:
-            return photo
-    return PHOTO_BY_CAT.get(cat, "pad")
+    """Nome da foto (sem extensão) do timbre; sem foto própria, a da categoria."""
+    return PHOTO_BY_NAME.get(name) or PHOTO_BY_CAT.get(cat, "pad-atmosfera")
 
 
 def _photo(name):
