@@ -179,3 +179,53 @@ def test_layer_volume_controls_ampsim_synth(engine):
     assert full > 0.02
     assert mute < 1e-4
     assert 0.15 < half / full < 0.4                          # mesma curva do CC7: (64/127)² ≈ 0,25
+
+
+
+@needs_sf
+def test_every_continuous_pad_sustains(engine):
+    """Pad contínuo não pode sumir sozinho: todos os timbres ainda soam (e não baixinho) depois de 12 s."""
+    from ampsim.instruments import CONT_PAD_SOUNDS
+    inst = engine.instruments
+    out = np.zeros((256, 2), np.float32)
+    weak = []
+    for name in CONT_PAD_SOUNDS:
+        inst.set_cont_sound(name)
+        inst.start_cont_pad("C")
+        late = 0.0
+        for b in range(int(48000 * 12 / 256)):
+            engine._render(None, out, 256)
+            if b % 6 == 0:
+                inst.tick(1 / 30)
+            if b > 48000 * 9 / 256:
+                late = max(late, float(np.abs(out).max()))
+        inst.stop_cont_pad(immediate=True)
+        for _ in range(int(48000 * 3 / 256)):
+            engine._render(None, out, 256)
+        if late < 0.04:
+            weak.append((name, round(late, 3)))
+    assert not weak, f"pads que somem ou ficam baixos: {weak}"
+
+
+def test_mute_silences_layer_and_comes_back(engine):
+    """Mute da camada: sem som (inclusive timbre AmpSim), volume guardado; desmutar volta igual."""
+    inst = engine.instruments
+    inst.set_ready("Baixo Pulsante (BPM)")
+
+    def peak():
+        out = np.zeros((N, 2), np.float32)
+        for _ in range(int(48000 * 1.0 / N)):
+            engine._render(None, out, N)
+        inst.key_on(48, 110)
+        p = 0.0
+        for _ in range(int(48000 * 0.4 / N)):
+            engine._render(None, out, N)
+            p = max(p, float(np.abs(out).max()))
+        inst.key_off(48)
+        return p
+
+    loud = peak()
+    inst.set_mute("Volume camada 1", True)
+    assert peak() < 1e-4 and inst.keys["vol1"] > 0
+    inst.set_mute("Volume camada 1", False)
+    assert abs(peak() - loud) < 0.3 * loud

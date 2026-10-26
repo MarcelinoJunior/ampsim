@@ -815,3 +815,38 @@ def test_every_timbre_has_a_photo(app):
     credits = open(os.path.join(os.path.dirname(PHOTO_DIR), "..", "CREDITS.md"), encoding="utf-8").read()
     for f in os.listdir(PHOTO_DIR):
         assert f"assets/timbres/{f}" in credits, f"{f} sem crédito no CREDITS.md"
+
+
+@needs_sf
+def test_emergency_mute_on_faders(win):
+    """Mute de emergência: silencia sem mexer no fader e fica bem sinalizado (botão, fader e painel)."""
+    d, pv, inst = win.dock, win.pad_view, win.inst
+    win.load_from_bank("ready", "Piano + Pad (culto)")
+    pv.select_layer(1)
+    f = {func: (s, val, name) for func, layer, s, val, name in d.vol_faders}
+    s, val, name = f["Volume camada 1"]
+    before = s.value()
+    b = d.mute_buttons["Volume camada 1"]
+    b.click()
+    assert inst.layer_muted(1) and s.value() == before                # o fader fica onde estava
+    assert b.text() == "MUDO" and val.text() == "SEM SOM" and pv.layer_vol_lab.text() == "MUDO"
+    inst.set_layer_volume(1, 100)                                      # mexer no volume não tira o mute
+    assert inst.layer_muted(1)
+    b.click()
+    assert not inst.layer_muted(1) and b.text() == "M" and val.text().endswith("%")
+    d.mute_buttons["Volume bateria"].click()
+    d.mute_buttons["Volume pad contínuo"].click()
+    assert inst.drums_gain() == 0.0 and inst.pad_gain() == 0.0
+    assert f["Volume bateria"][1].text() == "SEM SOM"
+    d.mute_buttons["Volume bateria"].click()
+    assert inst.drums_gain() > 0.0
+
+
+@needs_sf
+def test_big_photo_follows_selected_layer(win):
+    pv = win.pad_view
+    win.load_from_bank("ready", "Piano de Concerto")             # piano + cordas lentas
+    pv.select_layer(1)
+    assert pv.art.photo == "piano"
+    pv.select_layer(2)
+    assert pv.art.photo == "cordas" and pv.layer_art.photo == "cordas"

@@ -15,7 +15,7 @@ from ..instruments import (
     PAD_COUNT, PAD_SOUNDS, READY, READY_GROUPS, SOUND_BY_NAME, SOUNDS, note_name,
 )
 from ..dsp.keysfx import ROT_MULTS, rotation_hz
-from ..instruments import CH_LAYERS, LAYER_ZONES, MAX_LAYERS
+from ..instruments import LAYER_ZONES, MAX_LAYERS
 from .controller import MODELS, TRADEMARKS, ControllerWidget
 from .funcs import func_param, func_value, set_func
 from .icons import icon
@@ -601,7 +601,7 @@ class PadPianoView(QWidget):
         self.layer_vol.valueChanged.connect(self._layer_volume)
         row.addWidget(self.layer_vol, 1)
         self.layer_vol_lab = _label("", "small")
-        self.layer_vol_lab.setFixedWidth(32)
+        self.layer_vol_lab.setFixedWidth(40)
         row.addWidget(self.layer_vol_lab)
         lay.addLayout(row)
         row = QHBoxLayout()
@@ -795,10 +795,22 @@ class PadPianoView(QWidget):
         if self._updating:
             return
         self.inst.set_layer_volume(self._layer_slot(), v)
-        self.layer_vol_lab.setText(f"{round(v / 1.27)}%")
+        self._layer_vol_text()
         dock = getattr(self.win, "dock", None)
         if dock is not None:
             dock.refresh_levels()                   # faders de volume da aba Configurações
+
+    def _layer_vol_text(self):
+        """% do volume, ou MUDO em vermelho quando o mute de emergência da camada está ligado."""
+        n = self._layer_slot()
+        if self.inst.layer_muted(n):
+            self.layer_vol_lab.setText("MUDO")
+            self.layer_vol_lab.setStyleSheet(f"color: {C['red']}; font-weight: 800;")
+            self.layer_vol_lab.setToolTip("Mute de emergência ligado (aba Configurações → Volumes)")
+        else:
+            self.layer_vol_lab.setText(f"{round(self.layer_vol.value() / 1.27)}%")
+            self.layer_vol_lab.setStyleSheet("")
+            self.layer_vol_lab.setToolTip("")
 
     def _layer_octave(self, i):
         o = i - 2
@@ -1087,7 +1099,7 @@ class PadPianoView(QWidget):
             vol = inst.layer_volume(self._layer_slot())       # um knob pode ter mexido no volume
             if vol is not None and vol != self.layer_vol.value():
                 self.layer_vol.setValue(int(vol))
-                self.layer_vol_lab.setText(f"{round(vol / 1.27)}%")
+            self._layer_vol_text()
         finally:
             self._updating = False
         self._rot_rate_text()
@@ -1098,7 +1110,6 @@ class PadPianoView(QWidget):
         inst = self.inst
         k = inst.keys
         mode = key_mode(k)
-        s1 = SOUND_BY_NAME.get(k["sound1"])
         self.title.setText(_short(self.user_preset or inst.ready or "Timbre personalizado", 34))
         sub = k["sound1"]
         if mode == "layer":
@@ -1106,7 +1117,6 @@ class PadPianoView(QWidget):
         elif mode == "split":
             sub = f"{k['sound2']} (esq.) | {k['sound1']} (dir.)"
         self.subtitle.setText(sub)
-        self.art.set_kind(s1.cat if s1 else "Pianos", k["sound1"] or "")
         count = inst.layer_count()
         self.layer = max(1, min(self.layer, count))
         inst.fx_layer = self.layer - 1
@@ -1149,6 +1159,7 @@ class PadPianoView(QWidget):
         self.layer_name.setText(_short(sname or "—", 22))
         self.layer_sub.setText(" · ".join(x for x in ((snd.cat if snd else ""), where) if x))
         self.layer_art.set_kind(snd.cat if snd else "Pianos", sname or "")
+        self.art.set_kind(snd.cat if snd else "Pianos", sname or "")   # foto da camada selecionada
         i = self.layer_sound.findData(sname)
         if i >= 0:
             self.layer_sound.setCurrentIndex(i)
@@ -1160,7 +1171,7 @@ class PadPianoView(QWidget):
         try:
             self.layer_on.setChecked(bool(on))
             self.layer_vol.setValue(int(vol))
-            self.layer_vol_lab.setText(f"{round(vol / 1.27)}%")
+            self._layer_vol_text()
             self.layer_oct.setCurrentIndex(max(0, min(4, octv + 2)))
             if n >= 3:
                 self.layer_zone.setCurrentIndex(LAYER_ZONES.index(inst.extra_layers[n - 3]["zone"]))

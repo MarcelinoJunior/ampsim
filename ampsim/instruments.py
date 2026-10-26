@@ -237,6 +237,11 @@ DEFAULT_PAD_KEYS = ["C", "D", "E", "F", "G", "A", "B", "Parar"]
 CONT_PAD_SOUNDS = ("Pad Halo", "Pad Atmosfera", "Pad Quente", "Pad Vozes", "Pad Cristal", "Pad Sweep",
                    "Pad Vidro", "Coral", "Cordas Lentas", "Pad Orquestra")
 
+# no pad contínuo o som precisa se sustentar: o "Crystal" do GM é um sino que morre em ~4 s e o
+# "Bowed Glass" cai quase a zero depois do ataque. Aqui: (banco, programa, CC7, velocidade)
+CONT_PAD_PROGRAMS = {"Pad Cristal": (0, 102, 100, 90),       # Echo Drops: brilhante e sustentado
+                     "Pad Vidro": (0, 93, 127, 120)}         # Metal Pad, com o volume compensado
+
 PAD_COUNT = 8
 KNOB_COUNT = 8
 BUTTONS = ("PLAY", "STOP", "REC", "BT", "ARP", "SC/CH", "KNOB-B", "PAD-B")
@@ -366,6 +371,8 @@ class Instruments:
         self.transpose = 0
         self.sustain = False
         self.free_map = {}                   # função -> ["cc"|"note", canal, número] (atalhos rápidos)
+        # mute de emergência (faders da aba Configurações): guarda o volume, só silencia; não é salvo
+        self.mutes = set()                   # "Volume camada N", "Volume pad contínuo", "Volume bateria"
         self.capture = False                 # diálogo de mapeamento aberto: só monitora
         self.on_monitor = lambda kind, ch, num, val: None
         self.on_control = lambda func, val: None
@@ -475,10 +482,25 @@ class Instruments:
         return self._gain(self.levels["keys"])
 
     def drums_gain(self):
-        return self._gain(self.levels["drums"])
+        return 0.0 if "Volume bateria" in self.mutes else self._gain(self.levels["drums"])
 
     def pad_gain(self):
-        return self._gain(self.levels["pad"])
+        return 0.0 if "Volume pad contínuo" in self.mutes else self._gain(self.levels["pad"])
+
+    def layer_muted(self, n):
+        return f"Volume camada {n}" in self.mutes
+
+    def set_mute(self, func, on):
+        """Mute de emergência de um fader (camada 1-4, pad contínuo ou pads), sem mexer no volume."""
+        if on:
+            self.mutes.add(func)
+        else:
+            self.mutes.discard(func)
+        if func.startswith("Volume camada ") and self.sf:
+            n = int(func[-1])
+            vol = self.layer_volume(n)
+            if vol is not None:
+                self.sf.cc(CH_LAYERS[n - 1], 7, 0 if on else int(vol))
 
     def shimmer_amount(self):
         return self.levels["shimmer"] / 100.0
@@ -495,8 +517,8 @@ class Instruments:
                 self.engine.synth.apply_preset(s.synth_preset)
         self._assign_pad_channels()
         if self.sf:
-            for ch, vol in zip(CH_LAYERS, vols):
-                self.sf.cc(ch, 7, int(vol))
+            for i, (ch, vol) in enumerate(zip(CH_LAYERS, vols)):
+                self.sf.cc(ch, 7, 0 if self.layer_muted(i + 1) else int(vol))
             for ch in CH_LAYERS:
                 self.sf.cc(ch, 91, self.levels["reverb"])
                 self.sf.cc(ch, 93, self.levels["chorus"])
@@ -734,12 +756,14 @@ class Instruments:
         for c, st in self._cp.items():        # o tom anterior sai em fade
             if c != ch:
                 st[1] = 0.0
-        self.sf.program(ch, s.bank, s.prog)
+        bank, prog, vol, vel = CONT_PAD_PROGRAMS.get(self.cont_sound, (s.bank, s.prog, 100, 90))
+        self.sf.program(ch, bank, prog)
+        self.sf.cc(ch, 7, vol)
         self.sf.cc(ch, 11, 0)
         self.sf.cc(ch, 91, int(pe["reverb"]))
         self.sf.cc(ch, 93, int(pe["chorus"]))
         for n in notes:
-            self.sf.noteon(ch, n, 90)
+            self.sf.noteon(ch, n, vel)
         self._cp[ch] = [0.0, 127.0, notes]
         self.cont_key = key
 
@@ -801,7 +825,7 @@ class Instruments:
         else:
             return
         if self.sf:
-            self.sf.cc(CH_LAYERS[n - 1], 7, value)
+            self.sf.cc(CH_LAYERS[n - 1], 7, 0 if self.layer_muted(n) else value)
 
     def synth_layer_gain(self):
         """Ganho do synth AmpSim: volume da camada ligada que usa um timbre "(AmpSim)", na mesma
@@ -809,10 +833,10 @@ class Instruments:
         k = self.keys
         layers = [(k["sound1"], k["vol1"], True), (k["sound2"], k["vol2"], bool(k["sound2"] and k["layer2_on"]))]
         layers += [(x["sound"], x["vol"], x.get("on", True)) for x in self.extra_layers]
-        for name, vol, on in layers:
+        for n, (name, vol, on) in enumerate(layers, start=1):
             s = SOUND_BY_NAME.get(name or "")
             if on and s is not None and s.src == "synth":
-                return (vol / 127.0) ** 2
+                return 0.0 if self.layer_muted(n) else (vol / 127.0) ** 2
         return None
 
     def apply_knob_func(self, func, value):

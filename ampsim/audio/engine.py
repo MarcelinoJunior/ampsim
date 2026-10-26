@@ -39,6 +39,7 @@ class AudioEngine:
         self._mix = np.zeros((Ly.MAX_BLOCK, 2))
         self._synth_out = np.zeros((Ly.MAX_BLOCK, 1), dtype=np.float32)
         self._synth_gain = 1.0          # volume da camada que usa o synth (rampa quando muda)
+        self._gains = {}                # ganhos da bateria e do pad contínuo, mudando aos poucos
         self._ev = np.zeros((256, 3), dtype=np.int32)
         self.sf_peak = 0.0
         self.out_offset = 0
@@ -249,6 +250,8 @@ class AudioEngine:
             buf = self._synth_out[:frames, 0]
             buf *= g if g == g0 else np.linspace(g0, g, frames, dtype=np.float32)
         self._synth_gain = g
+        drums_g = self._glide("drums", inst.drums_gain())
+        pad_g = self._glide("pad", inst.pad_gain())
         sf = inst.sf
         shim = self._shim_send
         shimmer = inst.shimmer_amount()
@@ -257,7 +260,7 @@ class AudioEngine:
             to_chain = t.D[Ly.T_AMP] > 0.5 and t.D[Ly.T_ON] > 0.5
             eq = self.pad_eq
             pk = mix_soundfont(sf.buf, frames, mix, self._synth_out, shim, self._kbs, self._route, to_chain,
-                               inst.keys_gain(), inst.drums_gain(), inst.pad_gain(), shimmer,
+                               inst.keys_gain(), drums_g, pad_g, shimmer,
                                inst.pad_eq["shimmer"] / 100.0, eq.BQ, eq.Z, eq.P)
             if not to_chain:
                 for kfx in self.keys_fx:
@@ -277,11 +280,18 @@ class AudioEngine:
         d = self.drums
         send = self._drum_send
         send[:frames] = 0.0
-        render_drums(mix, send, frames, ev, nev, d.DV, d.DT, self.fs, inst.drums_gain(), d.DS)
+        render_drums(mix, send, frames, ev, nev, d.DV, d.DT, self.fs, drums_g, d.DS)
         self.drumverb.process(send, frames, mix, 0.25 + inst.levels["drumverb"] / 127.0, 0.0)
         if t.D[Ly.T_ON] > 0.5:
             self._run_track(t, self._synth_out, 0, frames, mix)
         write_output(mix, frames, outdata, self.out_offset, self.master)
+
+    def _glide(self, key, target):
+        """Ganho que anda ~35% do caminho por bloco (mute e fader sem estalo, ~13 ms)."""
+        g = self._gains.get(key, target)
+        g = target if abs(target - g) < 1e-4 else g + (target - g) * 0.35
+        self._gains[key] = g
+        return g
 
     def _run_track_rta(self, t, indata, ch, frames, mix):
         """Como _run_track, guardando entrada e saída da trilha para o analisador."""

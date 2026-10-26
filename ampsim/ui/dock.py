@@ -23,6 +23,15 @@ TABS = (("Pads", "pads"), ("Mixer", "mixer"), ("MIDI / Controlador", "midi"), ("
 DOCK_H = 196
 VOL_RANGE = next((p.lo, p.hi) for p in TRACK_PARAMS if p.key == "volume")
 # faders de volume da aba Configurações: (rótulo, função de knob, camada ou None)
+MUTE_ON = (f"QPushButton {{ background: {C['red']}; border: 1px solid #ff8a96; color: white; "
+           "font-weight: 800; font-size: 8pt; border-radius: 5px; padding: 0; }")
+MUTE_OFF = (f"QPushButton {{ background: {C['card']}; border: 1px solid {C['border2']}; color: {C['dim']}; "
+            f"font-weight: 700; font-size: 8pt; border-radius: 5px; padding: 0; }}"
+            f"QPushButton:hover {{ border-color: {C['red']}; color: #ff9aa5; }}")
+SLIDER_MUTED = (f"QSlider::groove:vertical {{ background: #5a1e2a; width: 4px; border-radius: 2px; }}"
+                f"QSlider::handle:vertical {{ background: {C['red']}; border: 2px solid #ff8a96; height: 14px;"
+                " width: 14px; margin: 0 -6px; border-radius: 8px; }"
+                "QSlider::add-page:vertical, QSlider::sub-page:vertical { background: #5a1e2a; }")
 VOLUME_FADERS = (("L1", "Volume camada 1", 1), ("L2", "Volume camada 2", 2), ("L3", "Volume camada 3", 3),
                  ("L4", "Volume camada 4", 4), ("Pad\ncontínuo", "Volume pad contínuo", None),
                  ("Pads", "Volume bateria", None))
@@ -281,6 +290,7 @@ class BottomDock(QFrame):
         row = QHBoxLayout()
         row.setSpacing(4)
         self.vol_faders = []
+        self.mute_buttons = {}
         for label, func, layer in VOLUME_FADERS:
             box = QVBoxLayout()
             box.setSpacing(1)
@@ -291,27 +301,41 @@ class BottomDock(QFrame):
             s = QSlider(Qt.Vertical)
             s.setRange(0, 100)
             s.setFocusPolicy(Qt.NoFocus)
-            s.setMinimumHeight(70)
+            s.setMinimumHeight(48)
             s.setToolTip(func)
             s.valueChanged.connect(lambda v, f=func: self._fader(f, v))
             val = QLabel("")
             val.setObjectName("small")
             val.setAlignment(Qt.AlignCenter)
-            val.setFixedWidth(46)
+            val.setFixedWidth(50)
+            mute = QPushButton("M")
+            mute.setCheckable(True)
+            mute.setFocusPolicy(Qt.NoFocus)
+            mute.setFixedSize(46, 20)
+            mute.setStyleSheet(MUTE_OFF)
+            mute.setToolTip("Mute de emergência: silencia sem mexer no fader (clique de novo para voltar)")
+            mute.clicked.connect(lambda on, f=func: self._mute(f, on))
             box.addWidget(name)
             box.addWidget(s, 1, Qt.AlignHCenter)
             box.addWidget(val)
+            box.addWidget(mute, 0, Qt.AlignHCenter)
             row.addLayout(box)
             self.vol_faders.append((func, layer, s, val, name))
+            self.mute_buttons[func] = mute
         col.addLayout(row, 1)
         return col
+
+    def _mute(self, func, on):
+        self.inst.set_mute(func, on)
+        self.refresh_levels()
+        self.win.pad_view.refresh_values()          # o painel da direita também avisa "MUDO"
 
     def _fader(self, func, v):
         if self._updating:
             return
         set_func(self.engine, func, v)
         for f, _layer, _s, val, _n in self.vol_faders:
-            if f == func:
+            if f == func and f not in self.inst.mutes:
                 val.setText(f"{v}%")
         self.win.pad_view.refresh_values()          # a barra Volume do painel da direita acompanha
         self.refresh_levels()
@@ -324,8 +348,22 @@ class BottomDock(QFrame):
             name.setEnabled(ok)
             v = round(func_value(self.engine, func)) if ok else 0
             s.setValue(v)
-            val.setText(f"{v}%" if ok else "—")
-            s.setToolTip(func if ok else f"{func}: adicione a camada {layer} no painel da direita (+)")
+            muted = func in self.inst.mutes
+            mute = self.mute_buttons[func]
+            mute.setChecked(muted)
+            mute.setText("MUDO" if muted else "M")
+            mute.setStyleSheet(MUTE_ON if muted else MUTE_OFF)
+            s.setStyleSheet(SLIDER_MUTED if muted else "")
+            if muted:                                   # fader lá em cima e sem som: deixa bem claro
+                val.setText("SEM SOM")
+                val.setStyleSheet(f"color: {C['red']}; font-weight: 800;")
+                name.setStyleSheet(f"color: {C['red']}; font-weight: 700;")
+            else:
+                val.setText(f"{v}%" if ok else "—")
+                val.setStyleSheet("")
+                name.setStyleSheet("")
+            s.setToolTip(func + (" — MUDO (mute de emergência ligado)" if muted else "") if ok
+                         else f"{func}: adicione a camada {layer} no painel da direita (+)")
 
     def refresh_levels(self):
         """Só as barras de volume (Mixer e Configurações): um knob ou fader mexeu em algum volume."""
