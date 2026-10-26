@@ -5,7 +5,7 @@ Pode ser recolhida (fica só a fileira de abas) para sobrar tela nas abas de gui
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget, QPushButton, QSlider,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget, QMenu, QPushButton, QSlider,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -16,6 +16,7 @@ from ..instruments import (
 from ..dsp.params import TRACK_PARAMS
 from .funcs import FUNC_RANGES, func_value, set_func
 from .icons import icon
+from .midi_learn import key_text
 from .recorder import pad_label
 from .theme import C
 from .widgets import Meter, ToggleSwitch
@@ -484,9 +485,13 @@ class BottomDock(QFrame):
                 elif label == "Knobs":
                     c.setToolTip(f"Knob {i + 1}")
                     c.activated.connect(lambda idx, i=i: self._knob_func(i, KNOB_FUNCS[idx]))
+                    c.setContextMenuPolicy(Qt.CustomContextMenu)
+                    c.customContextMenuRequested.connect(lambda _, i=i, c=c: self._physical_menu("knob", i, c))
                 else:
                     c.setToolTip(f"Botão {BUTTONS[i]}")
                     c.activated.connect(lambda idx, i=i: self._button_func(i, BUTTON_FUNCS[idx]))
+                    c.setContextMenuPolicy(Qt.CustomContextMenu)
+                    c.customContextMenuRequested.connect(lambda _, i=i, c=c: self._physical_menu("button", i, c))
                 store.append(c)
                 g.addWidget(c, r, i + 1)
         lay.addLayout(g, 1)
@@ -539,6 +544,19 @@ class BottomDock(QFrame):
         self.inst.button_funcs[i] = f
         self.win.refresh_sounds()
 
+    def _physical_menu(self, target, i, widget):
+        """Botão direito num knob/botão da aba MIDI (vale também para os que o desenho não mostra)."""
+        pv = self.win.pad_view
+        cur = pv.physical_key(target, i)
+        name = f"Knob {i + 1}" if target == "knob" else f"Botão {BUTTONS[i]}"
+        m = QMenu(self)
+        m.addSection(f"{name}: {key_text(cur)}")
+        m.addAction("Mapear controle físico…", lambda: pv.map_physical(target, i))
+        a = m.addAction("Remover mapeamento", lambda: pv.assign_physical(target, i, []))
+        a.setEnabled(bool(cur))
+        m.exec(widget.mapToGlobal(widget.rect().bottomLeft()))
+        self.refresh()
+
     def on_learn(self):
         steps = self.inst.learn_steps
         learning = bool(steps)
@@ -549,9 +567,10 @@ class BottomDock(QFrame):
         m = self.inst.mapping
         knobs = sum(1 for k in m["knobs"] if k)
         btns = sum(1 for b in m["buttons"] if b)
+        pads = sum(1 for k in m["pads"] + m["pads_b"] if k)
         self.learn_label.setText(self.inst.learning_prompt() or "")
         self.learn_btn.setToolTip("Toque cada pad, gire cada knob e aperte cada botão quando o AmpSim pedir.\n"
-                                  f"Agora: pads a partir da nota {m['pads'][0][1]} · knobs {knobs}/8 · "
+                                  f"Agora: pads {pads}/16 · knobs {knobs}/8 · "
                                   f"botões {btns}/8")
 
     # ------------------------------------------------------------------ Configurações
@@ -691,12 +710,15 @@ class BottomDock(QFrame):
             self.pitch_combo.setCurrentText(inst.pitch_func)
             for i, c in enumerate(self.padb_combos):
                 c.setCurrentText(inst.pad_keys[i])
+            pv = self.win.pad_view
             for i, c in enumerate(self.knob_combos):
                 c.setCurrentText(inst.knob_funcs[i])
-                c.setToolTip(f"Knob {i + 1}: {inst.knob_funcs[i]}")
+                c.setToolTip(f"Knob {i + 1}: {inst.knob_funcs[i]}\nControle físico: "
+                             f"{key_text(pv.physical_key('knob', i))}\nBotão direito: mapear ou remover")
             for i, c in enumerate(self.button_combos):
                 c.setCurrentText(inst.button_funcs[i])
-                c.setToolTip(f"Botão {BUTTONS[i]}: {inst.button_funcs[i]}")
+                c.setToolTip(f"Botão {BUTTONS[i]}: {inst.button_funcs[i]}\nControle físico: "
+                             f"{key_text(pv.physical_key('button', i))}\nBotão direito: mapear ou remover")
             self.use_amp.setChecked(bool(self.engine.tracks["pads"].values["track"].get("use_amp", False)))
             from .pad_piano import SIMPLE, is_simple
             self.device.setCurrentText(SIMPLE if is_simple(inst.device) else inst.device)

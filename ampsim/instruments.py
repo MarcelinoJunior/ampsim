@@ -389,6 +389,7 @@ class Instruments:
         self.drum_events = deque()           # (tipo, velocidade) para a bateria sintetizada
         self._held = {}
         self._btn_on = {}                    # botão (índice) -> instante do último valor > 0
+        self._last_cc = None                 # (canal, nº, valor, instante): filtra a cópia em outro canal
         self.learn_steps = []
         self._learned = set()
         # ganchos da interface (chamados de qualquer thread; a UI os liga a sinais Qt)
@@ -1008,6 +1009,14 @@ class Instruments:
     # ------------------------------------------------------------------ MIDI (thread do winmm)
     def handle_midi(self, status, d1, d2):
         kind, ch = status & 0xF0, status & 0x0F
+        if kind == 0xB0:
+            # o PSR manda cada knob/pedal nos canais das partes Main e Dual, juntos: a 2ª vez é cópia
+            # (sem isso o assistente aprendia um knob físico como dois e o 2º ia para um slot escondido)
+            now = time.monotonic()
+            last = self._last_cc
+            self._last_cc = (ch, d1, d2, now)
+            if last is not None and last[0] != ch and last[1:3] == (d1, d2) and now - last[3] < 0.015:
+                return
         if kind in (0x90, 0xB0) or (kind == 0x80):
             self.on_monitor("cc" if kind == 0xB0 else "note", ch, d1, d2 if kind != 0x80 else 0)
         elif kind in (0xC0, 0xE0):

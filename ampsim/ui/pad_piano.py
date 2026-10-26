@@ -946,18 +946,26 @@ class PadPianoView(QWidget):
             for j, k in enumerate(m["buttons"]):
                 if k == list(key) and not (group == "buttons" and j == i):
                     m["buttons"][j] = None
-            if kind == "cc":
+            if kind == "cc":                     # o mesmo knob físico em qualquer canal (ex.: PSR)
                 for j, k in enumerate(m["knobs"]):
-                    if k == [ch, num] and not (group == "knobs" and j == i):
+                    if k and k[1] == num and not (group == "knobs" and j == i):
                         m["knobs"][j] = None
             for f, k in list(self.inst.free_map.items()):
                 if k == list(key):
                     del self.inst.free_map[f]
             m[group][i] = stored
-        elif group in ("knobs", "buttons"):
+        else:
             m[group][i] = None
         self.inst.on_learn()
         return True
+
+    def clear_pad_mapping(self):
+        """Tira o mapeamento de todos os pads (A e B): ex.: teclas do PSR aprendidas como pads."""
+        m = self.inst.mapping
+        m["pads"] = [None] * PAD_COUNT
+        m["pads_b"] = [None] * PAD_COUNT
+        self.inst.on_learn()
+        self.win.refresh_sounds()
 
     def context_menu(self, kind, i):
         """Menu do botão direito num controle desenhado (separado para dar para testar)."""
@@ -978,6 +986,10 @@ class PadPianoView(QWidget):
             menu.addSection(f"Pad {j + 1}" + (" (banco B)" if bank_b else ""))
             menu.addAction(f"Mapear controle físico…   (atual: {key_text(cur)})",
                            lambda: self.map_physical(target, j))
+            if cur:
+                menu.addAction(f"Remover mapeamento ({key_text(cur)})",
+                               lambda: self.assign_physical(target, j, []))
+            menu.addAction("Remover o mapeamento de todos os pads (A e B)", self.clear_pad_mapping)
             if bank_b:
                 menu.addAction("Tom e timbre do pad contínuo…", lambda: self._cont_menu(j))
             else:
@@ -985,8 +997,11 @@ class PadPianoView(QWidget):
             return menu
         if kind == "knob":
             menu.addSection(f"Knob {i + 1}")
-            menu.addAction(f"Mapear controle físico…   (atual: {key_text(self.physical_key('knob', i))})",
+            cur = self.physical_key("knob", i)
+            menu.addAction(f"Mapear controle físico…   (atual: {key_text(cur)})",
                            lambda: self.map_physical("knob", i))
+            if cur:
+                menu.addAction(f"Remover mapeamento ({key_text(cur)})", lambda: self.assign_physical("knob", i, []))
             menu.addSection("Função")
             for func in KNOB_FUNCS:
                 a = menu.addAction(func)
@@ -995,8 +1010,11 @@ class PadPianoView(QWidget):
                 a.triggered.connect(lambda _, f=func: self.inst.knob_funcs.__setitem__(i, f))
         elif kind == "button":
             menu.addSection(f"Botão {BUTTONS[i]}")
-            menu.addAction(f"Mapear controle físico…   (atual: {key_text(self.physical_key('button', i))})",
+            cur = self.physical_key("button", i)
+            menu.addAction(f"Mapear controle físico…   (atual: {key_text(cur)})",
                            lambda: self.map_physical("button", i))
+            if cur:
+                menu.addAction(f"Remover mapeamento ({key_text(cur)})", lambda: self.assign_physical("button", i, []))
             menu.addSection("Função")
             for func in BUTTON_FUNCS:
                 a = menu.addAction(func)

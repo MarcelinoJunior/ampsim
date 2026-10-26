@@ -1060,3 +1060,54 @@ def test_right_click_pitch_on_drawing_chooses_function(win):
     assert win.inst.pitch_func == PITCH_FUNCS[2]
     win.dock.refresh()
     assert win.dock.pitch_combo.currentText() == PITCH_FUNCS[2]
+
+
+def test_psr_knob_on_two_channels_is_one_knob(win):
+    """PSR: cada knob chega nos canais 1 e 2 juntos; conta como um só (aprendizado e uso)."""
+    inst, pv = win.inst, win.pad_view
+    m = inst.mapping
+    m["knobs"] = [[0, 74], [1, 74], [0, 71], [1, 71], None, None, None, None]     # como ficou no PSR
+    inst.knob_funcs[2], inst.knob_funcs[3] = "Volume pad contínuo", "Reverb"
+    rev = inst.levels["reverb"]
+    inst.handle_midi(0xB0, 71, 30)
+    inst.handle_midi(0xB1, 71, 30)                              # cópia da parte Dual: ignorada
+    assert inst.knob_values[2] == 30 and inst.levels["reverb"] == rev
+    # mapear o KNOB B físico no knob 2 da tela tira o CC 71 dos slots escondidos (os dois canais)
+    pv.assign_physical("knob", 1, ["cc", 0, 71])
+    assert m["knobs"][1] == [0, 71] and m["knobs"][2] is None and m["knobs"][3] is None
+    menu = pv.context_menu("knob", 1)
+    assert any(a.text().startswith("Remover mapeamento") for a in menu.actions())
+    pv.assign_physical("knob", 1, [])
+    assert m["knobs"][1] is None
+    # assistente: girar o knob (que manda nos 2 canais) ocupa um passo só
+    inst.start_learning(("knobs",))
+    for v in (10, 20, 30):
+        inst.handle_midi(0xB0, 74, v)
+        inst.handle_midi(0xB1, 74, v)
+    assert m["knobs"][0] == [0, 74] and inst.learn_steps and inst.learn_steps[0] == ("knobs", 1)
+    inst.stop_learning()
+    win.dock.refresh()
+    assert "CC 74" in win.dock.knob_combos[0].toolTip()
+
+
+def test_keys_learned_as_pads_can_be_removed(win):
+    """Teclas do PSR aprendidas como pads (G# tocando bateria): dá para tirar um ou todos."""
+    inst, pv = win.inst, win.pad_view
+    m = inst.mapping
+    m["pads"][3] = [0, 68]                                       # G#4 virou o pad 4
+    hits = []
+    inst.on_pad = lambda i, v: hits.append(i)
+    inst.handle_midi(0x90, 68, 100)
+    assert hits == [3]
+    menu = pv.context_menu("pad", 3)
+    texts = [a.text() for a in menu.actions()]
+    assert any(t.startswith("Remover mapeamento") for t in texts)
+    pv.assign_physical("pad", 3, [])
+    assert m["pads"][3] is None
+    hits.clear()
+    inst.handle_midi(0x90, 68, 100)                              # agora é tecla de novo
+    assert hits == []
+    inst.handle_midi(0x80, 68, 0)
+    m["pads_b"][0] = [0, 76]
+    pv.clear_pad_mapping()
+    assert all(k is None for k in m["pads"] + m["pads_b"])
