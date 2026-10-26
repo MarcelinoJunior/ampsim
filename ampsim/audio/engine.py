@@ -121,7 +121,15 @@ class AudioEngine:
         saída não tiverem taxa em comum, abre só a saída. Os avisos ficam em start_notes."""
         import dataclasses
 
+        from .hotplug import is_keyboard_audio
+
         self.start_notes = []
+        if in_dev is not None and is_keyboard_audio(in_dev.name):
+            self.start_notes.append(
+                f"A entrada “{in_dev.name}” é o som do próprio teclado, que devolve pelo USB o que o "
+                "AmpSim toca: usada como guitarra/baixo, ela faz microfonia. O áudio abriu só com a saída.")
+            config = dataclasses.replace(config, input_device="")
+            in_dev = None
         excl = config.hostapi == "Windows WASAPI" and config.wasapi_exclusive
         in_index = in_dev.index if in_dev is not None else None
         both = dev.supported_rates(out_dev.index, in_index, exclusive=excl)

@@ -54,6 +54,24 @@ def instrument_of(name):
     return None
 
 
+# a entrada USB destes aparelhos é o som do próprio teclado; com "Audio Loop Back" (o PSR vem com
+# ele ligado) volta também o que o PC manda. Como guitarra/baixo isso vira microfonia.
+KEYBOARD_AUDIO = ("psr-e", "digital keyboard", "m-vave", "smk-25", "smk25", "vr-730", "vr730", "v-combo")
+
+
+def is_keyboard_audio(name, wdm_names=None):
+    """A entrada `name` é o áudio de um teclado (e não de uma guitarra/microfone)?"""
+    low = name.lower()
+    if any(w in low for w in KEYBOARD_AUDIO):
+        return True
+    if "yamaha steinberg usb" in low:
+        # o mesmo driver serve o PSR e as interfaces Steinberg UR: decide por quem está conectado
+        names = [n.lower() for n in (audio_outputs() if wdm_names is None else wdm_names)]
+        return (any(w in n for n in names for w in KEYBOARD_AUDIO)
+                and not any("steinberg" in n for n in names))
+    return False
+
+
 def find_instrument_output(names, prefer=None):
     """(modelo, nome) da saída de um instrumento conhecido; dá preferência ao modelo `prefer`."""
     found = [(instrument_of(n), n) for n in names]

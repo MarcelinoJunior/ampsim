@@ -72,8 +72,32 @@ def test_dialog_only_offers_supported_rates_and_prefers_vendor_asio(monkeypatch)
     e.config = dev.AudioConfig(hostapi="Windows WASAPI", output_device=OUT.name, samplerate=48000)
     dlg = AudioDialog(e, suggest_output="Line (2- Digital Keyboard)")
     assert dlg.api.currentText() == "ASIO" and dlg.out.currentText().startswith("Yamaha")
+    assert dlg.inp.currentData() is None                     # a entrada do teclado não vira guitarra
     dlg._update_rates()
     assert dlg.sr.currentData() == 44100
     model = dlg.sr.model()
     assert not model.item(dlg.sr.findData(48000)).isEnabled()
     dlg.reject()
+
+
+def test_keyboard_input_is_never_guitar(engine, monkeypatch):
+    """PSR pelo ASIO: a entrada é o som do teclado (com Audio Loop Back, o próprio AmpSim): microfonia."""
+    from ampsim.audio import hotplug
+    psr = SimpleNamespace(index=27, name="Yamaha Steinberg USB ASIO", max_in=2, max_out=2)
+    monkeypatch.setattr(dev, "supported_rates", fake_rates({27: [44100]}))
+    monkeypatch.setattr(hotplug, "audio_outputs", lambda: ["Line (2- Digital Keyboard)", "Realtek"])
+    cfg = dev.AudioConfig(hostapi="ASIO", output_device=psr.name, input_device=psr.name, samplerate=44100)
+    new, in_dev = engine._fit_rate(cfg, psr, psr)
+    assert in_dev is None and new.input_device == ""
+    assert any("microfonia" in n for n in engine.start_notes)
+
+
+def test_keyboard_audio_names():
+    from ampsim.audio.hotplug import is_keyboard_audio
+    assert is_keyboard_audio("Line (2- Digital Keyboard)")
+    assert is_keyboard_audio("Microfone (M-VAVE SMK-25 Audio)")
+    assert not is_keyboard_audio("Microfone (Iriun Webcam)")
+    # o driver da Yamaha também é o das interfaces UR (guitarra de verdade)
+    assert is_keyboard_audio("Yamaha Steinberg USB ASIO", ["Line (2- Digital Keyboard)"])
+    assert not is_keyboard_audio("Yamaha Steinberg USB ASIO", ["Line (Steinberg UR22C)"])
+    assert not is_keyboard_audio("Yamaha Steinberg USB ASIO", ["Line (Steinberg UR22C)", "Digital Keyboard"])

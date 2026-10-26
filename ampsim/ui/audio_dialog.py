@@ -39,6 +39,11 @@ class AudioDialog(QDialog):
         form.addRow("Saída:", self.out)
         self.inp = QComboBox()
         form.addRow("Entrada:", self.inp)
+        self.in_hint = QLabel()
+        self.in_hint.setObjectName("warn")
+        self.in_hint.setWordWrap(True)
+        self.in_hint.setVisible(False)
+        form.addRow("", self.in_hint)
         self.out_pair = QComboBox()
         form.addRow("Canais de saída:", self.out_pair)
         self.g_ch = QComboBox()
@@ -124,6 +129,7 @@ class AudioDialog(QDialog):
                     self.api.setCurrentText("ASIO")
                     self._api_changed("ASIO")
                     self._select(self.out, d.name)
+                    self.inp.setCurrentIndex(0)             # a entrada do teclado não é guitarra
                     self.hint.setText(f"{model}: usando o driver ASIO do fabricante ({d.name}), o de menor "
                                       "atraso. Confira e clique em “Aplicar e iniciar”.")
                     self._update_rates()
@@ -139,6 +145,8 @@ class AudioDialog(QDialog):
                 self._api_changed(api)
                 self._select(self.out, name)
                 self._select(self.inp, keep_in)
+                if self._keyboard_input(self.inp.currentData()):
+                    self.inp.setCurrentIndex(0)
                 self.hint.setText(f"Aparelho conectado: {name}. Confira e clique em “Aplicar e iniciar”.")
                 return name
         return None
@@ -164,7 +172,7 @@ class AudioDialog(QDialog):
         self.inp.addItem(NO_INPUT, None)
         for d in dev.devices(api, "input"):
             self.inp.addItem(d.name, d)
-        if self.inp.count() > 1:
+        if self.inp.count() > 1 and not self._keyboard_input(self.inp.itemData(1)):
             self.inp.setCurrentIndex(1)
         self.inp.blockSignals(False)
         self._out_changed()
@@ -183,9 +191,22 @@ class AudioDialog(QDialog):
             self.out_pair.addItem(f"{off + 1}-{off + 2}" if off + 1 < n else f"{off + 1}", off)
         self._select(self.out_pair, cur, data=True)
 
+    @staticmethod
+    def _keyboard_input(d):
+        from ..audio.hotplug import is_keyboard_audio
+        return d is not None and is_keyboard_audio(d.name)
+
     def _in_changed(self, *_):
         self._after_change()
         d = self.inp.currentData()
+        kb = self._keyboard_input(d)
+        self.in_hint.setVisible(kb or (d is not None and "asio4all" in d.name.lower()))
+        if kb:
+            self.in_hint.setText("Esta entrada é o som do próprio teclado: como guitarra/baixo faz microfonia. "
+                                 "O AmpSim vai abrir sem ela. Escolha “nenhuma”.")
+        elif self.in_hint.isVisible():
+            self.in_hint.setText("ASIO4ALL: se a entrada ligada no painel dele for o teclado, escolha “nenhuma” "
+                                 "aqui (senão o som do teclado volta pela guitarra/baixo e faz microfonia).")
         if dev.is_asio(self.api.currentText()) and d is not None and d.name != self.out.currentText():
             self._select(self.out, d.name)
         n = d.max_in if d else 0
