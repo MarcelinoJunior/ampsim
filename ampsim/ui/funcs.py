@@ -11,7 +11,10 @@ from ..dsp.params import Param
 # função: (rótulo curto, mínimo, máximo, unidade)
 FUNC_RANGES = {
     "Volume teclas": ("Volume", 0, 100, "%"),
+    "Volume camada 1": ("Camada 1", 0, 100, "%"),
     "Volume camada 2": ("Camada 2", 0, 100, "%"),
+    "Volume camada 3": ("Camada 3", 0, 100, "%"),
+    "Volume camada 4": ("Camada 4", 0, 100, "%"),
     "Volume bateria": ("Bateria", 0, 100, "%"),
     "Volume pad contínuo": ("Pad contínuo", 0, 100, "%"),
     "Reverb": ("Reverb", 0, 100, "%"),
@@ -44,11 +47,13 @@ def func_value(engine, func):
               "Brilho": "bright", "Reverb da bateria": "drumverb"}
     if func in pct127:
         return lv[pct127[func]] / 1.27
+    if func.startswith("Volume camada "):
+        return (inst.layer_volume(int(func[-1])) or 0) / 1.27
     return {
         "Shimmer": lv["shimmer"], "Rotação (intensidade)": fx["rot_mix"], "Drive": fx["drive"],
         "Delay (mix)": fx["delay_mix"], "Tempo do delay": fx["delay_ms"], "Repetições do delay": fx["delay_fb"],
         "Sensibilidade ao toque": lv["touch"], "Volume teclas": lv["keys"],
-        "Volume camada 2": inst.keys["vol2"] / 1.27, "Volume bateria": lv["drums"],
+        "Volume bateria": lv["drums"],
         "Volume pad contínuo": lv["pad"], "Master": master_pct(engine.master),
     }.get(func, 0.0)
 

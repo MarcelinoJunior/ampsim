@@ -730,3 +730,26 @@ def test_assign_physical_rules(win):
     assert pv.assign_physical("pad_b", 0, ["note", 9, 40])      # banco B pode repetir nota do A
     assert m["pads_b"][0] == [9, 40]
     assert pv.physical_key("knob", 1) == ["cc", 0, 21]
+
+
+@needs_sf
+def test_knob_moves_layer_volume_slider(win):
+    """Knob do controlador mapeado para "Volume camada N": a barra Volume do painel acompanha."""
+    from ampsim.instruments import KNOB_FUNCS
+    assert {"Volume camada 1", "Volume camada 3", "Volume camada 4"} <= set(KNOB_FUNCS)
+    pv, inst = win.pad_view, win.inst
+    win.load_from_bank("ready", "Piano + Pad (culto)")
+    inst.knob_funcs[0], inst.knob_funcs[1] = "Volume camada 1", "Volume camada 2"
+    pv.select_layer(2)
+    inst.set_knob(1, 127)
+    QApplication.processEvents()
+    win._sync_knob_values()                     # o que o timer de ~30 ms faz
+    assert inst.keys["vol2"] == 127 and pv.layer_vol.value() == 127 and pv.layer_vol_lab.text() == "100%"
+    inst.set_knob(0, 0)                         # camada 1 não está no painel: a barra da 2 não muda
+    win._sync_knob_values()
+    assert inst.keys["vol1"] == 0 and pv.layer_vol.value() == 127
+    pv.select_layer(1)
+    assert pv.layer_vol.value() == 0
+    inst.knob_funcs[2] = "Volume camada 4"      # camada que não existe: nada acontece
+    inst.set_knob(2, 90)
+    assert len(inst.extra_layers) == 0

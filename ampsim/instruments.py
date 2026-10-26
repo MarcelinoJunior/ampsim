@@ -241,7 +241,8 @@ PAD_COUNT = 8
 KNOB_COUNT = 8
 BUTTONS = ("PLAY", "STOP", "REC", "BT", "ARP", "SC/CH", "KNOB-B", "PAD-B")
 
-KNOB_FUNCS = ("Nenhuma", "Volume teclas", "Volume camada 2", "Volume bateria", "Volume pad contínuo",
+KNOB_FUNCS = ("Nenhuma", "Volume teclas", "Volume camada 1", "Volume camada 2", "Volume camada 3",
+              "Volume camada 4", "Volume bateria", "Volume pad contínuo",
               "Reverb", "Shimmer", "Reverb da bateria", "Chorus", "Rotação (intensidade)", "Drive",
               "Delay (mix)", "Tempo do delay", "Repetições do delay", "Brilho", "Release", "Ataque",
               "Sensibilidade ao toque", "BPM", "Master")
@@ -278,7 +279,8 @@ def channel_routes():
     from .audio.soundfont import N_GROUPS
 
     r = np.full(N_GROUPS, -1, dtype=np.int64)
-    dests = [(ch, i) for i, ch in enumerate(CH_LAYERS)] + [(ch, ROUTE_PAD) for ch in CH_CPAD]         + [(ch, ROUTE_DRUMS) for ch in PAD_CHANNELS]
+    dests = ([(ch, i) for i, ch in enumerate(CH_LAYERS)] + [(ch, ROUTE_PAD) for ch in CH_CPAD]
+             + [(ch, ROUTE_DRUMS) for ch in PAD_CHANNELS])
     for ch, dest in dests:
         g = ch % N_GROUPS
         assert r[g] in (-1, dest), f"canal {ch} cai na saída de outro destino"
@@ -782,6 +784,25 @@ class Instruments:
         self.apply_knob_func(self.knob_funcs[i], value)
         self.on_knob(i, value)
 
+    def layer_volume(self, n):
+        """Volume (0-127) da camada n (1-4); None se a camada não existe."""
+        if n <= 2:
+            return self.keys["vol1" if n == 1 else "vol2"]
+        lay = self.extra_layers[n - 3] if n - 3 < len(self.extra_layers) else None
+        return lay["vol"] if lay else None
+
+    def set_layer_volume(self, n, value):
+        """Volume da camada n (1-4), pelo painel ou por um knob; camada que não existe: nada."""
+        value = int(max(0, min(127, value)))
+        if n <= 2:
+            self.keys["vol1" if n == 1 else "vol2"] = value
+        elif n - 3 < len(self.extra_layers):
+            self.extra_layers[n - 3]["vol"] = value
+        else:
+            return
+        if self.sf:
+            self.sf.cc(CH_LAYERS[n - 1], 7, value)
+
     def apply_knob_func(self, func, value):
         lv = self.levels
         pct = round(value / 127 * 100)
@@ -793,10 +814,8 @@ class Instruments:
             lv["pad"] = pct
         elif func == "Shimmer":
             lv["shimmer"] = pct
-        elif func == "Volume camada 2":
-            self.keys["vol2"] = value
-            if self.sf:
-                self.sf.cc(CH_KEYS2, 7, value)
+        elif func.startswith("Volume camada "):
+            self.set_layer_volume(int(func[-1]), value)
         elif func == "Master":
             self.engine.master = (value / 127) ** 2 * 2.0
         elif func in ("Rotação (intensidade)", "Drive", "Delay (mix)", "Tempo do delay",

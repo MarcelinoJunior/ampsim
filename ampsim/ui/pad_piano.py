@@ -794,13 +794,7 @@ class PadPianoView(QWidget):
     def _layer_volume(self, v):
         if self._updating:
             return
-        n = self._layer_slot()
-        if n >= 3:
-            self.inst.extra_layers[n - 3]["vol"] = v
-        else:
-            self.inst.keys["vol1" if n == 1 else "vol2"] = v
-        if self.inst.sf:
-            self.inst.sf.cc(CH_LAYERS[n - 1], 7, v)
+        self.inst.set_layer_volume(self._layer_slot(), v)
         self.layer_vol_lab.setText(f"{round(v / 1.27)}%")
 
     def _layer_octave(self, i):
@@ -1087,6 +1081,10 @@ class PadPianoView(QWidget):
             self.touch.setValue(int(inst.levels["touch"]))
             self.action_buttons["Sustain (segurar)"].setChecked(inst.sustain)
             self.bpm.set_value(inst.bpm)
+            vol = inst.layer_volume(self._layer_slot())       # um knob pode ter mexido no volume
+            if vol is not None and vol != self.layer_vol.value():
+                self.layer_vol.setValue(int(vol))
+                self.layer_vol_lab.setText(f"{round(vol / 1.27)}%")
         finally:
             self._updating = False
         self._rot_rate_text()

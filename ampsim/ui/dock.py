@@ -269,6 +269,18 @@ class BottomDock(QFrame):
             self.win.refresh_sounds()
         self._strip_text()
 
+    def refresh_levels(self):
+        """Só as barras do Mixer (um knob do controlador mexeu em algum volume)."""
+        self._updating = True
+        try:
+            for (kind, arg), s, _val, _m in self.strips:
+                if kind == "func":
+                    _, lo, hi, _ = FUNC_RANGES[arg]
+                    s.setValue(round((func_value(self.engine, arg) - lo) / (hi - lo) * 100))
+        finally:
+            self._updating = False
+        self._strip_text()
+
     def _strip_text(self):
         for (kind, arg), s, val, _m in self.strips:
             if kind == "track":

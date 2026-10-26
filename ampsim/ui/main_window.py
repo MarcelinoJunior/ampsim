@@ -120,6 +120,12 @@ class MainWindow(QMainWindow):
         br.pad.connect(lambda i, v: self.pad_view.ctrl.flash_pad(i))
         br.key.connect(self._show_key)
         br.knob.connect(lambda i, v: self.pad_view.ctrl.set_knob(i, v))
+        # o knob mexe em volumes/efeitos: painel lateral e Mixer acompanham (no máximo ~30x/s)
+        self._knob_sync = QTimer(self)
+        self._knob_sync.setSingleShot(True)
+        self._knob_sync.setInterval(33)
+        self._knob_sync.timeout.connect(self._sync_knob_values)
+        br.knob.connect(lambda *_: self._knob_sync.isActive() or self._knob_sync.start())
         br.changed.connect(self.refresh_sounds)
         br.learn.connect(self._on_learn)
         inst = self.inst
@@ -410,6 +416,10 @@ class MainWindow(QMainWindow):
     def _on_learn(self):
         self.dock.on_learn()
         self.pad_view.refresh()
+
+    def _sync_knob_values(self):
+        self.pad_view.refresh_values()
+        self.dock.refresh_levels()
 
     def _midi_activity(self, kind, ch, num, val):
         """Toda mensagem do teclado: monitor + pitch/modulação mexendo no desenho."""
