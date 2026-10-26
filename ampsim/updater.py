@@ -1,6 +1,9 @@
 """Atualização automática a partir do GitHub (MarcelinoJunior/ampsim).
 
-Dois jeitos de instalação:
+Três jeitos de instalação:
+- instalado pelo AmpSim-Setup.exe (programa "congelado"): procura nas Releases do GitHub um
+  instalador mais novo, baixa, confere o SHA-256 e, no "Reiniciar", roda o instalador em silêncio
+  (ele fecha o AmpSim, atualiza e abre de novo);
 - clonado com git: `git fetch` + `git merge --ff-only`, com o login do GitHub que o git já usa
   (funciona com o repositório privado); nunca sobrescreve mudanças locais: se a cópia tiver
   commits que o GitHub não tem, não mexe em nada;
@@ -32,12 +35,16 @@ ROOT = Path(__file__).resolve().parent.parent
 VERSION_FILE = "versao.json"
 KEEP = {".venv", "third_party", ".git", VERSION_FILE}      # nunca são substituídos
 MAX_ZIP = 60 * 1024 * 1024
+RELEASES_URL = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
+SETUP_PREFIX = "AmpSim-Setup-"
+MAX_SETUP = 1024 * 1024 * 1024
+PENDING = {"installer": None}         # instalador baixado esperando o "Reiniciar para atualizar"
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0  # git/pip sem abrir console
 
 
 @dataclass
 class UpdateInfo:
-    mode: str = "zip"                 # "git" ou "zip"
+    mode: str = "zip"                 # "git", "zip" ou "exe" (instalado pelo AmpSim-Setup.exe)
     local: str = ""                   # commit instalado ("" = desconhecido)
     remote: str = ""                  # commit mais novo no GitHub
     message: str = ""
@@ -46,6 +53,7 @@ class UpdateInfo:
     reason: str = ""                  # por que não dá para atualizar (ex.: mudanças locais)
     notes: list = field(default_factory=list)
     version: str = ""                 # número da versão nova (ampsim/version.py no GitHub)
+    asset: dict = None                # modo exe: instalador da Release (url, tamanho, sha256)
 
     def label(self):
         return f"{self.version} ({self.remote[:7]})" if self.version else self.remote[:7]
@@ -64,7 +72,42 @@ def _git(root, *args, timeout=60):
 
 
 def install_mode(root=ROOT):
+    if getattr(sys, "frozen", False):
+        return "exe"
     return "git" if (Path(root) / ".git").exists() and shutil.which("git") else "zip"
+
+
+def version_key(v):
+    """"1.0.0-beta" -> (1, 0, 0, 0); "1.0.0" -> (1, 0, 0, 1): a estável vem depois da beta."""
+    import re
+    m = re.match(r"v?(\d+)\.(\d+)\.(\d+)(.*)", v or "")
+    if not m:
+        return (0, 0, 0, 0)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), 0 if m.group(4) else 1)
+
+
+def local_version():
+    from .version import CHANNEL, VERSION
+    return VERSION + (f"-{CHANNEL}" if CHANNEL else "")
+
+
+def latest_installer(fetch=None):
+    """O AmpSim-Setup-<versão>.exe mais novo das Releases (ou None)."""
+    data = json.loads((fetch or (lambda: _http_get(RELEASES_URL, 8, 4_000_000)))())
+    best = None
+    for rel in data if isinstance(data, list) else []:
+        if rel.get("draft"):
+            continue
+        for a in rel.get("assets", []):
+            name = a.get("name", "")
+            if name.startswith(SETUP_PREFIX) and name.endswith(".exe"):
+                ver = name[len(SETUP_PREFIX):-4]
+                if best is None or version_key(ver) > version_key(best["version"]):
+                    digest = a.get("digest") or ""
+                    best = dict(version=ver, url=a.get("browser_download_url", ""), size=a.get("size", 0),
+                                sha256=digest.split(":", 1)[1] if digest.startswith("sha256:") else "",
+                                name=rel.get("name") or rel.get("tag_name", ""), date=rel.get("published_at", ""))
+    return best
 
 
 def _http_get(url, timeout, limit=None):
@@ -106,6 +149,14 @@ def check(root=ROOT, remote=remote_commit):
     """Compara o instalado com o GitHub. Não altera nada."""
     root = Path(root)
     info = UpdateInfo(mode=install_mode(root), local=local_commit(root))
+    if info.mode == "exe":
+        info.local = local_version()
+        best = latest_installer()
+        if best and version_key(best["version"]) > version_key(info.local):
+            info.available = True
+            info.remote = info.version = best["version"]
+            info.message, info.date, info.asset = best["name"], best["date"], best
+        return info
     if info.mode == "git":
         try:
             _git(root, "fetch", "--quiet", "origin", BRANCH, timeout=60)
@@ -173,6 +224,8 @@ def apply(info, root=ROOT, download=None):
     """Baixa e instala a versão `info.remote`. -> lista de avisos (vazia = tudo certo)."""
     root = Path(root)
     notes = []
+    if info.mode == "exe":
+        return [_download_installer(info.asset, download)]
     req_before = _requirements_hash(root)
     if info.mode == "git":
         _git(root, "merge", "--ff-only", f"origin/{BRANCH}", timeout=120)
@@ -192,6 +245,18 @@ def apply(info, root=ROOT, download=None):
     return notes
 
 
+def _download_installer(asset, download=None):
+    """Baixa o instalador novo para a pasta temporária e confere o SHA-256. -> aviso para a tela."""
+    import tempfile
+    data = (download or (lambda: _http_get(asset["url"], 120, MAX_SETUP)))()
+    if asset.get("sha256") and hashlib.sha256(data).hexdigest() != asset["sha256"]:
+        raise RuntimeError("o instalador baixado não confere")
+    path = Path(tempfile.gettempdir()) / f"{SETUP_PREFIX}{asset['version']}.exe"
+    path.write_bytes(data)
+    PENDING["installer"] = str(path)
+    return "o instalador termina a atualização ao reiniciar"
+
+
 RAW_VERSION_URL = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/ampsim/version.py"
 
 
@@ -199,6 +264,8 @@ def remote_version(info, root=ROOT):
     """Número da versão que está no GitHub (só para mostrar; falha = vazio)."""
     from .version import parse_version
 
+    if info.mode == "exe":
+        return info.version
     try:
         if info.mode == "git":
             src = _git(Path(root), "show", f"origin/{BRANCH}:ampsim/version.py")
@@ -220,7 +287,12 @@ def check_and_apply(root=ROOT, auto=True, remote=remote_commit, download=None):
 
 
 def restart_command(root=ROOT):
-    """Comando para abrir o AmpSim de novo depois de atualizar."""
+    """Comando para abrir o AmpSim de novo depois de atualizar (exe: roda o instalador em silêncio,
+    que fecha, atualiza e abre o AmpSim de novo)."""
+    if PENDING["installer"]:
+        return [PENDING["installer"], "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"], str(root)
+    if getattr(sys, "frozen", False):
+        return [sys.executable], str(Path(sys.executable).parent)
     exe = sys.executable
     pyw = Path(exe).with_name("pythonw.exe")
     return [str(pyw if pyw.exists() else exe), "-m", "ampsim"], str(root)

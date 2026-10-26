@@ -29,6 +29,7 @@ class PacksDialog(QDialog):
         self.sig.done.connect(self._done)
         self.busy = None
         self._cancel = False
+        self.queue = []                              # (pacote, arquivo já baixado) a instalar em seguida
         lay = QVBoxLayout(self)
         intro = QLabel("Pianos gravados de instrumentos de verdade. Baixe só os que quiser: ficam no seu "
                        "computador e aparecem na lista de timbres (categoria Pianos).")
@@ -138,17 +139,37 @@ class PacksDialog(QDialog):
             bar.setRange(0, 0)
             status.setText("Instalando…")
 
+    def install_many(self, items):
+        """Instala, um de cada vez, os pacotes que o instalador já baixou [(pacote, arquivo)]."""
+        self.queue = list(items)
+        self._next()
+
+    def _next(self):
+        if self.queue and self.busy is None:
+            p, src = self.queue.pop(0)
+            self._source = src
+            self.download(p, source=src)
+
     def _done(self, pid, error):
         self.busy = None
         p = packs.PACK_BY_ID[pid]
+        src = getattr(self, "_source", None)
+        self._source = None
         if error:
             self.refresh()
             status, _, _ = self.rows[pid]
             status.setText("Erro: " + error)
             status.setStyleSheet(f"color: {C['red']};")
+            self._next()
             return
+        if src is not None and src.parent.name in ("_instalar", "_timbres"):
+            try:
+                src.unlink()                         # arquivo baixado pelo instalador: já foi usado
+            except OSError:
+                pass
         if self.inst.sf is not None:
             self.inst.sf.load_font(pid, packs.sf2_path(p))
             self.inst.apply_all()
         self.refresh()
         self.win.refresh_sounds()
+        self._next()

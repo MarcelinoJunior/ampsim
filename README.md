@@ -46,7 +46,28 @@ Todos os timbres usados são **gratuitos e de licença livre**, e o AmpSim é **
 
 ## Instalação (passo a passo)
 
-**Você precisa de:** Windows 10 ou 11, ~1,5 GB livres e internet só na instalação.
+**Você precisa de:** Windows 10 ou 11 (64 bits), ~700 MB livres (mais os pianos que escolher) e
+internet na instalação.
+
+### Jeito fácil: o instalador (recomendado)
+
+1. Abra **https://github.com/MarcelinoJunior/ampsim/releases**, pegue a versão mais nova e baixe o
+   arquivo **`AmpSim-Setup-<versão>.exe`**.
+2. Dê duplo-clique. O Windows pode mostrar “O Windows protegeu o computador” (o instalador não tem
+   certificado pago): clique em **Mais informações → Executar assim mesmo**.
+3. Escolha o que quer junto:
+
+   | Opção | O que é |
+   |---|---|
+   | Pianos gravados | Piano de Armário (44 MB) e Piano de Cauda YDP (52 MB) já vêm marcados; o Salamander (296 MB, o melhor) é opcional. Todos podem ser baixados depois na tela **Timbres adicionais** |
+   | FlexASIO / ASIO4ALL | Drivers ASIO gratuitos, baixados dos sites oficiais. Só para quem não tem driver ASIO da própria placa (Focusrite, Behringer, Yamaha…) |
+
+4. No fim ele prepara o áudio (cerca de 1 minuto, só na instalação) e abre o AmpSim.
+
+Não precisa de Python nem de permissão de administrador: tudo fica em
+`%LOCALAPPDATA%\Programs\AmpSim` e sai pelo **Adicionar ou remover programas** do Windows.
+
+### Pelo código (para quem quer mexer no projeto)
 
 1. Baixe o projeto em **https://github.com/MarcelinoJunior/ampsim** (botão verde *Code →
    Download ZIP*) e extraia numa pasta de **caminho curto**, por exemplo `C:\AmpSim`. Quem usa
@@ -88,6 +109,9 @@ winget install -e --id MichaelTippach.ASIO4ALL
 O AmpSim se atualiza sozinho. Ao abrir, ele confere o GitHub em segundo plano; se houver versão
 nova, baixa e instala sem parar o som. Depois aparece o botão **Reiniciar para atualizar** na
 barra de cima. A sessão é salva e o programa abre de novo já na versão nova.
+
+- **Instalado pelo instalador:** baixa o instalador da versão nova (conferido por SHA-256); o
+  **Reiniciar para atualizar** roda o instalador em silêncio, que atualiza e abre o AmpSim de novo.
 
 - **Baixado em ZIP:** os arquivos do programa são trocados. A pasta `.venv` (bibliotecas) e a
   `third_party` (timbres) ficam como estão.
@@ -231,6 +255,24 @@ botão direito num pad B (ou no botão **EQ…** ao lado do timbre). Dá para:
 Há atalhos prontos como *Sem embolar* e *Atrás da banda*.
 
 **Teclado do PC** também toca: `A W S E D F T G Y H U J K O L P Ç` (Z/X oitava, C/V força).
+
+## Ao vivo: setlist, metrônomo e saúde do áudio
+
+- **Setlist** (topo da lateral esquerda): monte a ordem do culto. **+ Música** guarda o som de
+  agora (timbres, camadas, efeitos, BPM, pad contínuo e pads) com o nome da música; clicar na
+  música carrega tudo de uma vez. Se o pad contínuo estiver tocando, ele vai para o tom da música.
+  Arraste para mudar a ordem; **◀ ▶**, **Ctrl+PgUp / Ctrl+PgDn** ou um botão/pedal do
+  controlador ("Próxima música") trocam de música. Dá para ter vários setlists.
+- **Metrônomo:** botão **CLICK** ao lado do TAP (Ctrl+M; botão direito: volume e compasso). Em
+  **Placa de som e driver → Saída do metrônomo**, mande o click para um par de saídas livre da
+  placa (ex.: 3-4 nos fones da banda): ele não vaza para o PA.
+- **Saúde do áudio:** ao lado da placa, na barra de cima, **● sem falhas** (verde) ou **● N falhas**
+  (amarelo/vermelho) no último minuto; clique para ver o histórico e dicas. Se o cabo USB soltar,
+  o AmpSim avisa "Áudio caiu" e religa sozinho quando a placa voltar.
+- **Pad que segue o acorde** (aba Pads): o tom do pad contínuo acompanha o acorde da mão esquerda
+  (abaixo do ponto de divisão), na hora ou na próxima batida do BPM.
+- **Pianos gravados** (menu ☰ → Timbres adicionais): Piano de Armário, Piano de Cauda YDP e
+  Salamander (Yamaha C5), baixados quando você quiser.
 
 ## Compartilhar cenas e presets (menu Arquivo)
 

@@ -222,3 +222,43 @@ def test_update_reports_the_new_version_number(git_repos):
     _g(dev, "push", "origin", "HEAD:main")
     info = updater.check_and_apply(user, auto=False, remote=None)
     assert info.available and info.version == "2.0.0"
+
+
+def test_exe_mode_finds_and_downloads_newer_installer(monkeypatch, tmp_path):
+    """Instalado pelo AmpSim-Setup.exe: acha o instalador mais novo nas Releases, baixa e confere."""
+    import hashlib
+    import json
+    import sys
+    from ampsim import updater
+    payload = b"MZ instalador de mentira"
+    releases = [
+        {"name": "AmpSim 0.9.21 (estável)", "tag_name": "v0.9.21", "assets": []},
+        {"name": "AmpSim 1.0.1 beta", "tag_name": "v1.0.1-beta", "published_at": "2026-11-01",
+         "assets": [{"name": "AmpSim-Setup-1.0.1-beta.exe", "size": len(payload),
+                     "browser_download_url": "https://exemplo/AmpSim-Setup-1.0.1-beta.exe",
+                     "digest": "sha256:" + hashlib.sha256(payload).hexdigest()}]},
+        {"name": "rascunho", "draft": True,
+         "assets": [{"name": "AmpSim-Setup-9.9.9.exe", "browser_download_url": "x"}]},
+    ]
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updater, "_http_get", lambda url, *a, **k: json.dumps(releases).encode())
+    monkeypatch.setattr(updater, "local_version", lambda: "1.0.0-beta")
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    updater.PENDING["installer"] = None
+    info = updater.check(tmp_path)
+    assert info.mode == "exe" and info.available and info.version == "1.0.1-beta"
+    notes = updater.apply(info, tmp_path, download=lambda: payload)
+    assert notes and updater.PENDING["installer"].endswith("AmpSim-Setup-1.0.1-beta.exe")
+    cmd, _ = updater.restart_command(tmp_path)
+    assert cmd[0] == updater.PENDING["installer"] and "/SILENT" in cmd
+    import pytest
+    with pytest.raises(RuntimeError):                               # arquivo alterado: recusa
+        updater.apply(info, tmp_path, download=lambda: b"outro")
+    monkeypatch.setattr(updater, "local_version", lambda: "1.0.1")  # já está na estável: nada
+    assert not updater.check(tmp_path).available
+    updater.PENDING["installer"] = None
+
+
+def test_version_order():
+    from ampsim.updater import version_key as k
+    assert k("1.0.0") > k("1.0.0-beta") > k("0.9.21") and k("1.0.10") > k("1.0.9")

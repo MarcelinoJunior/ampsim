@@ -355,6 +355,17 @@ class MainWindow(QMainWindow):
             dlg.download(start)
         dlg.exec()
 
+    def install_pending_packs(self):
+        """Pianos que o instalador baixou: instala agora (com a barra de progresso da tela)."""
+        from ..audio import packs
+        items = packs.pending()
+        if not items:
+            return False
+        dlg = PacksDialog(self)
+        dlg.install_many(items)
+        dlg.show()
+        return True
+
     def offer_pack(self, sound_name):
         """Escolheu um timbre de pacote não instalado: toca o piano padrão e oferece baixar."""
         pack = self.inst.pack_missing(sound_name)

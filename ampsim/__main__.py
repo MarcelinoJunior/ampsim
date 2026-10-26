@@ -7,6 +7,11 @@ os.environ.setdefault("SD_ENABLE_ASIO", "1")      # precisa vir antes de importa
 # BLAS (usado pelas capturas NAM) em uma thread só: blocos pequenos não ganham com threads e
 # acordar threads extras dentro do callback causa picos de latência.
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+if getattr(sys, "frozen", False):
+    # instalado pelo AmpSim-Setup.exe: a pasta do programa pode não aceitar gravação; o código
+    # compilado pelo Numba fica no perfil do usuário
+    os.environ.setdefault("NUMBA_CACHE_DIR", os.path.join(
+        os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "AmpSim", "numba-cache"))
 
 
 def _raise_priority():
@@ -60,7 +65,51 @@ def _install_error_log():
     sys.excepthook = hook
 
 
+def selftest(out_path):
+    """AmpSim.exe --selftest arquivo.txt: liga o motor sem janela e sem placa, toca notas, pads e o
+    pad contínuo e grava o resultado (usado para testar o instalador). -> código de saída."""
+    import time
+    lines = []
+    ok = False
+    try:
+        import numpy as np
+
+        from .audio.engine import AudioEngine
+        from .audio.soundfont import available
+        from .dsp.kernels import warmup
+        t0 = time.time()
+        warmup()
+        lines.append(f"warmup: {time.time() - t0:.1f} s")
+        e = AudioEngine()
+        inst = e.instruments
+        lines.append(f"timbres (FluidSynth + GeneralUser): {'sim' if available() and inst.sf else 'NÃO'}")
+        inst.set_ready("Piano + Pad (culto)")
+        out = np.zeros((256, 2), np.float32)
+        peak = 0.0
+        inst.key_on(60, 100)
+        inst.pad_hit(0, 110)
+        inst.start_cont_pad("D")
+        for b in range(int(48000 * 2 / 256)):
+            if b % 6 == 0:
+                inst.tick(1 / 30)
+            e._render(None, out, 256)
+            peak = max(peak, float(np.abs(out).max()))
+        lines.append(f"pico do som: {peak:.3f}")
+        from .ui.widgets import PHOTO_DIR
+        lines.append(f"fotos dos timbres: {len(os.listdir(PHOTO_DIR))}")
+        ok = peak > 0.01 and np.isfinite(out).all() and inst.sf is not None
+    except Exception as exc:  # noqa: BLE001 - o teste relata qualquer erro
+        import traceback
+        lines.append("ERRO: " + "".join(traceback.format_exception(exc)))
+    lines.append("RESULTADO: " + ("OK" if ok else "FALHOU"))
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return 0 if ok else 1
+
+
 def main():
+    if len(sys.argv) >= 3 and sys.argv[1] == "--selftest":
+        sys.exit(selftest(sys.argv[2]))
     _install_error_log()
     # A thread de áudio precisa do GIL a cada callback: trocar de thread mais rápido que o
     # padrão (5 ms) evita que a UI segure o GIL por um buffer inteiro.
@@ -107,6 +156,7 @@ def main():
         lambda s: win.kbd.release_all() if s != Qt.ApplicationActive else None)
     win.show()
     splash.finish(win)
+    win.install_pending_packs()        # pianos que o instalador baixou: instala na 1ª abertura
 
     # objetos criados até aqui nunca morrem: tira-os das varreduras do GC (menos pausas)
     gc.collect()

@@ -45,8 +45,14 @@ falhar, o script baixa das fontes oficiais listadas abaixo.
 | [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS), S. Christian Collins: banco de timbres | Licença própria e livre, inclusive para uso comercial (cópia em `third_party/soundfonts/`) |
 | [Capturas NAM](https://github.com/pelennor2170/NAM_models): coleção da comunidade | GPL-3.0 |
 | [Neural Amp Modeler (plugin)](https://github.com/sdatkinson/NeuralAmpModelerPlugin) | MIT |
-| [ASIO4ALL](https://asio4all.org), Michael Tippach | Freeware |
-| [FlexASIO](https://github.com/dechamps/FlexASIO), Etienne Dechamps | MIT |
+| [ASIO4ALL](https://asio4all.org), Michael Tippach | Freeware. Não vai dentro do AmpSim: o instalador baixa do site oficial, só se a pessoa marcar |
+| [FlexASIO](https://github.com/dechamps/FlexASIO), Etienne Dechamps | MIT (o SDK ASIO é da Steinberg). Não vai dentro do AmpSim: o instalador baixa do GitHub oficial, só se a pessoa marcar |
+
+O **instalador** (`AmpSim-Setup-<versão>.exe`) leva o Python e as bibliotecas da tabela acima
+(PySide6/Qt, NumPy, SciPy, Numba/LLVM, pedalboard, sounddevice/PortAudio), o FluidSynth, o
+GeneralUser GS e as capturas NAM, cada um com a sua licença. É montado com o
+[PyInstaller](https://pyinstaller.org) (GPL com exceção para o programa gerado) e o
+[Inno Setup](https://jrsoftware.org/isinfo.php) (licença própria, livre).
 
 ## Timbres adicionais (pianos, baixados à parte)
 

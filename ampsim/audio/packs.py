@@ -68,6 +68,27 @@ def sf2_path(pack):
     return p if p.exists() else None
 
 
+def pending_dirs():
+    """Onde o instalador deixa os pacotes que baixou: <pasta do AmpSim>/_timbres (programa instalado)
+    ou <timbres>/_instalar."""
+    import sys
+    dirs = [packs_dir() / "_instalar"]
+    if getattr(sys, "frozen", False):
+        dirs.insert(0, Path(sys.executable).parent / "_timbres")
+    return dirs
+
+
+def pending():
+    """Pacotes baixados pelo instalador e ainda não instalados: [(pacote, arquivo)]."""
+    out = []
+    for d in pending_dirs():
+        for p in PACKS:
+            f = d / Path(p.url).name
+            if f.exists() and p.id not in {q.id for q, _ in out}:
+                out.append((p, f))
+    return out
+
+
 def installed():
     return {p.id: sf2_path(p) for p in PACKS if sf2_path(p) is not None}
 

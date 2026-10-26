@@ -1237,3 +1237,33 @@ def test_pad_follow_combo(win):
     assert win.inst.pad_follow == PAD_FOLLOW[1] and "segue o acorde" in win.pad_view.cont_title.text()
     d.follow.activated.emit(0)
     assert win.pad_view.cont_title.text() == "Pad contínuo"
+
+
+def test_pianos_downloaded_by_installer_install_on_first_open(win, monkeypatch, tmp_path):
+    import hashlib
+    import zipfile
+    from ampsim.audio import packs
+    monkeypatch.setenv("AMPSIM_PACKS_DIR", str(tmp_path / "timbres"))
+    pend = tmp_path / "timbres" / "_instalar"
+    pend.mkdir(parents=True)
+    src = pend / "piano-upright.zip"
+    with zipfile.ZipFile(src, "w") as z:
+        z.writestr("UprightPianoKW-20220221.sf2", b"RIFF-falso")
+    real = packs.PACK_BY_ID["piano-upright"]
+    fake = packs.Pack(real.id, real.nome, real.descricao, real.licenca, 1, 1, real.url,
+                      hashlib.sha256(src.read_bytes()).hexdigest(), real.arquivo, real.sound)
+    monkeypatch.setattr(packs, "PACKS", (fake,))
+    monkeypatch.setitem(packs.PACK_BY_ID, fake.id, fake)
+    assert win.install_pending_packs()
+    import time
+    end = time.time() + 10
+    while packs.sf2_path(fake) is None and time.time() < end:
+        QApplication.processEvents()
+        time.sleep(0.02)
+    for _ in range(20):
+        QApplication.processEvents()
+    assert packs.sf2_path(fake) is not None and not src.exists()        # instalado e o arquivo apagado
+    assert not win.install_pending_packs()                                # nada mais pendente
+    for w in QApplication.topLevelWidgets():
+        if w.windowTitle() == "Timbres adicionais":
+            w.close()

@@ -126,3 +126,17 @@ def test_missing_pack_falls_back_to_grand_piano(pdir):
         e._render(None, out, 256)
         peak = max(peak, float(np.abs(out).max()))
     assert peak > 0.01
+
+
+def test_installer_downloads_are_found(pdir, tmp_path, monkeypatch):
+    """Pacote que o instalador deixou em <AmpSim>/_timbres (programa instalado) ou <timbres>/_instalar."""
+    import sys
+    app = tmp_path / "AmpSim"
+    (app / "_timbres").mkdir(parents=True)
+    (app / "_timbres" / "piano-ydp.zip").write_bytes(b"x")
+    (pdir / "_instalar").mkdir(parents=True)
+    (pdir / "_instalar" / "piano-upright.zip").write_bytes(b"x")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(app / "AmpSim.exe"))
+    found = {p.id: f for p, f in packs.pending()}
+    assert set(found) == {"piano-ydp", "piano-upright"} and found["piano-ydp"].parent.name == "_timbres"
