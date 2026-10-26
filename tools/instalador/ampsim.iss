@@ -45,8 +45,9 @@ Name: "asio4all"; Description: "ASIO4ALL 2.22 (baixa do site oficial asio4all.or
 Source: "{#AmpDist}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\AmpSim"; Filename: "{app}\AmpSim.exe"
-Name: "{autodesktop}\AmpSim"; Filename: "{app}\AmpSim.exe"; Tasks: atalho
+; mesma identidade que o AmpSim usa na barra de tarefas: ícone certo na janela e "Fixar" funciona
+Name: "{autoprograms}\AmpSim"; Filename: "{app}\AmpSim.exe"; AppUserModelID: "AmpSim.App"
+Name: "{autodesktop}\AmpSim"; Filename: "{app}\AmpSim.exe"; AppUserModelID: "AmpSim.App"; Tasks: atalho
 
 [Run]
 ; compila o áudio (Numba) agora, para a 1ª abertura não demorar ~1 minuto
