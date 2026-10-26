@@ -1043,3 +1043,20 @@ def test_pitch_function_combo_in_midi_tab(win):
     d.pitch_combo.setCurrentIndex(i)
     d.pitch_combo.activated.emit(i)
     assert win.inst.pitch_func == PITCH_FUNCS[1]
+
+
+def test_right_click_pitch_on_drawing_chooses_function(win):
+    """Botão direito no pitch desenhado (faixa, roda ou alavanca): escolhe a função, como nos knobs."""
+    from ampsim.instruments import PITCH_FUNCS
+    pv = win.pad_view
+    for model in ("M-VAVE SMK-25", "Yamaha PSR-E473", "Roland VR-730"):
+        pv.ctrl.set_model(model)
+        r = pv.ctrl._pitch_rect()
+        assert pv.ctrl._hit(r.center()) == ("pitch", 0), model
+    menu = pv.context_menu("pitch", 0)
+    acts = {a.text(): a for a in menu.actions() if a.text() in PITCH_FUNCS}
+    assert set(acts) == set(PITCH_FUNCS) and acts[PITCH_FUNCS[0]].isChecked()
+    acts[PITCH_FUNCS[2]].trigger()
+    assert win.inst.pitch_func == PITCH_FUNCS[2]
+    win.dock.refresh()
+    assert win.dock.pitch_combo.currentText() == PITCH_FUNCS[2]

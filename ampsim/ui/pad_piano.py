@@ -15,7 +15,7 @@ from ..instruments import (
     PAD_COUNT, PAD_SOUNDS, READY, READY_GROUPS, SOUND_BY_NAME, SOUNDS, note_name,
 )
 from ..dsp.keysfx import ROT_MULTS, rotation_hz
-from ..instruments import DEFAULT_FX, LAYER_ZONES, MAX_LAYERS
+from ..instruments import DEFAULT_FX, LAYER_ZONES, MAX_LAYERS, PITCH_FUNCS
 from .controller import MODELS, TRADEMARKS, ControllerWidget
 from .funcs import func_param, func_value, set_func
 from .icons import icon
@@ -962,6 +962,14 @@ class PadPianoView(QWidget):
     def context_menu(self, kind, i):
         """Menu do botão direito num controle desenhado (separado para dar para testar)."""
         menu = QMenu(self)
+        if kind == "pitch":
+            menu.addSection("Pitch (alavanca/faixa): função")
+            for func in PITCH_FUNCS:
+                a = menu.addAction(func)
+                a.setCheckable(True)
+                a.setChecked(self.inst.pitch_func == func)
+                a.triggered.connect(lambda _, f=func: self.inst.set_pitch_func(f))
+            return menu
         if kind == "pad":
             bank_b = i >= PAD_COUNT
             j = i - PAD_COUNT if bank_b else i

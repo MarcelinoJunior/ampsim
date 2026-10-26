@@ -406,24 +406,33 @@ class BottomDock(QFrame):
         lay.setContentsMargins(4, 0, 4, 0)
         lay.setSpacing(14)
         col = QVBoxLayout()
-        col.setSpacing(6)
-        col.addWidget(_title("Entrada MIDI"))
+        col.setSpacing(5)
         row = QHBoxLayout()
+        row.addWidget(_title("Entrada MIDI"))
         self.midi_combo = _combo()
-        self.midi_combo.setMinimumWidth(220)
+        self.midi_combo.setMinimumWidth(180)
         row.addWidget(self.midi_combo, 1)
         self.rescan = QPushButton()
         self.rescan.setIcon(icon("refresh", C["text"], 15))
         self.rescan.setToolTip("Procurar dispositivos MIDI")
         self.rescan.setFocusPolicy(Qt.NoFocus)
+        self.rescan.setFixedWidth(34)
         row.addWidget(self.rescan)
         col.addLayout(row)
-        self.learn_btn = QPushButton("Mapear meu controlador (assistente)…")
+        row = QHBoxLayout()
+        self.learn_btn = QPushButton("Mapear meu controlador…")
         self.learn_btn.setObjectName("primary")
         self.learn_btn.setFocusPolicy(Qt.NoFocus)
-        self.learn_btn.setToolTip("Toque cada pad, gire cada knob e aperte cada botão quando o AmpSim pedir.")
         self.learn_btn.clicked.connect(lambda: None if self.inst.learn_steps else self.inst.start_learning())
-        col.addWidget(self.learn_btn)
+        row.addWidget(self.learn_btn, 1)
+        self.skip_btn = QPushButton("Pular")
+        self.skip_btn.clicked.connect(self.inst.skip_learning_step)
+        self.stop_btn = QPushButton("Parar")
+        self.stop_btn.clicked.connect(self.inst.stop_learning)
+        for b in (self.skip_btn, self.stop_btn):
+            b.setFocusPolicy(Qt.NoFocus)
+            row.addWidget(b)
+        col.addLayout(row)
         only = QHBoxLayout()
         for text, what, tip in (("Só os knobs", ("knobs",), "Gire cada knob quando pedir (o da tela pisca)"),
                                 ("Só os pads", ("pads", "pads_b"), "Toque cada pad quando pedir (bancos A e B)"),
@@ -434,27 +443,21 @@ class BottomDock(QFrame):
             b.clicked.connect(lambda *_, w=what: None if self.inst.learn_steps else self.inst.start_learning(w))
             only.addWidget(b)
         col.addLayout(only)
+        # última linha: a função do pitch; durante o assistente, o que tocar no controlador
         row = QHBoxLayout()
-        self.skip_btn = QPushButton("Pular")
-        self.skip_btn.clicked.connect(self.inst.skip_learning_step)
-        self.stop_btn = QPushButton("Parar")
-        self.stop_btn.clicked.connect(self.inst.stop_learning)
-        for b in (self.skip_btn, self.stop_btn):
-            b.setFocusPolicy(Qt.NoFocus)
-            row.addWidget(b)
-        row.addSpacing(10)
-        row.addWidget(QLabel("Pitch:"))
+        self.pitch_label = QLabel("Pitch do controlador:")
+        row.addWidget(self.pitch_label)
         self.pitch_combo = _combo(PITCH_FUNCS)
         self.pitch_combo.setToolTip("O que a alavanca/faixa de pitch do controlador faz:\n"
                                     "tom das teclas, velocidade da rotação (até 4× mais rápida ou ¼) ou\n"
-                                    "tempo do delay (o dobro ou a metade). Solta no centro: volta ao normal.")
+                                    "tempo do delay (o dobro ou a metade). Solta no centro: volta ao normal.\n"
+                                    "Também dá para escolher com o botão direito no pitch do desenho.")
         self.pitch_combo.activated.connect(lambda i: self.inst.set_pitch_func(PITCH_FUNCS[i]))
         row.addWidget(self.pitch_combo, 1)
-        col.addLayout(row)
         self.learn_label = QLabel("")
-        self.learn_label.setWordWrap(True)
         self.learn_label.setStyleSheet(f"color: {C['yellow']}; font-weight: 600;")
-        col.addWidget(self.learn_label)
+        row.addWidget(self.learn_label, 1)
+        col.addLayout(row)
         col.addStretch(1)
         lay.addLayout(col)
         lay.addWidget(_vsep())
@@ -474,6 +477,7 @@ class BottomDock(QFrame):
                 c = _combo(choices)
                 c.setMinimumWidth(84)
                 c.setMaximumWidth(150)
+                c.setStyleSheet("QComboBox { font-size: 8.5pt; padding: 2px 3px; }")   # cabe mais do nome
                 if label.startswith("Pads"):
                     c.setToolTip(f"Pad {i + 1} do banco B: tom do pad contínuo")
                     c.activated.connect(lambda idx, i=i: self.inst.set_pad_key(i, PAD_B_CHOICES[idx]))
@@ -502,13 +506,13 @@ class BottomDock(QFrame):
         col.addLayout(head)
         self.monitor = QListWidget()
         self.monitor.setFocusPolicy(Qt.NoFocus)
-        self.monitor.setFixedWidth(270)
+        self.monitor.setFixedWidth(240)
         self.monitor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.monitor.setTextElideMode(Qt.ElideMiddle)
         self.monitor.setStyleSheet("QListWidget { font-size: 8.5pt; } QListWidget::item { padding: 1px 4px; }")
         self.monitor.setToolTip("O que chega do teclado MIDI e o que o AmpSim faz com cada mensagem.\n"
                                 "Se apertar um botão e nada aparecer, ele não manda MIDI comum.")
-        self.monitor.addItem("Mexa no teclado: as mensagens aparecem aqui")
+        self.monitor.addItem("Mexa no teclado: aparece aqui")
         col.addWidget(self.monitor, 1)
         lay.addLayout(col)
         self.midi_log = []
@@ -537,13 +541,18 @@ class BottomDock(QFrame):
 
     def on_learn(self):
         steps = self.inst.learn_steps
-        self.skip_btn.setVisible(bool(steps))
-        self.stop_btn.setVisible(bool(steps))
+        learning = bool(steps)
+        for w in (self.skip_btn, self.stop_btn, self.learn_label):
+            w.setVisible(learning)
+        for w in (self.pitch_label, self.pitch_combo):
+            w.setVisible(not learning)
         m = self.inst.mapping
         knobs = sum(1 for k in m["knobs"] if k)
         btns = sum(1 for b in m["buttons"] if b)
-        self.learn_label.setText(self.inst.learning_prompt() or
-                                 f"Pads: nota {m['pads'][0][1]}… · knobs {knobs}/8 · botões {btns}/8")
+        self.learn_label.setText(self.inst.learning_prompt() or "")
+        self.learn_btn.setToolTip("Toque cada pad, gire cada knob e aperte cada botão quando o AmpSim pedir.\n"
+                                  f"Agora: pads a partir da nota {m['pads'][0][1]} · knobs {knobs}/8 · "
+                                  f"botões {btns}/8")
 
     # ------------------------------------------------------------------ Configurações
     def _build_settings(self):
@@ -684,8 +693,10 @@ class BottomDock(QFrame):
                 c.setCurrentText(inst.pad_keys[i])
             for i, c in enumerate(self.knob_combos):
                 c.setCurrentText(inst.knob_funcs[i])
+                c.setToolTip(f"Knob {i + 1}: {inst.knob_funcs[i]}")
             for i, c in enumerate(self.button_combos):
                 c.setCurrentText(inst.button_funcs[i])
+                c.setToolTip(f"Botão {BUTTONS[i]}: {inst.button_funcs[i]}")
             self.use_amp.setChecked(bool(self.engine.tracks["pads"].values["track"].get("use_amp", False)))
             from .pad_piano import SIMPLE, is_simple
             self.device.setCurrentText(SIMPLE if is_simple(inst.device) else inst.device)

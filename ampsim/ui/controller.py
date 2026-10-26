@@ -204,6 +204,8 @@ class ControllerWidget(QWidget):
         for d, r, _ in m.get("oct", []):
             if r.contains(v):
                 return ("oct", d)
+        if self._pitch_rect().contains(v):
+            return ("pitch", 0)
         keys = self._keys()
         for note, r, white in keys:
             if not white and r.contains(v):
@@ -212,6 +214,15 @@ class ControllerWidget(QWidget):
             if white and r.contains(v):
                 return ("key", note)
         return None
+
+    def _pitch_rect(self):
+        """Onde fica o pitch no desenho: faixa PITCH (SMK), roda (PSR) ou alavanca BENDER (VR)."""
+        style = self.m.get("style", "smk")
+        if style == "smk":
+            return next((r for r, label in self.m.get("strips", []) if label == "PITCH"), _r(0, 0, 0, 0))
+        if style == "psr":
+            return _r(36, 410, 46, 150)
+        return _r(36, 262, 64, 100)
 
     def mousePressEvent(self, e):
         v = self._to_virtual(e.position())
@@ -222,7 +233,7 @@ class ControllerWidget(QWidget):
         if e.button() == Qt.RightButton:
             if kind == "pad":
                 i += PAD_COUNT * self.bank
-            if kind in ("pad", "knob", "button", "key"):
+            if kind in ("pad", "knob", "button", "key", "pitch"):
                 self.contextRequested.emit(kind, i, e.globalPosition().toPoint())
             return
         if kind == "pad":
