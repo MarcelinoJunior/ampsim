@@ -1,8 +1,11 @@
 """Banco de Presets (lateral esquerda): busca e lista de tudo que dá para carregar.
 
-Grupos: timbres do Pad/Piano (prontos e os seus), presets de Guitarra e Baixo (fábrica ★ e os
-seus), amp/efeitos das teclas e os arquivos .ampsim da pasta Documentos\\AmpSim.
+Mostra só o que serve para a aba aberta lá em cima (set_page): Guitarra, Baixo ou Pad/Piano (timbres
+prontos e os seus, amp/efeitos das teclas), mais os arquivos .ampsim da pasta Documentos\\AmpSim
+desse tipo. O botão direito oferece partes do preset (timbre na L1/L2, só o amp, só os efeitos...).
 """
+import json
+
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont, QPalette
 from PySide6.QtWidgets import (
@@ -11,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import storage
-from ..instruments import READY_GROUPS
+from ..instruments import CONT_PAD_SOUNDS, READY, READY_GROUPS
 from ..presets import FACTORY
 from ..sharing import EXTENSION
 from .icons import icon
@@ -30,6 +33,7 @@ class PresetBank(QFrame):
     requestExport = Signal(str, object)
     requestDelete = Signal(str, object)
     requestShareCode = Signal(str, object)
+    requestPart = Signal(str, object, str)      # (tipo, nome, parte): ver _menu
 
     def __init__(self):
         super().__init__()
@@ -81,7 +85,13 @@ class PresetBank(QFrame):
             b.clicked.connect(lambda *_, s=sig: s.emit())
             row.addWidget(b)
         lay.addLayout(row)
+        self.page = "pads"                       # aba aberta lá em cima: "guitar", "bass" ou "pads"
         self.reload()
+
+    def set_page(self, page):
+        if page != self.page:
+            self.page = page
+            self.reload()
 
     # ------------------------------------------------------------------ conteúdo
     @staticmethod
@@ -114,31 +124,37 @@ class PresetBank(QFrame):
         expanded = {self.tree.topLevelItem(i).text(0).strip() for i in range(self.tree.topLevelItemCount())
                     if self.tree.topLevelItem(i).isExpanded()}
         self.tree.clear()
-        inst = self._group("Instrumentos (Pad/Piano)", "keys")
-        mine = storage.list_user_presets("teclas")
-        if mine:
-            g = self._group("Meus timbres", parent=inst)
-            for n in mine:
-                self._leaf(g, n, ("keys_user", n), "music")
-        for group, items in READY_GROUPS:
-            g = self._group(group, parent=inst)
-            for n in items:
-                self._leaf(g, n, ("ready", n), "music")
+        page = self.page
+        if page == "pads":
+            inst = self._group("Instrumentos (Pad/Piano)", "keys")
+            mine = storage.list_user_presets("teclas")
+            if mine:
+                g = self._group("Meus timbres", parent=inst)
+                for n in mine:
+                    self._leaf(g, n, ("keys_user", n), "music")
+            for group, items in READY_GROUPS:
+                g = self._group(group, parent=inst)
+                for n in items:
+                    self._leaf(g, n, ("ready", n), "music")
         for kind, title, ic in TRACK_TITLES:
+            if kind != page:
+                continue
             g = self._group(title, ic)
             for n in FACTORY.get(kind, {}):
                 self._leaf(g, "★ " + n, ("track", (kind, "factory", n)), ic)
             for n in storage.list_user_presets(kind):
                 self._leaf(g, n, ("track", (kind, "user", n)), ic)
-        g = self._group("Amp e efeitos das teclas", "pads")
-        for n in FACTORY.get("pads", {}):
-            self._leaf(g, "★ " + n, ("track", ("pads", "factory", n)), "pads")
-        for n in storage.list_user_presets("pads"):
-            self._leaf(g, n, ("track", ("pads", "user", n)), "pads")
+        if page == "pads":
+            g = self._group("Amp e efeitos das teclas", "pads")
+            for n in FACTORY.get("pads", {}):
+                self._leaf(g, "★ " + n, ("track", ("pads", "factory", n)), "pads")
+            for n in storage.list_user_presets("pads"):
+                self._leaf(g, n, ("track", ("pads", "user", n)), "pads")
         files = self._group("Meus arquivos (.ampsim)", "folder")
         d = storage.SHARE_DIR
         found = sorted(d.glob("*" + EXTENSION)) if d.is_dir() else []
-        for f in found[:200]:
+        found = [f for f in found[:200] if _file_page(f) in (None, page)]
+        for f in found:
             self._leaf(files, f.stem, ("file", str(f)), "file")
         if not found:
             hint = QTreeWidgetItem(["    (salve ou receba arquivos em Documentos\\AmpSim)"])
@@ -197,10 +213,37 @@ class PresetBank(QFrame):
         data = it.data(0, ROLE) if it is not None else None
         if data is None:
             return
-        kind, arg = data
+        m = self.context_menu(*data)
+        m.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def context_menu(self, kind, arg):
+        """Menu do botão direito num preset (separado para dar para testar)."""
         m = QMenu(self)
-        m.addAction(icon("play", C["text"], 14), "Carregar", lambda: self.activated.emit(kind, arg))
+        m.addAction(icon("play", C["text"], 14), "Carregar tudo", lambda: self.activated.emit(kind, arg))
+
+        def part(text, p, enabled=True):
+            a = m.addAction(text, lambda: self.requestPart.emit(kind, arg, p))
+            a.setEnabled(enabled)
+
+        if kind in ("ready", "keys_user"):
+            sound = READY[arg]["sound1"] if kind == "ready" else ""
+            what = f"Timbre “{sound}”" if sound else "Timbre principal"
+            m.addSeparator()
+            part(f"{what} na L1", "l1")
+            part(f"{what} na L2", "l2")
+            part(f"{what} numa camada nova (L3/L4)", "new_layer")
+            part("Só os efeitos (rotação, drive, delay) na camada selecionada", "fx")
+            if sound in CONT_PAD_SOUNDS:
+                part(f"Usar “{sound}” no pad contínuo", "cont")
+        elif kind == "track":
+            name = arg[0]
+            m.addSeparator()
+            part("Só o amplificador e o gabinete", "amp")
+            part("Só os pedais de efeito", "fx")
+            if name in ("guitar", "bass"):
+                part("Carregar no Baixo" if name == "guitar" else "Carregar na Guitarra", "other")
         if kind != "file":
+            m.addSeparator()
             m.addAction(icon("upload", C["text"], 14), "Exportar para arquivo…",
                         lambda: self.requestExport.emit(kind, arg))
             m.addAction(icon("share", C["text"], 14), "Copiar código para compartilhar",
@@ -209,4 +252,17 @@ class PresetBank(QFrame):
         if user:
             m.addSeparator()
             m.addAction(icon("delete", C["text"], 14), "Excluir…", lambda: self.requestDelete.emit(kind, arg))
-        m.exec(self.tree.viewport().mapToGlobal(pos))
+        return m
+
+
+def _file_page(path):
+    """Aba a que um arquivo .ampsim pertence ("guitar", "bass", "pads"); None = cena (vale em todas)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.loads(f.read(200_001))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict) or doc.get("tipo") != "preset":
+        return None
+    trilha = doc.get("trilha")
+    return "pads" if trilha in ("pads", "teclas") else trilha if trilha in ("guitar", "bass") else None

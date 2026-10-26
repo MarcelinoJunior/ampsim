@@ -176,15 +176,16 @@ class KeysFX:
         self.KS[S_DSPD] = HORN_SLOW * DRUM_RATIO
         self.KP[K_ROT_HZ] = HORN_SLOW
 
-    def configure(self, fx, bpm):
-        """fx: dicionário de níveis (0-100) e chaves liga/desliga vindos de Instruments."""
+    def configure(self, fx, bpm, rot_mult=1.0, delay_mult=1.0):
+        """fx: dicionário de níveis (0-100) e chaves liga/desliga vindos de Instruments.
+        rot_mult/delay_mult: alavanca de pitch usada como velocidade da rotação / tempo do delay."""
         KP, fs = self.KP, self.fs
         KP[K_DRV_ON] = 1.0 if fx["drive_on"] else 0.0
         KP[K_DRV] = fx["drive"] / 100.0
         KP[K_ROT_ON] = 1.0 if fx["rot_on"] else 0.0
         KP[K_ROT_FAST] = 1.0 if fx["rot_fast"] else 0.0
         KP[K_ROT_MIX] = fx["rot_mix"] / 100.0
-        KP[K_ROT_HZ] = rotation_hz(fx, bpm)
+        KP[K_ROT_HZ] = min(rotation_hz(fx, bpm) * rot_mult, 12.0)
         KP[K_DL_ON] = 1.0 if fx["delay_on"] else 0.0
         div = fx.get("delay_div", 0)
         if div:                                 # sincronizado ao BPM
@@ -192,7 +193,7 @@ class KeysFX:
             ms = 60000.0 / max(bpm, 30) * beats
         else:
             ms = fx["delay_ms"]
-        KP[K_DL_TIME] = ms / 1000.0 * fs
+        KP[K_DL_TIME] = min(ms * delay_mult, 2000.0) / 1000.0 * fs
         KP[K_DL_FB] = fx["delay_fb"] / 100.0 * 0.9
         KP[K_DL_MIX] = fx["delay_mix"] / 100.0
         KP[K_DL_DAMP] = 1.0 - math.exp(-2.0 * math.pi * 4500.0 / fs)

@@ -223,6 +223,7 @@ def test_bank_file_list_shows_shared_folder(win, monkeypatch, dirs):
     target = storage.SHARE_DIR / "Arquivo recebido.ampsim"
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(target), "")))
     fm.export_preset("guitar")
+    win.tabs.setCurrentIndex(0)                    # preset de guitarra: aparece na aba Guitarra
     win.bank.reload()
     files = [win.bank.tree.topLevelItem(i) for i in range(win.bank.tree.topLevelItemCount())
              if win.bank.tree.topLevelItem(i).text(0).strip().startswith("Meus arquivos")][0]
@@ -245,19 +246,22 @@ def _bank_items(win):
 
 
 def test_bank_search_filters(win):
+    win.tabs.setCurrentIndex(2)
     win.bank.search.setText("gospel")
     visible = [it.text(0) for it in _bank_items(win) if it.data(0, Qt.UserRole) and not it.isHidden()]
     assert visible and all("gospel" in t.lower() for t in visible)
     win.bank.search.setText("")
-    assert sum(1 for it in _bank_items(win) if it.data(0, Qt.UserRole) and not it.isHidden()) > 40
+    assert sum(1 for it in _bank_items(win) if it.data(0, Qt.UserRole) and not it.isHidden()) > 30
 
 
 @needs_sf
 def test_bank_loads_instrument_and_track_presets(win):
+    win.tabs.setCurrentIndex(2)
     item = next(it for it in _bank_items(win) if it.data(0, Qt.UserRole) == ("ready", "Piano + Pad (culto)"))
     win.bank._clicked(item)
     assert win.inst.ready == "Piano + Pad (culto)" and win.tabs.currentIndex() == 2
     assert "Piano + Pad (culto)" in win.pad_view.title.text()
+    win.tabs.setCurrentIndex(1)
     item = next(it for it in _bank_items(win) if (it.data(0, Qt.UserRole) or ("",))[0] == "track"
                 and it.data(0, Qt.UserRole)[1][0] == "bass")
     win.bank._clicked(item)
@@ -937,3 +941,105 @@ def test_pad_eq_drag_points_on_the_curve(win):
     dlg.knobs["high"].setValue(3.0, emit=True)                 # knob -> ponto acompanha
     assert g.values["high"] == 3.0
     dlg.close()
+
+
+
+def test_bank_shows_only_presets_of_the_open_tab(win):
+    def kinds():
+        out = set()
+        for it in _bank_items(win):
+            d = it.data(0, Qt.UserRole)
+            if d:
+                out.add(d[1][0] if d[0] == "track" else d[0])
+        return out
+    win.tabs.setCurrentIndex(0)
+    assert kinds() == {"guitar"}
+    win.tabs.setCurrentIndex(1)
+    assert kinds() == {"bass"}
+    win.tabs.setCurrentIndex(2)
+    assert kinds() >= {"ready", "pads"} and not kinds() & {"guitar", "bass"}
+
+
+@needs_sf
+def test_bank_right_click_parts(win):
+    """Botão direito: timbre na L1/L2/camada nova, só os efeitos; guitarra: só amp, só pedais, no baixo."""
+    from ampsim.instruments import READY
+    b, inst, pv = win.bank, win.inst, win.pad_view
+    win.tabs.setCurrentIndex(2)
+    win.load_from_bank("ready", "Piano de Concerto")
+    texts = [a.text() for a in b.context_menu("ready", "Órgão Gospel (rotação)").actions() if a.text()]
+    assert any("na L1" in t for t in texts) and any("na L2" in t for t in texts)
+    sound = READY["Órgão Gospel (rotação)"]["sound1"]
+    win.load_part("ready", "Órgão Gospel (rotação)", "l2")
+    assert inst.keys["sound2"] == sound and inst.keys["layer2_on"] and pv.layer == 2
+    assert inst.keys["sound1"] == READY["Piano de Concerto"]["sound1"]      # a L1 não mudou
+    win.load_part("ready", "Órgão Gospel (rotação)", "new_layer")
+    assert inst.layer_count() == 3 and inst.extra_layers[0]["sound"] == sound
+    pv.select_layer(1)
+    win.load_part("ready", "Órgão Gospel (rotação)", "fx")
+    fx = READY["Órgão Gospel (rotação)"].get("fx", {})
+    assert all(inst.layer_fx[0][k] == v for k, v in fx.items() if k in inst.layer_fx[0])
+    win.load_part("ready", "Pad Halo Contínuo (nas teclas)", "cont")
+    assert inst.cont_sound == READY["Pad Halo Contínuo (nas teclas)"]["sound1"]
+    # guitarra: só o amp mantém os pedais atuais; "no baixo" carrega na outra trilha
+    win.tabs.setCurrentIndex(0)
+    g = win.engine.tracks["guitar"]
+    g.set_on("delay", True)
+    win.load_part("track", ("guitar", "factory", "Hi-Gain Rítmico"), "amp")
+    assert g.values["delay"]["on"] and g.values["amp"]["on"]
+    win.load_part("track", ("guitar", "factory", "Crunch Clássico"), "fx")
+    assert not g.values["delay"]["on"] and g.values["reverb"]["on"]
+    texts = [a.text() for a in b.context_menu("track", ("guitar", "factory", "Crunch Clássico")).actions()]
+    assert "Carregar no Baixo" in texts
+    win.load_part("track", ("guitar", "factory", "Crunch Clássico"), "other")
+    assert win.tabs.currentIndex() == 1 and win.engine.tracks["bass"].values["reverb"]["on"]
+
+
+def test_shortcuts_mute_all_and_actions(win, monkeypatch):
+    from ampsim.ui.shortcuts import DEFAULTS, ShortcutsDialog, clean_keys, conflicts
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: warned.append(a[2])))
+    e, inst = win.engine, win.inst
+    assert win.shortcuts.keys == DEFAULTS and len(win.shortcuts._items) == len(DEFAULTS)
+    win.activateWindow()
+    QTest.keyClick(win, Qt.Key_Space, Qt.AltModifier)          # Alt+Espaço de verdade
+    QApplication.processEvents()
+    if not e.muted:                                            # sem foco de janela (offscreen): pela ação
+        win.shortcut_action("mute_all")
+    assert e.muted and win.mute_banner.isVisible()
+    win.mute_banner.click()                                    # clicar na faixa volta o som
+    assert not e.muted and not win.mute_banner.isVisible()
+    win.shortcut_action("mute_l1")
+    assert inst.layer_muted(1) and win.dock.mute_buttons["Volume camada 1"].text() == "MUDO"
+    win.shortcut_action("mute_l1")
+    assert not inst.layer_muted(1)
+    win.shortcut_action("tab_bass")
+    assert win.current_kind() == "bass"
+    win.shortcut_action("tab_pads")
+    assert win.current_kind() == "pads"
+    assert conflicts({"a": "Ctrl+R", "b": "Ctrl+R", "c": ""}) == {"Ctrl+R": ["a", "b"]}
+    assert clean_keys({"rec": "Ctrl+Shift+R", "inventada": "X"})["rec"] == "Ctrl+Shift+R"
+    dlg = ShortcutsDialog(win.shortcuts, win)
+    from PySide6.QtGui import QKeySequence
+    dlg.edits["rec"].setKeySequence(QKeySequence("Ctrl+T"))    # igual ao tap: recusa
+    dlg.accept()
+    assert win.shortcuts.keys["rec"] == "Ctrl+R" and "Ctrl+T" in warned[0]
+    dlg.edits["rec"].setKeySequence(QKeySequence("Ctrl+G"))
+    dlg.accept()
+    assert win.shortcuts.keys["rec"] == "Ctrl+G"
+    win.save_state()
+    assert storage.load_state()["ui"]["shortcuts"]["rec"] == "Ctrl+G"
+    dlg = ShortcutsDialog(win.shortcuts, win)
+    dlg.restore()
+    dlg.accept()
+    assert win.shortcuts.keys == DEFAULTS
+
+
+def test_pitch_function_combo_in_midi_tab(win):
+    from ampsim.instruments import PITCH_FUNCS
+    d = win.dock
+    d.show_tab(2)
+    i = d.pitch_combo.findText(PITCH_FUNCS[1])
+    d.pitch_combo.setCurrentIndex(i)
+    d.pitch_combo.activated.emit(i)
+    assert win.inst.pitch_func == PITCH_FUNCS[1]

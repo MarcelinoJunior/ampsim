@@ -6,7 +6,7 @@ from PySide6.QtGui import QIcon, QIntValidator, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
     QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QToolButton, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget,
+    QMessageBox, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..instruments import (
@@ -15,7 +15,7 @@ from ..instruments import (
     PAD_COUNT, PAD_SOUNDS, READY, READY_GROUPS, SOUND_BY_NAME, SOUNDS, note_name,
 )
 from ..dsp.keysfx import ROT_MULTS, rotation_hz
-from ..instruments import LAYER_ZONES, MAX_LAYERS
+from ..instruments import DEFAULT_FX, LAYER_ZONES, MAX_LAYERS
 from .controller import MODELS, TRADEMARKS, ControllerWidget
 from .funcs import func_param, func_value, set_func
 from .icons import icon
@@ -1075,6 +1075,36 @@ class PadPianoView(QWidget):
         self.refresh()
 
     # ------------------------------------------------------------------ presets (barra superior)
+    def send_sound(self, sound, fx, part):
+        """Parte de um preset do banco: timbre na L1, na L2, numa camada nova, só os efeitos na
+        camada selecionada ou o timbre no pad contínuo."""
+        inst = self.inst
+        if part == "l1":
+            inst.set_sound(1, sound)
+            self.select_layer(1)
+        elif part == "l2":
+            inst.set_sound(2, sound)
+            if key_mode(inst.keys) == "single":
+                self.set_key_mode("layer")
+            self.select_layer(2)
+        elif part == "new_layer":
+            n = inst.add_layer(sound)
+            if n is None:
+                QMessageBox.information(self, "Camadas", "Já tem 4 camadas: remova uma para adicionar outra.")
+                return
+            self.select_layer(n)
+        elif part == "fx":
+            n = self._layer_slot()
+            inst.layer_fx[n - 1] = dict(DEFAULT_FX)
+            inst.layer_fx[n - 1].update({k: v for k, v in fx.items() if k in DEFAULT_FX})
+            inst.ready = ""
+            inst.apply_fx()
+            inst.on_change()
+        elif part == "cont":
+            inst.set_cont_sound(sound)
+        self.user_preset = ""
+        self.refresh()
+
     def load_ready(self, name):
         self.user_preset = ""
         self.inst.set_ready(name)

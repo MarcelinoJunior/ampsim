@@ -54,6 +54,10 @@ def _small(text=""):
     return lab
 
 
+# parte "amplificador" de um preset (o resto são os pedais de efeito)
+AMP_PART = ("amp", "nam", "vst", "cab")
+
+
 class _Face(QWidget):
     """Área da fachada do amp: o desenho fica por conta do painel dono."""
 
@@ -787,6 +791,21 @@ class TrackPage(QWidget):
         if self.name == "pads" and "synth" in data:
             self.engine.synth.load_state(data["synth"])
         self.refresh()
+
+    def apply_preset_part(self, data, part):
+        """Só uma parte do preset: "amp" (amplificador, captura, plugin e gabinete) ou "fx" (pedais)."""
+        from ..dsp.track import default_values
+
+        cur = self.track().get_state()
+        vals, dv, pv = cur["values"], default_values(), data.get("values", {})
+        keys = AMP_PART if part == "amp" else [e for e in vals if e not in AMP_PART + ("track",)]
+        for eff in keys:
+            v = dict(dv[eff])
+            v.update(pv.get(eff, {}))
+            vals[eff] = v
+        if part == "amp":
+            cur["ir_path"] = data.get("ir_path")
+        self.apply_preset_data(cur)
 
     def _load_preset(self, _):
         kind, n = self.preset.currentData()

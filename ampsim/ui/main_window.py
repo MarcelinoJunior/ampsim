@@ -8,7 +8,7 @@ import threading
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QMainWindow, QMenu, QMessageBox, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QHBoxLayout, QMainWindow, QMenu, QMessageBox, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from .. import sharing, storage, updater
@@ -17,6 +17,8 @@ from ..audio import devices as dev
 from ..audio.hotplug import DeviceWatcher, audio_outputs, find_instrument_output, instrument_of
 from ..audio.engine import TRACKS
 from ..midi import winmm
+from ..instruments import READY
+from .shortcuts import Shortcuts, ShortcutsDialog
 from ..presets import DEFAULT_PRESET, FACTORY
 from ..sharing import sound_state
 from .audio_dialog import AudioDialog
@@ -55,6 +57,15 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
         self.topbar = TopBar()
         root.addWidget(self.topbar)
+        # mute geral ligado: faixa vermelha bem visível (clique nela também volta o som)
+        self.mute_banner = QPushButton("SEM SOM  ·  mute geral ligado  ·  clique aqui ou Alt+Espaço para voltar")
+        self.mute_banner.setFocusPolicy(Qt.NoFocus)
+        self.mute_banner.setCursor(Qt.PointingHandCursor)
+        self.mute_banner.setStyleSheet(f"QPushButton {{ background: {C['red']}; color: white; border: none; "
+                                       "font-size: 13pt; font-weight: 800; padding: 6px; }")
+        self.mute_banner.clicked.connect(lambda: self.toggle_mute_all())
+        self.mute_banner.setVisible(False)
+        root.addWidget(self.mute_banner)
         body = QVBoxLayout()
         body.setContentsMargins(10, 10, 10, 10)
         body.setSpacing(10)
@@ -101,6 +112,7 @@ class MainWindow(QMainWindow):
         self.bank.requestExport.connect(self._bank_export)
         self.bank.requestShareCode.connect(self._bank_code)
         self.bank.requestDelete.connect(self._bank_delete)
+        self.bank.requestPart.connect(self.load_part)
         self.dock.collapsedChanged.connect(self._dock_collapsed)
         self.dock.rescan.clicked.connect(self._reload_midi)
         self.dock.midi_combo.activated.connect(lambda _: self._open_midi(self.dock.midi_combo.currentText()))
@@ -143,7 +155,9 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._tab_changed)
         self.midi = winmm.MidiInput(inst.handle_midi) if winmm.available else None
 
+        self.shortcuts = Shortcuts(self)
         self._restore_state()
+        self.bank.set_page(self.current_kind())
         self._update_kbd_label()
 
         self.timer = QTimer(self)
@@ -221,7 +235,8 @@ class MainWindow(QMainWindow):
         for a in self.file_menu.actions():
             fm.addAction(a)
         m.addAction(icon("midi", C["text"], 14), "MIDI / Controlador", lambda: self.dock.show_tab(2))
-        m.addAction(icon("mixer", C["text"], 14), "Mixer", lambda: self.dock.show_tab(1))
+        m.addAction(icon("mixer", C["text"], 14), "Faders / Pads", lambda: self.dock.show_tab(1))
+        m.addAction(icon("tap", C["text"], 14), "Teclas de atalho…", self.open_shortcuts)
         m.addAction(icon("stop", C["text"], 14), "Pânico (soltar todas as notas)", self.panic)
         m.addSeparator()
         m.addAction(icon("info", C["text"], 14), "Sobre o AmpSim…", lambda: self.show_about())
@@ -241,6 +256,7 @@ class MainWindow(QMainWindow):
             self.pad_view.refresh()
         else:
             self.pages[name].refresh()
+        self.bank.set_page(name)                    # o banco mostra só presets desta aba
         self._sync_bank()
 
     def _dock_collapsed(self, on):
@@ -292,6 +308,74 @@ class MainWindow(QMainWindow):
                 self.file_menu.apply_doc(sharing.load_file(arg))
             except sharing.ShareError as exc:
                 QMessageBox.warning(self, "Abrir", str(exc))
+        self._sync_bank()
+
+    # ------------------------------------------------------------------ mute geral e atalhos
+    def toggle_mute_all(self, on=None):
+        e = self.engine
+        e.muted = (not e.muted) if on is None else bool(on)
+        self.mute_banner.setVisible(e.muted)
+
+    def open_shortcuts(self):
+        ShortcutsDialog(self.shortcuts, self).exec()
+
+    def shortcut_action(self, action):
+        inst = self.inst
+        mutes = {"mute_l1": "Volume camada 1", "mute_l2": "Volume camada 2", "mute_l3": "Volume camada 3",
+                 "mute_l4": "Volume camada 4", "mute_pad": "Volume pad contínuo", "mute_drums": "Volume bateria"}
+        if action == "mute_all":
+            self.toggle_mute_all()
+        elif action in mutes:
+            f = mutes[action]
+            self.dock._mute(f, f not in inst.mutes)
+        elif action in ("preset_next", "preset_prev"):
+            self.preset_step(1 if action == "preset_next" else -1)
+        elif action.startswith("tab_"):
+            self.tabs.setCurrentIndex(PAGE_ORDER.index(action[4:]))
+        elif action == "panic":
+            self.panic()
+            self.refresh_sounds()
+        elif action == "rec":
+            rec = self.dock.recorder
+            rec.stop() if self.engine.recorder.active else rec.start()
+        elif action == "tap":
+            inst.tap_tempo()
+        elif action == "stop_pad":
+            inst.stop_cont_pad()
+            self.refresh_sounds()
+
+    def load_part(self, kind, arg, part):
+        """Botão direito no banco: só uma parte do preset (timbre numa camada, só amp, só efeitos...)."""
+        if kind in ("ready", "keys_user"):
+            if kind == "ready":
+                cfg = READY[arg]
+                sound, fx = cfg["sound1"], cfg.get("fx", {})
+            else:
+                data = storage.load_user_preset("teclas", arg) or {}
+                sound = data.get("keys", {}).get("sound1")
+                fx = (data.get("layer_fx") or [data.get("fx") or {}])[0]
+            if not sound:
+                return
+            self.tabs.setCurrentWidget(self.pad_view)
+            self.pad_view.send_sound(sound, fx, part)
+        elif kind == "track":
+            name, src, n = arg
+            data = FACTORY[name][n] if src == "factory" else storage.load_user_preset(name, n)
+            if not data:
+                return
+            if part == "other":                     # preset de guitarra no baixo (ou o contrário)
+                page = self.track_pages["bass" if name == "guitar" else "guitar"]
+                self.tabs.setCurrentWidget(page)
+                page.apply_preset_data(data)
+            else:
+                page = self.track_pages[name]
+                if name == "pads":
+                    self.tabs.setCurrentWidget(self.pad_view)
+                    self.pad_view.show_view(2)
+                else:
+                    self.tabs.setCurrentWidget(page)
+                page.apply_preset_part(data, part)
+        self.refresh_sounds()
         self._sync_bank()
 
     def save_preset(self):
@@ -790,6 +874,7 @@ class MainWindow(QMainWindow):
         self.kbd.velocity = kb.get("velocity", 100)
         self.dock.kbd_enable.setChecked(kb.get("enabled", True))
         ui = st.get("ui", {})
+        self.shortcuts.set_keys(ui.get("shortcuts"))
         self.auto_update = ui.get("auto_update", True) is not False
         self.dock.auto_update.setChecked(self.auto_update)
         if ui.get("layout") != 2:
@@ -828,7 +913,7 @@ class MainWindow(QMainWindow):
             "running": e.running,
             "ui": {"layout": 2, "auto_update": self.auto_update,
                    "dock_collapsed": dict(self._dock_by_page), "dock_tab": self.dock.stack.currentIndex(),
-                   "keys_user": self.pad_view.user_preset},
+                   "keys_user": self.pad_view.user_preset, "shortcuts": dict(self.shortcuts.keys)},
         })
 
     def autostart(self):

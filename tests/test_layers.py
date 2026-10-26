@@ -229,3 +229,54 @@ def test_mute_silences_layer_and_comes_back(engine):
     assert peak() < 1e-4 and inst.keys["vol1"] > 0
     inst.set_mute("Volume camada 1", False)
     assert abs(peak() - loud) < 0.3 * loud
+
+
+def test_master_mute_silences_output(engine):
+    inst = engine.instruments
+    inst.set_ready("Piano + Pad (culto)")
+    out = np.zeros((N, 2), np.float32)
+    inst.key_on(60, 110)
+    for _ in range(40):
+        engine._render(None, out, N)
+    assert np.abs(out).max() > 0.01
+    engine.muted = True
+    for _ in range(30):                           # desce aos poucos (sem estalo)
+        engine._render(None, out, N)
+    assert np.abs(out).max() == 0.0
+    engine.muted = False
+    for _ in range(30):
+        engine._render(None, out, N)
+    assert np.abs(out).max() > 0.001
+    inst.key_off(60)
+
+
+def test_pitch_lever_functions(engine):
+    """Alavanca de pitch: tom (bend), velocidade da rotação (até 4x) ou tempo do delay (até 2x)."""
+    from ampsim.dsp.keysfx import K_DL_TIME
+    from ampsim.instruments import PITCH_FUNCS
+    inst = engine.instruments
+    inst.layer_fx[0].update(rot_on=True, rot_fast=False, rot_sync=False, rot_slow_hz=1.0, delay_on=True,
+                            delay_div=0, delay_ms=400)
+    inst.apply_fx()
+    kp = engine.keys_fx[0].KP
+    assert kp[K_ROT_HZ] == pytest.approx(1.0)
+    engine._events.clear()
+    inst.handle_midi(0xE0, 127, 127)                           # tom: vira pitch bend
+    from ampsim.dsp import layout as Ly
+    assert (Ly.EV_BEND, 16383, 0) in engine._events
+    inst.set_pitch_func(PITCH_FUNCS[1])
+    engine._events.clear()
+    inst.handle_midi(0xE0, 127, 127)                           # todo para cima: 4x mais rápida
+    assert kp[K_ROT_HZ] == pytest.approx(4.0, rel=0.01) and not engine._events
+    inst.handle_midi(0xE0, 0, 0)                               # todo para baixo: 1/4
+    assert kp[K_ROT_HZ] == pytest.approx(0.25, rel=0.01)
+    inst.handle_midi(0xE0, 0, 64)                              # centro: normal
+    assert kp[K_ROT_HZ] == pytest.approx(1.0)
+    assert "rotação" in inst.describe_midi("bend", 0, 0, 64)
+    inst.set_pitch_func(PITCH_FUNCS[2])
+    base = 0.4 * engine.fs
+    inst.handle_midi(0xE0, 127, 127)
+    assert kp[K_DL_TIME] == pytest.approx(2 * base, rel=0.01) and kp[K_ROT_HZ] == pytest.approx(1.0)
+    inst.set_pitch_func(PITCH_FUNCS[0])                        # trocar volta tudo ao normal
+    assert kp[K_DL_TIME] == pytest.approx(base) and inst.bend == 0.0
+    assert inst.get_state()["pitch_func"] == PITCH_FUNCS[0]

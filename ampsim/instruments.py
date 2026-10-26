@@ -259,6 +259,8 @@ BUTTON_FUNCS = ("Nenhuma", "Tap tempo (BPM)", "Timbre anterior", "Próximo timbr
                 "Banco de pads A/B (tela)", "Rotação lenta/rápida", "Rotação liga/desliga",
                 "Delay liga/desliga", "Drive liga/desliga", "Sustain (segurar)", "Oitava −", "Oitava +",
                 "Pânico (soltar notas)")
+# o que a alavanca/faixa de pitch do controlador faz
+PITCH_FUNCS = ("Pitch (tom)", "Rotação (velocidade)", "Delay (tempo)")
 DEFAULT_FX = dict(drive_on=False, drive=30, rot_on=False, rot_fast=False, rot_mix=100, delay_on=False,
                   delay_ms=380, delay_div=0, delay_fb=30, delay_mix=25, delay_ping=True,
                   # velocidade da rotação: Hz de cada modo, ou voltas por tempo quando segue o BPM
@@ -374,6 +376,8 @@ class Instruments:
         self.free_map = {}                   # função -> ["cc"|"note", canal, número] (atalhos rápidos)
         # mute de emergência (faders da aba Configurações): guarda o volume, só silencia; não é salvo
         self.mutes = set()                   # "Volume camada N", "Volume pad contínuo", "Volume bateria"
+        self.pitch_func = PITCH_FUNCS[0]     # alavanca de pitch: tom, velocidade da rotação ou tempo do delay
+        self.bend = 0.0                      # posição da alavanca (-1 a 1) quando não é tom
         self.capture = False                 # diálogo de mapeamento aberto: só monitora
         self.on_monitor = lambda kind, ch, num, val: None
         self.on_control = lambda func, val: None
@@ -584,8 +588,33 @@ class Instruments:
             eq.configure(self.pad_eq)
 
     def apply_fx(self):
+        rot = 4.0 ** self.bend if self.pitch_func == PITCH_FUNCS[1] else 1.0
+        dly = 2.0 ** self.bend if self.pitch_func == PITCH_FUNCS[2] else 1.0
         for kfx, fx in zip(getattr(self.engine, "keys_fx", ()), self.layer_fx):
-            kfx.configure(fx, self.bpm)
+            kfx.configure(fx, self.bpm, rot, dly)
+
+    def handle_bend(self, val):
+        """Alavanca de pitch (14 bits, centro 8192): tom, velocidade da rotação ou tempo do delay."""
+        if self.pitch_func == PITCH_FUNCS[0]:
+            self.engine.send_event(Ly.EV_BEND, val)
+            if self.sf:
+                for c in CH_LAYERS:
+                    self.sf.pitch_bend(c, val)
+            return
+        self.bend = max(-1.0, min(1.0, (val - 8192) / 8191.0))
+        self.apply_fx()
+
+    def set_pitch_func(self, func):
+        if func not in PITCH_FUNCS:
+            return
+        self.pitch_func = func
+        self.bend = 0.0
+        self.engine.send_event(Ly.EV_BEND, 8192)          # sem nota desafinada presa ao trocar
+        if self.sf:
+            for c in CH_LAYERS:
+                self.sf.pitch_bend(c, 8192)
+        self.apply_fx()
+        self.on_change()
 
     def set_sound(self, slot, name):
         self.keys["sound1" if slot == 1 else "sound2"] = name
@@ -1057,11 +1086,7 @@ class Instruments:
                 for c in CH_LAYERS:
                     self.sf.cc(c, d1, d2)
         elif kind == 0xE0:
-            val = d1 | (d2 << 7)
-            self.engine.send_event(Ly.EV_BEND, val)
-            if self.sf:
-                for c in CH_LAYERS:
-                    self.sf.pitch_bend(c, val)
+            self.handle_bend(d1 | (d2 << 7))
 
     def describe_midi(self, kind, ch, num, val):
         """Texto do monitor MIDI: o que o AmpSim faz com esta mensagem."""
@@ -1072,7 +1097,9 @@ class Instruments:
                     return f"Troca de programa {num} · canal {ch + 1} → botão {BUTTONS[i]}"
             return f"Troca de programa {num} · canal {ch + 1} → não usado"
         if kind == "bend":
-            return f"Pitch bend · canal {ch + 1} → afinação das teclas"
+            what = {PITCH_FUNCS[0]: "afinação das teclas", PITCH_FUNCS[1]: "velocidade da rotação",
+                    PITCH_FUNCS[2]: "tempo do delay"}[self.pitch_func]
+            return f"Pitch bend · canal {ch + 1} → {what}"
         key = [kind, ch, num]
         head = f"{'CC' if kind == 'cc' else 'Nota'} {num} · canal {ch + 1}" + (f" · valor {val}" if kind == "cc" else "")
         for func, k in self.free_map.items():
@@ -1182,7 +1209,7 @@ class Instruments:
                     device=self.device, bpm=self.bpm, fx=dict(self.layer_fx[0]), free_map=dict(self.free_map),
                     layer_fx=[dict(f) for f in self.layer_fx], fx_layer=self.fx_layer,
                     extra_layers=[dict(x) for x in self.extra_layers],
-                    pad_eq=dict(self.pad_eq))
+                    pad_eq=dict(self.pad_eq), pitch_func=self.pitch_func)
 
     def load_state(self, st):
         if not st:
@@ -1216,6 +1243,9 @@ class Instruments:
             self.fx_layer = max(0, min(st["fx_layer"], self.layer_count() - 1))
         if isinstance(st.get("pad_eq"), dict):
             self.pad_eq.update(clean_pad_eq(st["pad_eq"]))
+        if st.get("pitch_func") in PITCH_FUNCS:
+            self.pitch_func = st["pitch_func"]
+            self.bend = 0.0
         if isinstance(st.get("free_map"), dict):
             self.free_map = {k: v for k, v in st["free_map"].items()
                              if (k in KNOB_FUNCS or k in BUTTON_FUNCS) and isinstance(v, list) and len(v) == 3}

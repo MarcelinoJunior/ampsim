@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..instruments import (
-    BUTTON_FUNCS, BUTTONS, CONT_PAD_SOUNDS, KNOB_COUNT, KNOB_FUNCS, PAD_B_CHOICES, PAD_COUNT, PAD_PRESETS,
+    BUTTON_FUNCS, BUTTONS, CONT_PAD_SOUNDS, KNOB_COUNT, KNOB_FUNCS, PAD_B_CHOICES, PAD_COUNT, PAD_PRESETS, PITCH_FUNCS,
     note_name,
 )
 from ..dsp.params import TRACK_PARAMS
@@ -35,7 +35,8 @@ SLIDER_MUTED = (f"QSlider::groove:vertical {{ background: #5a1e2a; width: 4px; b
 # faders da aba Faders / Pads: (rótulo, tipo, função ou trilha, camada, tem mute de emergência)
 STRIPS = (("L1", "func", "Volume camada 1", 1, True), ("L2", "func", "Volume camada 2", 2, True),
           ("L3", "func", "Volume camada 3", 3, True), ("L4", "func", "Volume camada 4", 4, True),
-          ("Pad\ncontínuo", "func", "Volume pad contínuo", None, True), ("Pads", "func", "Volume bateria", None, True),
+          ("Pad\ncontínuo", "func", "Volume pad contínuo", None, True),
+          ("Pads", "func", "Volume bateria", None, True),
           ("Teclas\n(todas)", "func", "Volume teclas", None, False), ("Guitarra", "track", "guitar", None, False),
           ("Baixo", "track", "bass", None, False), ("Master", "func", "Master", None, False))
 
@@ -441,6 +442,14 @@ class BottomDock(QFrame):
         for b in (self.skip_btn, self.stop_btn):
             b.setFocusPolicy(Qt.NoFocus)
             row.addWidget(b)
+        row.addSpacing(10)
+        row.addWidget(QLabel("Pitch:"))
+        self.pitch_combo = _combo(PITCH_FUNCS)
+        self.pitch_combo.setToolTip("O que a alavanca/faixa de pitch do controlador faz:\n"
+                                    "tom das teclas, velocidade da rotação (até 4× mais rápida ou ¼) ou\n"
+                                    "tempo do delay (o dobro ou a metade). Solta no centro: volta ao normal.")
+        self.pitch_combo.activated.connect(lambda i: self.inst.set_pitch_func(PITCH_FUNCS[i]))
+        row.addWidget(self.pitch_combo, 1)
         col.addLayout(row)
         self.learn_label = QLabel("")
         self.learn_label.setWordWrap(True)
@@ -585,6 +594,13 @@ class BottomDock(QFrame):
         self.kbd_label.setObjectName("small")
         self.kbd_label.setWordWrap(True)
         col.addWidget(self.kbd_label)
+        sc = QPushButton(" Teclas de atalho…")
+        sc.setIcon(icon("tap", C["text"], 15))
+        sc.setFocusPolicy(Qt.NoFocus)
+        sc.setToolTip("Alt+Espaço: mute geral · Alt+1-4: mute das camadas · F1-F3: abas · Esc: pânico…\n"
+                      "Clique para ver todos e trocar as teclas.")
+        sc.clicked.connect(lambda *_: self.win.open_shortcuts())
+        col.addWidget(sc, 0, Qt.AlignLeft)
         col.addStretch(1)
         lay.addLayout(col, 1)
         lay.addWidget(_vsep())
@@ -663,6 +679,7 @@ class BottomDock(QFrame):
                 t.setText(f"Pad {i + 1}\n{_short(pad_label(inst.pad_sounds[i]), 15)}")
                 t.setToolTip(b.toolTip())
             self._sync_strips()
+            self.pitch_combo.setCurrentText(inst.pitch_func)
             for i, c in enumerate(self.padb_combos):
                 c.setCurrentText(inst.pad_keys[i])
             for i, c in enumerate(self.knob_combos):

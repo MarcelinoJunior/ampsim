@@ -30,6 +30,7 @@ class AudioEngine:
         self.synth = SynthDSP(self.fs)
         self.input_channel = {"guitar": 0, "bass": 1}
         self.master = 1.0
+        self.muted = False              # mute geral (Alt+Espaço): silencia a saída sem mexer no master
         self.config = dev.AudioConfig()
         self.stream = None
         self.n_in = 0
@@ -293,7 +294,7 @@ class AudioEngine:
         self.sampler.render(mix, frames, drums_g)        # gravações nos pads: volume/mute dos pads
         if t.D[Ly.T_ON] > 0.5:
             self._run_track(t, self._synth_out, 0, frames, mix)
-        write_output(mix, frames, outdata, self.out_offset, self.master)
+        write_output(mix, frames, outdata, self.out_offset, self._glide("master", 0.0 if self.muted else self.master))
         if rec.active and rec.source == "out":
             rec.feed(outdata[:frames, self.out_offset:self.out_offset + 2])
 
