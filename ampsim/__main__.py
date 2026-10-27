@@ -98,6 +98,21 @@ def selftest(out_path):
         from .ui.widgets import PHOTO_DIR
         lines.append(f"fotos dos timbres: {len(os.listdir(PHOTO_DIR))}")
         ok = peak > 0.01 and np.isfinite(out).all() and inst.sf is not None
+        # tela remota: servidor só em 127.0.0.1, a página e o QR code (websockets e segno no pacote)
+        import urllib.request
+
+        import segno
+
+        from .web import config as wcfg
+        from .web.server import WebServer
+        srv = WebServer(lambda *a: None, dict)
+        web_ok = srv.start(wcfg.default(), host="127.0.0.1", port=0)
+        if web_ok:
+            page = urllib.request.urlopen(f"http://127.0.0.1:{srv.port}/", timeout=5).read()
+            web_ok = b"AmpSim Remoto" in page and bool(segno.make("http://127.0.0.1").matrix)
+            srv.stop()
+        lines.append(f"tela remota: {'ok' if web_ok else 'FALHOU ' + srv.error}")
+        ok = ok and web_ok
     except Exception as exc:  # noqa: BLE001 - o teste relata qualquer erro
         import traceback
         lines.append("ERRO: " + "".join(traceback.format_exception(exc)))
