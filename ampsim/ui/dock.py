@@ -38,9 +38,10 @@ STRIPS = (("L1", "func", "Volume camada 1", 1, True), ("L2", "func", "Volume cam
           ("L3", "func", "Volume camada 3", 3, True), ("L4", "func", "Volume camada 4", 4, True),
           ("Pad\ncontínuo", "func", "Volume pad contínuo", None, True),
           ("Pads", "func", "Volume bateria", None, True),
-          ("Teclas\n(todas)", "func", "Volume teclas", None, False), ("Guitarra", "track", "guitar", None, False),
-          ("Baixo", "track", "bass", None, False), ("Click", "func", "Volume do metrônomo", None, False),
-          ("Master", "func", "Master", None, False))
+          ("Rotação", "func", "Rotação (intensidade)", None, False),
+          ("Veloc.\nrotação", "func", "Rotação (velocidade)", None, False),
+          ("Reverb", "func", "Reverb", None, False), ("Drive", "func", "Drive", None, False),
+          ("Delay", "func", "Delay (mix)", None, False), ("Click", "func", "Volume do metrônomo", None, False))
 
 
 def _title(text):
@@ -267,7 +268,7 @@ class BottomDock(QFrame):
             name = QLabel(label)
             name.setObjectName("small")
             name.setAlignment(Qt.AlignCenter)
-            name.setFixedSize(50, 26)
+            name.setFixedSize(46, 26)
             sl = QHBoxLayout()
             sl.setSpacing(2)
             sl.addStretch(1)
@@ -286,7 +287,7 @@ class BottomDock(QFrame):
             val = QLabel("")
             val.setObjectName("small")
             val.setAlignment(Qt.AlignCenter)
-            val.setFixedWidth(50)
+            val.setFixedWidth(46)
             box.addWidget(name)
             box.addLayout(sl, 1)
             box.addWidget(val)

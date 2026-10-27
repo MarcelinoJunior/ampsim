@@ -57,9 +57,14 @@ def func_value(engine, func):
         return rot_speed_value(hz) / 1.27
     if func.startswith("Volume camada "):
         return (inst.layer_volume(int(func[-1])) or 0) / 1.27
+    # efeito desligado aparece em 0 (o fader mostra o que se ouve); subir o fader liga o efeito
+    on_mix = {"Rotação (intensidade)": ("rot_on", "rot_mix"), "Drive": ("drive_on", "drive"),
+              "Delay (mix)": ("delay_on", "delay_mix")}
+    if func in on_mix:
+        on, key = on_mix[func]
+        return fx[key] if fx[on] else 0.0
     return {
-        "Shimmer": lv["shimmer"], "Rotação (intensidade)": fx["rot_mix"], "Drive": fx["drive"],
-        "Delay (mix)": fx["delay_mix"], "Tempo do delay": fx["delay_ms"], "Repetições do delay": fx["delay_fb"],
+        "Shimmer": lv["shimmer"], "Tempo do delay": fx["delay_ms"], "Repetições do delay": fx["delay_fb"],
         "Sensibilidade ao toque": lv["touch"], "Volume teclas": lv["keys"],
         "Volume bateria": lv["drums"],
         "Volume pad contínuo": lv["pad"], "Master": master_pct(engine.master),

@@ -197,10 +197,10 @@ def test_open_mode_sees_only_open_panels(win, app):
     assert set(p.state) == {"pads", "tempo"}
     assert len(p.state["pads"]["tons"]) == 12 and len(p.state["pads"]["bateria"]) == 8
     # sem permissão: o fader não muda
-    before = win.engine.tracks["guitar"].values["track"]["volume"]
-    p.cmd("fader", id="guitar", valor=0)
+    before = win.inst.fx["drive"]
+    p.cmd("fader", id="Drive", valor=90)
     drain(app, p)
-    assert win.engine.tracks["guitar"].values["track"]["volume"] == before
+    assert win.inst.fx["drive"] == before
     p.close()
 
 
@@ -270,12 +270,14 @@ def test_commands_do_what_the_screen_does(win, app):
     assert wait(app, lambda: inst.cont_key in (None, ""))
 
     # fader e mute iguais aos da barra inferior
-    p.cmd("fader", id="guitar", valor=50)
-    slider = [s for s in win.dock.strips if s[0] == ("track", "guitar")][0][1]
+    p.cmd("fader", id="Delay (mix)", valor=50)
+    slider = [s for s in win.dock.strips if s[0] == ("func", "Delay (mix)")][0][1]
     assert wait(app, lambda: slider.value() == 50)
+    assert win.inst.fx["delay_mix"] == 50
     drain(app, p)
     ch = {c["id"]: c for c in p.state["faders"]["canais"]}
-    assert ch["guitar"]["valor"] == 50
+    assert ch["Delay (mix)"]["valor"] == 50 and ch["Delay (mix)"]["nome"] == "Delay"
+    assert "guitar" not in ch and "Master" not in ch
     mutable = next(c["id"] for c in p.state["faders"]["canais"] if c["pode_mutar"])
     p.cmd("mute", id=mutable, on=True)
     assert wait(app, lambda: mutable in inst.mutes)

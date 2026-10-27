@@ -442,14 +442,22 @@ def test_midi_learn_maps_screen_control(win, monkeypatch):
 
 
 # ------------------------------------------------------------------ barra inferior
-def test_mixer_moves_track_and_keys_volumes(win):
+def test_mixer_moves_volumes_and_effects(win):
     win.dock.show_tab(1)
     strips = {arg: s for (kind, arg), s, *_ in win.dock.strips}
-    strips["guitar"].setValue(50)
-    vol = win.engine.tracks["guitar"].values["track"]["volume"]
-    assert -30 < vol < -20
+    assert "guitar" not in strips and "Master" not in strips and "Volume teclas" not in strips
     strips["Volume bateria"].setValue(40)
     assert win.inst.levels["drums"] == 40
+    strips["Drive"].setValue(60)
+    assert win.inst.fx["drive"] == 60 and win.inst.fx["drive_on"]
+    strips["Delay (mix)"].setValue(30)
+    assert win.inst.fx["delay_mix"] == 30 and win.inst.fx["delay_on"]
+    strips["Rotação (intensidade)"].setValue(50)
+    assert win.inst.fx["rot_mix"] == 50 and win.inst.fx["rot_on"]
+    strips["Rotação (intensidade)"].setValue(0)
+    assert not win.inst.fx["rot_on"]
+    strips["Reverb"].setValue(80)
+    assert abs(win.inst.levels["reverb"] / 127 * 100 - 80) < 1.5
 
 
 def test_midi_tab_function_combos(win):
