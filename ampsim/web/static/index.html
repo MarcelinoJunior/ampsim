@@ -13,7 +13,8 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand"><img src="icone.svg" alt=""><span>AmpSim</span><small>remoto</small></div>
+  <div class="brand"><img src="icone.svg" alt="AmpSim"><span>AmpSim</span><small>remoto</small></div>
+  <nav id="modos" class="modos" role="tablist" aria-label="Sessão" hidden></nav>
   <div class="status"><span id="dot" class="dot"></span><span id="lat">conectando…</span></div>
   <button id="sair" class="ghost" hidden>Sair</button>
 </header>
@@ -33,6 +34,7 @@
 </main>
 
 <nav id="tabs" class="tabs" hidden></nav>
+<div id="toast" class="toast" hidden></div>
 <div id="offline" class="offline" hidden>Sem conexão com o AmpSim · tentando de novo…</div>
 <script src="app.js"></script>
 </body>

@@ -836,7 +836,13 @@ class TrackPage(QWidget):
         n, ok = QInputDialog.getText(self, "Salvar preset", "Nome do preset:")
         if not ok or not n.strip():
             return None
-        n = n.strip()
+        return self.save_preset_as(n)
+
+    def save_preset_as(self, name):
+        """Salva o som atual (amp e pedais) como preset do usuário, sem perguntar nada (tela remota)."""
+        n = (name or "").strip()
+        if not n:
+            return None
         storage.save_user_preset(self.name, n, self.preset_data())
         self.reload_presets(select=("user", storage._safe(n)))
         return n

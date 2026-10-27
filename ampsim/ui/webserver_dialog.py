@@ -4,7 +4,7 @@ import copy
 import io
 
 from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QSpinBox, QVBoxLayout,
@@ -106,7 +106,7 @@ class WebServerDialog(QDialog):
         lay = QVBoxLayout(self)
 
         intro = QLabel("Use um celular, tablet ou outro computador <b>na mesma rede Wi-Fi</b> como segunda tela "
-                       "do AmpSim: pads, faders, setlist, BPM e mute de emergência, direto no navegador.")
+                       "do AmpSim: pads, faders, setlist, timbres, guitarra e baixo, direto no navegador.")
         intro.setWordWrap(True)
         lay.addWidget(intro)
 
@@ -272,6 +272,10 @@ class WebServerDialog(QDialog):
         self.users.clear()
         for u in self.cfg["usuarios"]:
             it = QListWidgetItem(f"{u['nome']}  ·  {panels_text(u['telas'])}")
+            if not u["telas"]:
+                # perfil sem tela (ex. só tinha Tempo/Mute, que saíram da página): chama a atenção
+                it.setText(f"⚠ {u['nome']}  ·  nenhuma tela (marque as telas em Alterar)")
+                it.setForeground(QColor(C.get("yellow", "#f2c94c")))
             it.setData(Qt.UserRole, u["nome"])
             self.users.addItem(it)
 

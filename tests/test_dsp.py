@@ -369,3 +369,54 @@ def test_pulse_has_no_clicks(shape):
     y = np.concatenate(ys)[int(FS * 0.5):]
     d2 = np.abs(np.diff(y, 2))
     assert d2.max() / np.percentile(d2, 99) < 8.0
+
+
+def _run_output(sig, amount, fs=48000, lim=None):
+    from ampsim.dsp.kernels import limiter_state, write_output_lim
+    lim = limiter_state(fs) if lim is None else lim
+    lim[3] = amount
+    out = np.zeros((len(sig), 2), dtype=np.float32)
+    for i in range(0, len(sig), BLOCK):
+        mix = np.stack([sig[i:i + BLOCK]] * 2, axis=1).astype(np.float64)
+        write_output_lim(mix, len(mix), out[i:i + BLOCK], 0, 1.0, lim)
+    return out, lim
+
+
+def _db(a):
+    return 20 * np.log10(np.sqrt(np.mean(np.asarray(a, np.float64) ** 2)))
+
+
+def test_output_compressor_evens_out_notes_held_on_the_pedal():
+    """Compressor da saída: muitas notas presas no pedal (+10 dB de uma vez) somam bem menos com ele
+    no máximo; desligado (0, o padrão) não muda nada."""
+    fs = 48000
+    t = np.arange(2 * fs) / fs
+    amp = np.where(t < 1.0, 0.1, 0.1 * 10 ** (10 / 20))         # poucas notas -> muitas notas
+    sig = amp * np.sin(2 * np.pi * 220 * t)
+    off, _ = _run_output(sig, 0.0)
+    assert np.allclose(off[:, 0], sig, atol=1e-6)                 # 0 = som exatamente igual
+    on, lim = _run_output(sig, 1.0)
+    step = _db(on[int(1.5 * fs):, 0]) - _db(on[int(0.5 * fs):fs, 0])
+    assert step < 10.0 - 5.0, step                                 # o salto de 10 dB vira menos de 5 dB
+    assert np.isfinite(on).all() and np.isfinite(lim).all()
+    # soltar o pedal (-10 dB): a diferença entre antes e depois fica bem menor, e o que sobra volta
+    # aos poucos (release de ~350 ms) em vez de ficar lá embaixo
+    down = np.where(t < 1.0, 0.1 * 10 ** (10 / 20), 0.1) * np.sin(2 * np.pi * 220 * t)
+    rel, _ = _run_output(down, 1.0)
+    w = int(0.02 * fs)
+    just_after = _db(rel[fs + w:fs + 2 * w, 0])
+    settled = _db(rel[int(1.8 * fs):, 0])
+    assert _db(rel[int(0.8 * fs):fs, 0]) - settled < 10.0 - 5.0    # a queda de 10 dB vira menos de 5 dB
+    assert settled - just_after > 3.0                              # e o volume sobe de volta sozinho
+
+
+def test_output_compressor_is_nan_safe_and_turns_off_cleanly():
+    fs = 48000
+    sig = 0.5 * np.sin(2 * np.pi * 110 * np.arange(fs) / fs)
+    sig[1000:1010] = np.nan
+    sig[2000] = np.inf
+    out, lim = _run_output(sig, 1.0)
+    assert np.isfinite(out).all() and np.isfinite(lim).all() and 0.0 < lim[5] <= 2.0
+    # desligar com o ganho ainda baixo: volta suave para 1 e depois passa direto
+    out, lim = _run_output(np.full(5 * fs, 0.3), 0.0, lim=lim)
+    assert lim[5] == 1.0 and np.allclose(out[-100:, 0], 0.3)

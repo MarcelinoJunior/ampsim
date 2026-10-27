@@ -33,6 +33,7 @@ FUNC_RANGES = {
     "Sensibilidade ao toque": ("Toque", 0, 100, "%"),
     "Volume do metrônomo": ("Click", 0, 100, "%"),
     "Master": ("Master", 0, 100, "%"),
+    "Compressor": ("Compressor", 0, 100, "%"),
 }
 
 
@@ -69,6 +70,7 @@ def func_value(engine, func):
         "Volume bateria": lv["drums"],
         "Volume pad contínuo": lv["pad"], "Master": master_pct(engine.master),
         "Volume do metrônomo": engine.metronome.volume * 100,
+        "Compressor": lv.get("comp", 0),
     }.get(func, 0.0)
 
 

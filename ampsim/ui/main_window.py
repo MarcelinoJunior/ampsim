@@ -464,18 +464,27 @@ class MainWindow(QMainWindow):
 
             default = self.pad_view.user_preset or self.inst.ready or "Meu timbre"
             n, ok = QInputDialog.getText(self, "Salvar timbre", "Nome do timbre (Pad/Piano):", text=default)
-            if not ok or not n.strip():
-                return
-            n = n.strip()
-            storage.save_user_preset("teclas", n, sound_state(self.inst.get_state()))
-            self.pad_view.user_preset = storage._safe(n)
-            self._rebuild_ready_combo()
-            self.refresh_sounds()
-        else:
-            page = self.track_pages["pads" if kind == "pads" else kind]
-            page.save_preset()
+            if ok and n.strip():
+                self.save_keys_preset(n)
+            return
+        page = self.track_pages["pads" if kind == "pads" else kind]
+        page.save_preset()
         self.bank.reload()
         self._sync_bank()
+
+    def save_keys_preset(self, name):
+        """Salva o setup atual do Pad/Piano (camadas, volumes, efeitos...) em "Meus timbres".
+        Usado pela janela de salvar e pela tela remota. -> nome salvo (ou None se vazio)."""
+        n = (name or "").strip()
+        if not n:
+            return None
+        storage.save_user_preset("teclas", n, sound_state(self.inst.get_state()))
+        self.pad_view.user_preset = storage._safe(n)
+        self._rebuild_ready_combo()
+        self.refresh_sounds()
+        self.bank.reload()
+        self._sync_bank()
+        return self.pad_view.user_preset
 
     def _bank_doc(self, kind, arg):
         """Documento .ampsim de um item do banco (sem precisar carregá-lo)."""

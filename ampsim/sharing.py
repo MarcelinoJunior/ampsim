@@ -163,11 +163,16 @@ def sanitize_synth(values):
 
 SOUND_STATE_KEYS = ("keys", "ready", "pad_preset", "pad_sounds", "pad_keys", "cont_sound",
                     "levels", "fx", "layer_fx", "extra_layers", "pad_eq", "bpm")
+# níveis da saída (como o master): ficam na sessão, mas presets, cenas e músicas não levam nem mudam
+OUTPUT_LEVELS = ("comp",)
 
 
 def sound_state(inst_state):
     """Parte do estado das teclas que é "som" (sem mapeamento de controlador nem aparelho)."""
-    return {k: inst_state[k] for k in SOUND_STATE_KEYS if k in inst_state}
+    out = {k: inst_state[k] for k in SOUND_STATE_KEYS if k in inst_state}
+    if isinstance(out.get("levels"), dict):
+        out["levels"] = {k: v for k, v in out["levels"].items() if k not in OUTPUT_LEVELS}
+    return out
 
 
 def sanitize_instruments(st, current):
@@ -183,7 +188,7 @@ def sanitize_instruments(st, current):
         if isinstance(src, dict):
             out[k] = {kk: v for kk, v in src.items() if kk in ref and _same_kind(ref[kk], v)}
     if "levels" in out:
-        out["levels"] = {k: max(0, min(127, v)) for k, v in out["levels"].items()}
+        out["levels"] = {k: max(0, min(127, v)) for k, v in out["levels"].items() if k not in OUTPUT_LEVELS}
     for k in ("pad_sounds", "pad_keys"):
         src = st.get(k)
         if isinstance(src, list) and len(src) == len(current.get(k, [])) and all(

@@ -41,7 +41,7 @@ STRIPS = (("L1", "func", "Volume camada 1", 1, True), ("L2", "func", "Volume cam
           ("Rotação", "func", "Rotação (intensidade)", None, False),
           ("Veloc.\nrotação", "func", "Rotação (velocidade)", None, False),
           ("Reverb", "func", "Reverb", None, False), ("Drive", "func", "Drive", None, False),
-          ("Delay", "func", "Delay (mix)", None, False), ("Click", "func", "Volume do metrônomo", None, False))
+          ("Delay", "func", "Delay (mix)", None, False), ("Master", "func", "Master", None, False))
 
 
 def _title(text):

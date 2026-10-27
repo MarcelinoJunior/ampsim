@@ -87,9 +87,16 @@ class Page:
         return m
 
     def until(self, t, timeout=3.0):
+        """Espera a mensagem `t`, processando a interface (comandos rodam na thread dela)."""
         end = time.monotonic() + timeout
         while True:
-            m = self.recv(max(0.05, end - time.monotonic()))
+            QApplication.processEvents()
+            try:
+                m = self.recv(0.02)
+            except TimeoutError:
+                if time.monotonic() > end:
+                    raise
+                continue
             if m["t"] == t:
                 return m
 
@@ -117,10 +124,10 @@ def drain(app, page, secs=0.3):
 # ------------------------------------------------------------------ configuração
 def test_users_passwords_are_hashed_and_checked(dirs):
     cfg = wcfg.default()
-    wcfg.set_user(cfg, "Baterista", "1234", ["pads", "tempo", "xyz"])
-    assert cfg["usuarios"][0]["telas"] == ["pads", "tempo"]
+    wcfg.set_user(cfg, "Baterista", "1234", ["pads", "baixo", "xyz"])
+    assert cfg["usuarios"][0]["telas"] == ["pads", "baixo"]
     assert "1234" not in json.dumps(cfg)
-    assert wcfg.check(cfg, "baterista", "1234") == ["pads", "tempo"]
+    assert wcfg.check(cfg, "baterista", "1234") == ["pads", "baixo"]
     assert wcfg.check(cfg, "baterista", "errada") is None
     assert wcfg.check(cfg, "ninguem", "1234") is None
     wcfg.set_user(cfg, "Baterista", "", ["pads"])            # senha vazia mantém a atual
@@ -144,10 +151,34 @@ def test_config_file_with_junk_falls_back(dirs):
     assert wcfg.load() == wcfg.default()
 
 
+def test_old_config_with_removed_panels_still_loads(dirs):
+    """Tempo e Mute saíram da página: configurações antigas carregam sem eles (o resto continua)."""
+    assert {"guitarra", "baixo"} <= set(wcfg.default()["aberto"])
+    assert "tempo" not in wcfg.PANEL_IDS and "emergencia" not in wcfg.PANEL_IDS
+    old = wcfg.default()
+    wcfg.set_user(old, "mesa", "1234", ["faders"])
+    old["usuarios"][0]["telas"] = ["tempo", "emergencia", "faders"]
+    old["aberto"] = ["pads", "tempo", "emergencia", "timbre"]
+    wcfg.save(old)
+    c = wcfg.load()
+    assert c["aberto"] == ["pads", "timbre"]
+    assert c["usuarios"][0]["telas"] == ["faders"]
+    assert wcfg.check(c, "mesa", "1234") == ["faders"]
+    # quem via todas as telas antigas (sem senha ou "espelho") passa a ver também Guitarra e Baixo
+    old["aberto"] = ["pads", "faders", "setlist", "tempo", "emergencia", "timbre"]
+    old["usuarios"][0]["telas"] = list(old["aberto"])
+    wcfg.save(old)
+    c = wcfg.load()
+    assert c["aberto"] == list(wcfg.PANEL_IDS) and c["usuarios"][0]["telas"] == list(wcfg.PANEL_IDS)
+
+
 def test_page_only_sends_known_commands():
     js = open(os.path.join(STATIC, "app.js"), encoding="utf-8").read()
-    used = set(re.findall(r'cmd\("(\w+)"', js))
+    used = set(re.findall(r'\b(?:cmd|tc)\("(\w+)"', js))
     assert used and used <= set(COMMAND_PANEL), used - set(COMMAND_PANEL)
+    assert {"trilha_volume", "efeito_on", "efeito_param", "trilha_salvar", "timbre_salvar"} <= used
+    for gone in ("tap", "click", "bpm", "mute_geral", "panico"):         # telas Tempo e Mute saíram
+        assert gone not in COMMAND_PANEL
     assert set(re.findall(r"^  (\w+)\(sec\)", js, re.M)) == set(wcfg.PANEL_IDS)
     html = open(os.path.join(STATIC, "index.html"), encoding="utf-8").read()
     assert "http" not in html.replace('lang="pt-BR"', "")                 # nada de CDN: funciona sem internet
@@ -189,12 +220,14 @@ def test_port_in_use_gives_clear_error(win):
 
 
 def test_open_mode_sees_only_open_panels(win, app):
-    port = serve(win, aberto=["pads", "tempo"])
+    port = serve(win, aberto=["pads", "baixo"])
     p = Page(port)
     m = p.until("auth")
-    assert m["ok"] and m["telas"] == ["pads", "tempo"] and not m["login"]
+    assert m["ok"] and m["telas"] == ["pads", "baixo"] and not m["login"]
     p.until("estado")
-    assert set(p.state) == {"pads", "tempo"}
+    assert {k.split(".")[0] for k in p.state} == {"pads", "baixo"}
+    assert "baixo.presets" in p.state and "guitarra" not in p.state
+    assert "pads.sons" in p.state and "timbre.sons" not in p.state      # catálogo só de tela liberada
     assert len(p.state["pads"]["tons"]) == 12 and len(p.state["pads"]["bateria"]) == 8
     # sem permissão: o fader não muda
     before = win.inst.fx["drive"]
@@ -206,20 +239,20 @@ def test_open_mode_sees_only_open_panels(win, app):
 
 def test_login_token_and_wrong_password(win, app):
     cfg = wcfg.default()
-    wcfg.set_user(cfg, "mesa", "segredo", ["faders", "emergencia"])
+    wcfg.set_user(cfg, "mesa", "segredo", ["faders", "guitarra"])
     port = serve(win, login=True, usuarios=cfg["usuarios"])
     p = Page(port)
     assert p.recv()["t"] == "precisa_login"
-    p.cmd("mute_geral", on=True)                         # antes de entrar: ignorado
+    p.cmd("trilha_on", trilha="guitar", on=False)       # antes de entrar: ignorado
     p.send(t="login", nome="mesa", senha="errada")
     m = p.until("auth")
     assert not m["ok"] and "errad" in m["erro"]
-    assert not win.engine.muted
+    assert win.engine.tracks["guitar"].values["track"]["on"]
     p.send(t="login", nome="Mesa", senha="segredo")
     m = p.until("auth")
-    assert m["ok"] and m["telas"] == ["faders", "emergencia"] and m["token"]
+    assert m["ok"] and m["telas"] == ["faders", "guitarra"] and m["token"]
     p.until("estado")
-    assert set(p.state) == {"faders", "emergencia"}
+    assert {k.split(".")[0] for k in p.state} == {"faders", "guitarra"}
     p.close()
     # o celular volta (recarregou a página): o token basta
     q = Page(port)
@@ -240,7 +273,7 @@ def test_changing_users_kicks_connected_pages(win, app):
     p.send(t="login", nome="a", senha="1234")
     assert p.until("auth")["ok"]
     new = json.loads(json.dumps(win.remote.cfg))
-    new["usuarios"][0]["telas"] = ["tempo"]
+    new["usuarios"][0]["telas"] = ["baixo"]
     win.remote.set_config(new, host="127.0.0.1")
     assert p.until("precisa_login")["t"] == "precisa_login"
     p.close()
@@ -277,7 +310,9 @@ def test_commands_do_what_the_screen_does(win, app):
     drain(app, p)
     ch = {c["id"]: c for c in p.state["faders"]["canais"]}
     assert ch["Delay (mix)"]["valor"] == 50 and ch["Delay (mix)"]["nome"] == "Delay"
-    assert "guitar" not in ch and "Master" not in ch
+    assert "guitar" not in ch and "Volume do metrônomo" not in ch            # Click saiu, Master entrou
+    ids = [c["id"] for c in p.state["faders"]["canais"]]
+    assert ids[-2:] == ["Master", "Compressor"]                             # Compressor logo depois do Master
     mutable = next(c["id"] for c in p.state["faders"]["canais"] if c["pode_mutar"])
     p.cmd("mute", id=mutable, on=True)
     assert wait(app, lambda: mutable in inst.mutes)
@@ -287,26 +322,14 @@ def test_commands_do_what_the_screen_does(win, app):
     assert wait(app, lambda: mutable not in inst.mutes)
     p.cmd("fader", id="nao-existe", valor=10)
 
-    # tempo
-    p.cmd("bpm", valor=97)
-    assert wait(app, lambda: round(inst.bpm) == 97)
-    p.cmd("click", on=True)
-    assert wait(app, lambda: win.engine.metronome.on)
-    p.cmd("click", on=False)
-    assert wait(app, lambda: not win.engine.metronome.on)
-    p.cmd("tap")
-    drain(app, p, 0.1)
-    time.sleep(0.4)
-    p.cmd("tap")
-    assert wait(app, lambda: 100 <= inst.bpm <= 140)
-
-    # emergência
-    p.cmd("mute_geral", on=True)
-    assert wait(app, lambda: win.engine.muted and win.mute_banner.isVisibleTo(win))
-    p.cmd("mute_geral", on=False)
-    assert wait(app, lambda: not win.engine.muted)
-    p.cmd("panico")
+    # telas Tempo e Mute saíram da página: os comandos delas não fazem mais nada
+    bpm = inst.bpm
+    for c, kw in (("bpm", {"valor": 97}), ("click", {"on": True}), ("tap", {}), ("mute_geral", {"on": True}),
+                  ("panico", {})):
+        p.cmd(c, **kw)
     drain(app, p)
+    assert inst.bpm == bpm and not win.engine.metronome.on and not win.engine.muted
+    assert "tempo" not in p.state and "emergencia" not in p.state
 
     # preset do Pad/Piano muda sem trocar a aba do PC
     win.tabs.setCurrentIndex(0)
@@ -318,7 +341,9 @@ def test_commands_do_what_the_screen_does(win, app):
     assert p.state["timbre"]["preset"] == win.pad_view.title.text()
 
     # comando estranho não derruba nada
-    p.send(t="cmd", c="bpm", valor="abc")
+    p.send(t="cmd", c="trilha_volume", trilha="guitar", valor="abc")
+    p.send(t="cmd", c="efeito_param", trilha="guitar", efeito="delay", param="mix", valor=float("nan"))
+    p.send(t="cmd", c=["lista"], trilha={"x": 1})
     p.ws.send("{lixo")
     p.send(t="ping", id=1)
     assert p.until("pong")["id"] == 1
@@ -364,10 +389,10 @@ def test_only_changes_are_sent(win, app):
     app.processEvents()
     with pytest.raises(TimeoutError):
         p.recv(0.3)
-    win.inst.set_bpm(133)
+    win.engine.tracks["guitar"].set_param("track", "volume", -12.0)
     win.remote.push()
     m = p.until("estado")
-    assert set(m["telas"]) == {"tempo"}
+    assert set(m["telas"]) == {"guitarra"}
     p.close()
 
 
@@ -378,10 +403,10 @@ def test_two_devices_at_once(win, app):
     b.until("auth")
     assert wait(app, lambda: len(win.remote.server.connected()) == 2)
     drain(app, b)
-    a.cmd("bpm", valor=88)
-    assert wait(app, lambda: round(win.inst.bpm) == 88)
+    a.cmd("trilha_volume", trilha="bass", valor=25)
+    assert wait(app, lambda: abs(win.engine.tracks["bass"].values["track"]["volume"] - (-42.0)) < 1e-6)
     drain(app, b)
-    assert round(b.state["tempo"]["bpm"]) == 88
+    assert b.state["baixo"]["volume"] == 25
     a.close()
     b.close()
 
@@ -434,9 +459,10 @@ def test_webserver_dialog(win, app, monkeypatch):
     d.login_mode.setChecked(True)
     app.processEvents()
     assert win.remote.cfg["login"] and "usuário" in d.warn.text()
-    d.save_user("baterista", "1234", ["pads", "tempo"])
-    assert d.users.count() == 1 and "Pads" in d.users.item(0).text()
-    assert wcfg.check(wcfg.load(), "baterista", "1234") == ["pads", "tempo"]
+    d.save_user("baterista", "1234", ["pads", "guitarra"])
+    assert d.users.count() == 1 and "Pads" in d.users.item(0).text() and "Guitarra" in d.users.item(0).text()
+    assert wcfg.check(wcfg.load(), "baterista", "1234") == ["pads", "guitarra"]
+    assert set(d.open_checks) == set(wcfg.PANEL_IDS)
     with pytest.raises(ValueError):
         d.save_user("Baterista", "9999", ["pads"])
     d.save_user("batera", "", ["pads"], old_name="baterista")
@@ -486,3 +512,675 @@ def test_starts_with_the_app_when_left_on(app, dirs, monkeypatch):
         assert not w.remote.server.running
         w.deleteLater()
         app.processEvents()
+
+
+# ------------------------------------------------------------------ configurar pelo aparelho
+def test_choose_layer_sounds_from_the_phone(win, app):
+    port = serve(win)
+    inst = win.inst
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    cats = p.state["timbre.sons"]
+    assert any(s["nome"] == "Rhodes" for c in cats for s in c["sons"])
+    p.cmd("timbre_camada", camada=1, nome="Rhodes")
+    assert wait(app, lambda: inst.keys["sound1"] == "Rhodes")
+    inst.keys["layer2_on"] = False
+    p.cmd("timbre_camada", camada=2, nome="Cordas Lentas")      # escolher a L2 liga a L2
+    assert wait(app, lambda: inst.keys["sound2"] == "Cordas Lentas" and inst.keys["layer2_on"])
+    n = inst.layer_count()
+    p.cmd("timbre_camada", camada=n + 1, nome="Coral")         # "+ L3": camada nova
+    assert wait(app, lambda: inst.layer_count() == n + 1)
+    assert inst.layer_sounds()[-1][1] == "Coral"
+    p.cmd("timbre_camada", camada=n + 1, nome="Sinos")
+    assert wait(app, lambda: inst.layer_sounds()[-1][1] == "Sinos")
+    before = inst.layer_sounds()
+    p.cmd("timbre_camada", camada=1, nome="Não existe")
+    p.cmd("timbre_camada", camada=9, nome="Rhodes")
+    drain(app, p)
+    assert inst.layer_sounds() == before
+    assert [x["som"] for x in p.state["timbre"]["lista"]] == [s for _, s, _ in before]
+    p.close()
+
+
+def test_choose_pad_sound_from_the_phone(win, app):
+    port = serve(win)
+    inst = win.inst
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    names = [s["nome"] for c in p.state["pads.sons"] for s in c["sons"]]
+    assert "Chimbal Aberto (synth)" in names
+    p.cmd("pad_som", i=2, nome="Chimbal Aberto (synth)")
+    assert wait(app, lambda: inst.pad_sounds[2] == "Chimbal Aberto (synth)")
+    drain(app, p)
+    assert p.state["pads"]["bateria"][2]["som"] == "Chimbal Aberto (synth)"
+    p.cmd("pad_som", i=2, nome="rec:não existe")
+    p.cmd("pad_som", i=40, nome="Chimbal Aberto (synth)")
+    drain(app, p)
+    assert inst.pad_sounds[2] == "Chimbal Aberto (synth)"
+    p.close()
+
+
+def test_recorder_from_the_phone(win, app, monkeypatch):
+    port = serve(win)
+    e = win.engine
+    p = Page(port)
+    p.until("auth")
+    p.cmd("rec")                                          # áudio desligado: avisa só o celular
+    assert "desligado" in p.until("aviso")["texto"]
+    assert not e.recorder.active
+    # com áudio: grava, para e guarda no banco
+    monkeypatch.setattr(type(e), "running", property(lambda self: True))
+    p.cmd("rec")
+    assert wait(app, lambda: e.recorder.active)
+    drain(app, p)
+    assert p.state["pads.gravador"]["gravando"]
+    import numpy as np
+    e.recorder.feed(np.full((4800, 2), 0.3, np.float32))
+    p.cmd("rec_parar")
+    assert "Gravado" in p.until("aviso")["texto"]
+    assert not e.recorder.active
+    drain(app, p, 2.5)                                    # o banco relê a pasta
+    recs = p.state["pads.gravador"]["gravacoes"]
+    assert len(recs) == 1
+    played = []
+    monkeypatch.setattr(e.sampler, "trigger", lambda name, vel=110: played.append(name))
+    p.cmd("rec_ouvir", nome=recs[0])
+    assert wait(app, lambda: played == [recs[0]])
+    stopped = []
+    monkeypatch.setattr(e.sampler, "stop_all", lambda: stopped.append(1))
+    p.cmd("rec_parar")                                    # STOP sem gravar: para o que toca
+    assert wait(app, lambda: stopped == [1])
+    p.close()
+
+
+def test_pad_volumes_on_the_pads_screen(win, app):
+    """Quem só vê a aba Pads ajusta o volume do pad contínuo e dos pads (e só esses dois)."""
+    port = serve(win, aberto=["pads"])
+    inst = win.inst
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    assert [v["id"] for v in p.state["pads.volumes"]] == ["Volume pad contínuo", "Volume bateria"]
+    p.cmd("pad_volume", id="Volume pad contínuo", valor=33)
+    assert wait(app, lambda: inst.levels["pad"] == 33)
+    p.cmd("pad_mute", id="Volume bateria", on=True)
+    assert wait(app, lambda: "Volume bateria" in inst.mutes)
+    drain(app, p)
+    assert {v["id"]: v["mudo"] for v in p.state["pads.volumes"]}["Volume bateria"]
+    before = inst.fx["drive"]
+    p.cmd("pad_volume", id="Drive", valor=90)              # outros faders: só pela aba Faders
+    p.cmd("fader", id="Drive", valor=90)
+    drain(app, p)
+    assert inst.fx["drive"] == before
+    p.close()
+
+
+# ------------------------------------------------------------------ telas Guitarra e Baixo
+def factory_names(name):
+    from ampsim.presets import FACTORY
+    return list(FACTORY[name])
+
+
+def _fx_panel(page, key):
+    return next(p for p in page.panels if p.eff.key == key)
+
+
+def test_track_commands_need_the_right_panel():
+    from ampsim.web.server import command_panel
+    assert command_panel({"c": "efeito_on", "trilha": "guitar"}) == "guitarra"
+    assert command_panel({"c": "trilha_salvar", "trilha": "bass"}) == "baixo"
+    assert command_panel({"c": "trilha_volume", "trilha": "pads"}) is None       # teclas: não por aqui
+    assert command_panel({"c": "trilha_volume"}) is None
+    assert command_panel({"c": "trilha_volume", "trilha": ["guitar"]}) is None
+    assert command_panel({"c": ["pad"]}) is None
+    assert command_panel({"c": "timbre_salvar"}) == "timbre"
+    assert command_panel({"c": "pad", "trilha": "guitar"}) == "pads"
+
+
+def test_guitar_screen_volume_pedals_and_params(win, app):
+    import copy
+    from ampsim.dsp.params import AMP_MODELS, CAB_IR_INDEX
+    from ampsim.web.remote import REMOTE_EFFECTS
+    port = serve(win)
+    g = win.engine.tracks["guitar"]
+    page = win.track_pages["guitar"]
+    win.tabs.setCurrentWidget(win.pad_view)               # o PC está na aba Pad/Piano
+    pc_tab = win.tabs.currentIndex()
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    st = p.state["guitarra"]
+    assert [f["k"] for f in st["efeitos"]] == [e.key for e in REMOTE_EFFECTS]
+    assert not {"nam", "vst"} & {f["k"] for f in st["efeitos"]}          # dependem de arquivos do PC
+    assert st["preset"] == page.preset.currentText() and st["on"]
+    names = [s["nome"] for c in p.state["guitarra.presets"] for s in c["sons"]]
+    assert names == ["factory:" + n for n in factory_names("guitar")]
+    assert "baixo" in p.state and p.state["baixo"]["efeitos"]
+
+    # volume da trilha (0..100 = -60..+12 dB, como os faders das trilhas) e liga/desliga
+    p.cmd("trilha_volume", trilha="guitar", valor=50)
+    assert wait(app, lambda: abs(g.values["track"]["volume"] - (-24.0)) < 1e-6)
+    p.cmd("trilha_volume", trilha="guitar", valor=500)
+    assert wait(app, lambda: g.values["track"]["volume"] == 12.0)
+    p.cmd("trilha_on", trilha="guitar", on=False)
+    assert wait(app, lambda: not g.values["track"]["on"])
+    drain(app, p)
+    assert not p.state["guitarra"]["on"] and p.state["guitarra"]["volume"] == 100
+    p.cmd("trilha_on", trilha="guitar", on=True)
+    assert wait(app, lambda: g.values["track"]["on"])
+
+    # pedais: liga/desliga e parâmetros (linear, logarítmico, escolha)
+    was = g.values["delay"]["on"]
+    p.cmd("efeito_on", trilha="guitar", efeito="delay", on=not was)
+    assert wait(app, lambda: g.values["delay"]["on"] == (not was))
+    p.cmd("efeito_param", trilha="guitar", efeito="delay", param="mix", valor=40)
+    assert wait(app, lambda: g.values["delay"]["mix"] == 40.0)
+    p.cmd("efeito_param", trilha="guitar", efeito="delay", param="time", valor=50)    # 20..2000 ms em log
+    assert wait(app, lambda: abs(g.values["delay"]["time"] - 200.0) < 1e-6)
+    p.cmd("efeito_param", trilha="guitar", efeito="delay", param="time", valor=-30)
+    assert wait(app, lambda: g.values["delay"]["time"] == 20.0)
+    p.cmd("efeito_param", trilha="guitar", efeito="amp", param="model", valor=2)
+    assert wait(app, lambda: g.values["amp"]["model"] == 2.0)
+    p.cmd("efeito_param", trilha="guitar", efeito="amp", param="model", valor=99)
+    assert wait(app, lambda: g.values["amp"]["model"] == len(AMP_MODELS) - 1)
+    p.cmd("efeito_param", trilha="guitar", efeito="cab", param="model", valor=CAB_IR_INDEX)
+    assert wait(app, lambda: g.values["cab"]["model"] == CAB_IR_INDEX - 1)     # IR só escolhendo o .wav no PC
+    drain(app, p)
+    fx = {f["k"]: f for f in p.state["guitarra"]["efeitos"]}
+    delay = {x["k"]: x for x in fx["delay"]["params"]}
+    assert fx["delay"]["on"] == (not was)
+    assert delay["mix"]["valor"] == 40 and delay["time"]["valor"] == 0 and delay["time"]["txt"] == "20.0 ms"
+    assert delay["ping"]["opcoes"] == ["Não", "Sim"]
+    cab = {x["k"]: x for x in fx["cab"]["params"]}
+    assert len(cab["model"]["opcoes"]) == CAB_IR_INDEX and cab["model"]["i"] == CAB_IR_INDEX - 1
+
+    # o que não existe (ou não é do celular) é ignorado
+    before = copy.deepcopy(g.values)
+    pads_before = copy.deepcopy(win.engine.tracks["pads"].values)
+    for kw in ({"efeito": "nam", "param": "input", "valor": 100}, {"efeito": "vst", "param": "mix", "valor": 0},
+               {"efeito": "delay", "param": "nao", "valor": 3}, {"efeito": "xyz", "param": "mix", "valor": 3},
+               {"efeito": "track", "param": "volume", "valor": 3}):
+        p.cmd("efeito_param", trilha="guitar", **kw)
+    p.cmd("efeito_on", trilha="guitar", efeito="vst", on=True)
+    p.cmd("efeito_on", trilha="guitar", efeito="track", on=False)
+    p.cmd("trilha_volume", trilha="pads", valor=0)
+    p.cmd("efeito_on", trilha="teclas", efeito="delay", on=True)
+    drain(app, p)
+    assert g.values == before and win.engine.tracks["pads"].values == pads_before
+    assert win.tabs.currentIndex() == pc_tab                      # nada disso trocou a aba do PC
+
+    # com a aba da guitarra aberta no PC, o knob acompanha o celular
+    win.tabs.setCurrentWidget(page)
+    p.cmd("efeito_param", trilha="guitar", efeito="delay", param="mix", valor=70)
+    assert wait(app, lambda: _fx_panel(page, "delay").controls["mix"].value() == 70.0)
+    p.cmd("efeito_on", trilha="guitar", efeito="chorus", on=True)
+    assert wait(app, lambda: _fx_panel(page, "chorus").led.isChecked())
+    p.close()
+
+
+def test_guitar_presets_from_the_phone_keep_the_pc_tab(win, app):
+    from ampsim.presets import FACTORY
+    port = serve(win)
+    page = win.track_pages["guitar"]
+    g = win.engine.tracks["guitar"]
+    win.tabs.setCurrentWidget(win.pad_view)
+    pc_tab = win.tabs.currentIndex()
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    first = page.preset.currentIndex()
+    p.cmd("trilha_preset_passo", trilha="guitar", d=1)
+    assert wait(app, lambda: page.preset.currentIndex() == (first + 1) % page.preset.count())
+    p.cmd("trilha_preset_passo", trilha="guitar", d=-1)
+    assert wait(app, lambda: page.preset.currentIndex() == first)
+    name = factory_names("guitar")[2]
+    g.values["track"]["volume"] = -7.0                         # o volume da trilha não muda com preset
+    p.cmd("trilha_preset", trilha="guitar", tipo="factory", nome=name)
+    assert wait(app, lambda: tuple(page.preset.currentData()) == ("factory", name))
+    for eff, vals in FACTORY["guitar"][name]["values"].items():
+        if "on" in vals and eff in g.values and eff != "track":
+            assert g.values[eff]["on"] == vals["on"], eff
+    assert g.values["track"]["volume"] == -7.0
+    p.cmd("trilha_preset", trilha="guitar", tipo="user", nome="não existe")
+    p.cmd("trilha_preset", trilha="guitar", tipo="../x", nome=name)
+    p.cmd("trilha_preset", trilha="guitar", tipo="factory", nome=["x"])
+    drain(app, p)
+    assert tuple(page.preset.currentData()) == ("factory", name)
+    assert p.state["guitarra"]["preset"] == "★ " + name and p.state["guitarra"]["atual"] == "factory:" + name
+    assert win.tabs.currentIndex() == pc_tab
+    # baixo também
+    bp = win.track_pages["bass"]
+    b0 = bp.preset.currentIndex()
+    p.cmd("trilha_preset_passo", trilha="bass", d=1)
+    assert wait(app, lambda: bp.preset.currentIndex() == (b0 + 1) % bp.preset.count())
+    assert win.tabs.currentIndex() == pc_tab
+    p.close()
+
+
+def test_guitar_user_cannot_touch_bass_and_vice_versa(win, app):
+    port = serve(win, aberto=["baixo"])
+    g, b = win.engine.tracks["guitar"], win.engine.tracks["bass"]
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    assert {k.split(".")[0] for k in p.state} == {"baixo"}
+    gv = g.values["track"]["volume"]
+    rv = g.values["reverb"]["on"]
+    p.cmd("trilha_volume", trilha="guitar", valor=0)
+    p.cmd("efeito_on", trilha="guitar", efeito="reverb", on=not rv)
+    p.cmd("trilha_on", trilha="guitar", on=False)
+    p.cmd("trilha_salvar", trilha="guitar", nome="Invasor")
+    p.cmd("timbre_salvar", nome="Invasor")
+    p.cmd("trilha_volume", trilha="bass", valor=0)             # o baixo pode
+    assert wait(app, lambda: b.values["track"]["volume"] == -60.0)
+    drain(app, p)
+    assert g.values["track"]["volume"] == gv and g.values["reverb"]["on"] == rv and g.values["track"]["on"]
+    assert storage.list_user_presets("guitar") == [] and storage.list_user_presets("teclas") == []
+    p.close()
+
+
+def test_save_track_preset_from_the_phone(win, app, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: pytest.fail("abriu janela no PC")))
+    port = serve(win)
+    page = win.track_pages["guitar"]
+    g = win.engine.tracks["guitar"]
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    g.set_on("chorus", True)
+    p.cmd("trilha_salvar", trilha="guitar", nome="  Meu Solo  ")
+    assert p.until("aviso")["texto"] == "Salvo: Meu Solo"
+    assert storage.list_user_presets("guitar") == ["Meu Solo"]
+    saved = storage.load_user_preset("guitar", "Meu Solo")
+    assert saved["values"]["chorus"]["on"] and "track" not in saved["values"]
+    assert tuple(page.preset.currentData()) == ("user", "Meu Solo")
+    drain(app, p)
+    assert p.state["guitarra"]["preset"] == "Meu Solo" and p.state["guitarra"]["nome_salvar"] == "Meu Solo"
+    assert p.state["guitarra.presets"][0]["sons"] == [{"nome": "user:Meu Solo", "curto": "Meu Solo"}]
+    p.cmd("trilha_salvar", trilha="guitar", nome="   ")
+    assert "nome" in p.until("aviso")["texto"]
+    # volta para ele pelo celular
+    g.set_on("chorus", False)
+    page.preset_step(1)
+    p.cmd("trilha_preset", trilha="guitar", tipo="user", nome="Meu Solo")
+    assert wait(app, lambda: g.values["chorus"]["on"])
+    p.close()
+
+
+def test_save_setup_on_the_timbre_screen(win, app, monkeypatch):
+    """💾 Salvar setup: o mesmo que salvar o timbre no PC (camadas, volumes, efeitos), sem janela no PC,
+    e depois dá para voltar a ele com ◀ ▶ na tela Timbre."""
+    from PySide6.QtWidgets import QInputDialog
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: pytest.fail("abriu janela no PC")))
+    port = serve(win)
+    inst = win.inst
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    assert p.state["timbre"]["nome_salvar"]
+    p.cmd("timbre_camada", camada=1, nome="Rhodes")
+    assert wait(app, lambda: inst.keys["sound1"] == "Rhodes")
+    win.tabs.setCurrentWidget(win.track_pages["bass"])
+    pc_tab = win.tabs.currentIndex()
+    p.cmd("timbre_salvar", nome="Culto Domingo")
+    assert p.until("aviso")["texto"] == "Setup salvo: Culto Domingo"
+    data = storage.load_user_preset("teclas", "Culto Domingo")
+    assert data["keys"]["sound1"] == "Rhodes"
+    assert win.pad_view.user_preset == "Culto Domingo"
+    c = win.ready_combo
+    assert ("keys_user", "Culto Domingo") in [tuple(c.itemData(i) or ()) for i in range(c.count())]
+    assert win.tabs.currentIndex() == pc_tab
+    drain(app, p)
+    assert p.state["timbre"]["preset"] == "Culto Domingo" and p.state["timbre"]["nome_salvar"] == "Culto Domingo"
+    p.cmd("timbre_salvar", nome="")
+    assert "nome" in p.until("aviso")["texto"]
+    # mexe no som e volta para o setup salvo com ▶
+    p.cmd("timbre_camada", camada=1, nome="Coral")
+    assert wait(app, lambda: inst.keys["sound1"] == "Coral" and not win.pad_view.user_preset)
+    for _ in range(c.count() + 2):
+        before = win.pad_view.title.text()
+        p.cmd("preset_passo", d=1)
+        assert wait(app, lambda: win.pad_view.title.text() != before)
+        if win.pad_view.user_preset == "Culto Domingo":
+            break
+    assert win.pad_view.user_preset == "Culto Domingo" and inst.keys["sound1"] == "Rhodes"
+    assert win.tabs.currentIndex() == pc_tab
+    p.close()
+
+
+def test_play_twice_loops_the_recording_until_stop(win, app):
+    """PLAY na tela Pads: 1 toque toca uma vez na hora; o 2º toque logo depois faz a mesma gravação
+    repetir em loop (a página mostra ⟳ LOOP) até o STOP."""
+    import numpy as np
+    from ampsim.audio import sampler as smp
+    port = serve(win)
+    e = win.engine
+    data = np.full((4800, 2), 0.2, np.float32)
+    name = smp.save_recording(data, 48000, "Intro")
+    e.sampler.put(name, data, 48000)
+    mix = np.zeros((256, 2))
+    p = Page(port)
+    p.until("auth")
+    drain(app, p, 2.5)                                    # o banco relê a pasta
+    assert name in p.state["pads.gravador"]["gravacoes"] and p.state["pads.gravador"]["loop"] == ""
+    p.cmd("rec_ouvir", nome=name)                          # 1º toque: toca já
+    assert wait(app, lambda: len(e.sampler.events) == 1)
+    e.sampler.render(mix, 256, 1.0)                       # o callback começa a tocar
+    assert len(e.sampler.voices) == 1 and e.sampler.looping == ""
+    p.cmd("rec_ouvir", nome=name, loop=True)              # 2º toque: a mesma voz vira loop
+    assert wait(app, lambda: len(e.sampler.events) == 1)
+    for _ in range(60):                                   # bem mais que os 0,1 s da gravação
+        e.sampler.render(mix, 256, 1.0)
+    assert len(e.sampler.voices) == 1 and e.sampler.looping == name
+    win.remote.push()
+    drain(app, p)
+    assert p.state["pads.gravador"]["loop"] == name
+    p.cmd("rec_parar")                                    # STOP encerra o loop
+    assert wait(app, lambda: e.sampler.looping == "")
+    e.sampler.render(mix, 256, 1.0)
+    assert not e.sampler.voices
+    win.remote.push()
+    drain(app, p)
+    assert p.state["pads.gravador"]["loop"] == ""
+    p.cmd("rec_ouvir", nome="não existe", loop=True)
+    p.cmd("rec_ouvir", nome=name, loop="sim")             # só true de verdade liga o loop
+    drain(app, p)
+    e.sampler.render(mix, 256, 1.0)
+    assert e.sampler.looping == ""
+    p.close()
+
+
+def test_master_and_compressor_faders(win, app):
+    """Faders: Master no lugar do Click (na barra do PC e no celular) e o Compressor da saída
+    logo depois do Master (só no celular), o mesmo knob "Compressor" do MIDI."""
+    from ampsim.ui.dock import STRIPS
+    from ampsim.ui.funcs import func_value
+    assert [s[2] for s in STRIPS][-1] == "Master" and "Volume do metrônomo" not in [s[2] for s in STRIPS]
+    assert win.inst.levels["comp"] == 0                    # padrão: desligado (nenhum som muda)
+    port = serve(win)
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    ch = {c["id"]: c for c in p.state["faders"]["canais"]}
+    assert ch["Compressor"]["valor"] == 0 and not ch["Compressor"]["pode_mutar"]
+    p.cmd("fader", id="Compressor", valor=60)
+    assert wait(app, lambda: win.inst.levels["comp"] == 60)
+    p.cmd("fader", id="Compressor", valor=500)
+    assert wait(app, lambda: win.inst.levels["comp"] == 100)
+    p.cmd("fader", id="Master", valor=50)
+    assert wait(app, lambda: abs(func_value(win.engine, "Master") - 50) < 1.5)
+    drain(app, p)
+    ch = {c["id"]: c for c in p.state["faders"]["canais"]}
+    assert ch["Compressor"]["valor"] == 100 and abs(ch["Master"]["valor"] - 50) <= 1
+    p.cmd("mute", id="Compressor", on=True)                # sem mute
+    p.cmd("pad_volume", id="Compressor", valor=0)          # só pela aba Faders
+    drain(app, p)
+    assert win.inst.levels["comp"] == 100
+    # o motor usa a quantidade no compressor da saída, e ela é salva com o estado das teclas
+    import numpy as np
+    out = np.zeros((256, 2), np.float32)
+    win.engine._render(None, out, 256)
+    assert win.engine._lim[3] == 1.0
+    assert win.inst.get_state()["levels"]["comp"] == 100
+    p.close()
+
+
+def test_turn_layer2_off_and_remove_extra_layers_from_the_phone(win, app):
+    """Tela Timbre: desligar/ligar a L2 (como o interruptor do PC, o timbre dela fica guardado) e remover
+    a L3/L4; a lista diz quais camadas estão soando."""
+    port = serve(win)
+    inst = win.inst
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    p.cmd("timbre_camada", camada=1, nome="Rhodes")
+    p.cmd("timbre_camada", camada=2, nome="Cordas Lentas")
+    assert wait(app, lambda: inst.keys["sound2"] == "Cordas Lentas" and inst.keys["layer2_on"])
+    p.cmd("timbre_l2", on=False)
+    assert wait(app, lambda: not inst.keys["layer2_on"])
+    assert inst.keys["sound2"] == "Cordas Lentas"                  # só desligou
+    drain(app, p)
+    assert [x["ligada"] for x in p.state["timbre"]["lista"]][:2] == [True, False]
+    assert p.state["timbre"]["camadas"] == ["Rhodes"]               # só a L1 soa
+    p.cmd("timbre_l2", on=True)
+    assert wait(app, lambda: inst.keys["layer2_on"])
+    # L3 e L4: criar e remover
+    n = inst.layer_count()
+    p.cmd("timbre_camada", camada=n + 1, nome="Coral")
+    assert wait(app, lambda: inst.layer_count() == n + 1)
+    p.cmd("timbre_camada", camada=n + 2, nome="Sinos")
+    assert wait(app, lambda: inst.layer_count() == n + 2)
+    p.cmd("timbre_remover", camada=n + 1)                          # remove a L3: a L4 vira L3
+    assert wait(app, lambda: inst.layer_count() == n + 1)
+    assert inst.layer_sounds()[-1][1] == "Sinos"
+    # o que não vale é ignorado: L1/L2 não saem, camada que não existe, tipos errados
+    for kw in ({"camada": 1}, {"camada": 2}, {"camada": 9}, {"camada": "3"}, {"camada": True}):
+        p.cmd("timbre_remover", **kw)
+    for kw in ({"on": "nao"}, {"on": 0}, {}):
+        p.cmd("timbre_l2", **kw)
+    drain(app, p)
+    assert inst.layer_count() == n + 1 and inst.keys["layer2_on"]
+    assert [x["som"] for x in p.state["timbre"]["lista"]] == ["Rhodes", "Cordas Lentas", "Sinos"]
+    p.close()
+
+
+# ------------------------------------------------------------------ entradas ruins e casos da revisão
+BAD_VALUES = ("abc", None, [], {}, [1], {"x": 1}, True, False, float("nan"), float("inf"), -float("inf"), 1e400,
+              "1", "", "\x00", -1, 10 ** 12)
+
+
+def _all_fields():
+    return ("i", "vel", "tom", "nome", "id", "valor", "on", "d", "camada", "trilha", "tipo", "efeito", "param", "loop")
+
+
+def _snapshot(win):
+    """O que importa do estado (sem o que muda sozinho, como o tempo de gravação)."""
+    st = json.loads(json.dumps(win.remote.state(), default=str))
+    st.pop("timbre.sons", None)
+    st.pop("pads.sons", None)
+    return st
+
+
+def test_wrong_types_never_raise_or_change_anything(win, app, monkeypatch):
+    """Fuzz: todo comando, com cada campo de tipo errado (texto, lista, NaN, infinito, null...), não levanta
+    exceção na interface (o Remote.apply roda num slot do Qt) e não muda nada."""
+    from PySide6.QtWidgets import QInputDialog
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: pytest.fail("abriu janela no PC")))
+    hits = []
+    win.engine.instruments.pad_hit = lambda i, v=110: hits.append((i, v))
+    before = _snapshot(win)
+    files = {k: storage.list_user_presets(k) for k in ("teclas", "guitar", "bass")}
+    remote = win.remote
+    for c in COMMAND_PANEL:
+        if c in ("pad_parar", "rec", "rec_parar"):
+            continue                                   # sem campos (e mexem no gravador/pad de propósito)
+        for field in _all_fields():
+            for bad in BAD_VALUES:
+                for trilha in ("guitar", "bass"):
+                    msg = {"t": "cmd", "c": c, "trilha": trilha, field: bad}
+                    if c in ("timbre_salvar", "trilha_salvar") and field == "nome" and isinstance(bad, str) and bad.strip("\x00"):
+                        continue                        # nomes de texto são válidos (testados abaixo)
+                    if c == "rec_ouvir" and field != "loop" and field != "nome":
+                        continue
+                    if field in ("on", "loop") and isinstance(bad, bool):
+                        continue                        # booleano é o valor certo desses campos
+                    if field in ("d", "valor") and not isinstance(bad, bool) and isinstance(bad, (int, float))                             and bad == bad and abs(bad) != float("inf") and bad != 0:
+                        continue                        # número de verdade é valor válido (só limitado)
+                    remote._from_server(msg, list(wcfg.PANEL_IDS)) if c == "pad" else remote.apply(msg)
+    app.processEvents()
+    assert hits == []
+    assert _snapshot(win) == before
+    assert {k: storage.list_user_presets(k) for k in ("teclas", "guitar", "bass")} == files
+
+
+def test_names_with_control_chars_are_cleaned_and_reserved_names_saved(win, app, monkeypatch):
+    from ampsim.web.remote import clean_name
+    assert clean_name("  Meu\x00 Set\nup\t ") == "Meu Set up"               # controle vira 1 espaço
+    assert clean_name("linha\nnova") == "linha nova" and clean_name("a \t\t b") == "a b"
+    assert clean_name("\x00\x01") == "" and clean_name(["x"]) == "" and clean_name("...") == ""
+    assert clean_name("CON") == "_CON" and clean_name("x" * 200) == "x" * 60
+    port = serve(win)
+    p = Page(port)
+    p.until("auth")
+    p.cmd("trilha_salvar", trilha="guitar", nome="Solo\x00\n1")
+    assert p.until("aviso")["texto"] == "Salvo: Solo 1"
+    p.cmd("trilha_salvar", trilha="guitar", nome="a:b")
+    assert p.until("aviso")["texto"] == "Salvo: a_b"                 # o nome como ficou na lista
+    assert "a_b" in storage.list_user_presets("guitar")
+    p.cmd("timbre_salvar", nome="AUX")
+    assert p.until("aviso")["texto"] == "Setup salvo: _AUX"
+    p.cmd("timbre_salvar", nome="\x07\x00")
+    assert "nome" in p.until("aviso")["texto"]
+    # disco recusou: avisa o celular em vez de quebrar
+    monkeypatch.setattr(storage, "save_user_preset", lambda *a: (_ for _ in ()).throw(OSError("disco cheio")))
+    p.cmd("trilha_salvar", trilha="bass", nome="Novo")
+    assert "Não deu para salvar" in p.until("aviso")["texto"]
+    p.close()
+
+
+def test_invalid_numbers_are_ignored_not_zeroed(win, app):
+    port = serve(win)
+    g = win.engine.tracks["guitar"]
+    page = win.track_pages["guitar"]
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    vol, mix, idx, comp = g.values["track"]["volume"], g.values["delay"]["mix"], page.preset.currentIndex(), win.inst.levels["comp"]
+    for bad in ("abc", None, True, [3]):
+        p.cmd("trilha_volume", trilha="guitar", valor=bad)
+        p.cmd("efeito_param", trilha="guitar", efeito="delay", param="mix", valor=bad)
+        p.cmd("trilha_preset_passo", trilha="guitar", d=bad)
+        p.cmd("fader", id="Compressor", valor=bad)
+    p.send(t="cmd", c="trilha_volume", trilha="guitar", valor=float("nan"))
+    p.send(t="cmd", c="fader", id="Compressor", valor=float("inf"))
+    drain(app, p)
+    assert g.values["track"]["volume"] == vol and g.values["delay"]["mix"] == mix
+    assert page.preset.currentIndex() == idx and win.inst.levels["comp"] == comp
+    p.close()
+
+
+def test_output_compressor_is_not_part_of_presets(win, app):
+    """O Compressor é da saída (como o Master): salvar/carregar timbre, cena ou música não mexe nele."""
+    from ampsim import sharing
+    inst = win.inst
+    inst.levels["comp"] = 70
+    assert "comp" not in sharing.sound_state(inst.get_state())["levels"]
+    assert win.save_keys_preset("Com comp") == "Com comp"
+    assert "comp" not in storage.load_user_preset("teclas", "Com comp")["levels"]
+    old = sharing.sound_state(inst.get_state())
+    old["levels"]["comp"] = 5                                   # preset antigo que levou o comp junto
+    storage.save_user_preset("teclas", "Antigo", old)
+    win._rebuild_ready_combo()
+    win.load_from_bank("keys_user", "Antigo")
+    assert inst.levels["comp"] == 70
+    win.load_from_bank("keys_user", "Com comp")
+    assert inst.levels["comp"] == 70
+    # a sessão guarda (como o master)
+    assert inst.get_state()["levels"]["comp"] == 70
+
+
+def test_auto_stop_at_the_limit_is_quiet_when_started_from_the_phone(win, app, monkeypatch):
+    """A gravação começada no celular que chega nos 60 s para sozinha sem abrir janela no PC e avisa o celular."""
+    from PySide6.QtWidgets import QMessageBox
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a)))
+    monkeypatch.setattr(type(win.engine), "running", property(lambda self: True))
+    port = serve(win)
+    e = win.engine
+    p = Page(port)
+    p.until("auth")
+    p.cmd("rec")
+    assert wait(app, lambda: e.recorder.active)
+    e.recorder.active = False                                   # chegou no limite (o callback parou) com silêncio
+    assert "limite" in p.until("aviso", timeout=3)["texto"]
+    assert shown == [] and not win.dock.recorder._recording
+    p.close()
+
+
+def test_single_play_while_looping_stops_the_loop_and_plays_once(win, app):
+    import numpy as np
+    from ampsim.audio import sampler as smp
+    port = serve(win)
+    e = win.engine
+    data = np.full((4800, 2), 0.2, np.float32)
+    name = smp.save_recording(data, 48000, "Intro")
+    e.sampler.put(name, data, 48000)
+    mix = np.zeros((256, 2))
+    p = Page(port)
+    p.until("auth")
+    win.remote._recs = ([], 0.0)
+    p.cmd("rec_ouvir", nome=name, loop=True)
+    assert wait(app, lambda: len(e.sampler.events) == 1)
+    e.sampler.render(mix, 256, 1.0)
+    assert e.sampler.looping == name
+    p.cmd("rec_ouvir", nome=name)                                 # 1 toque com o loop tocando
+    assert wait(app, lambda: len(e.sampler.events) >= 2)
+    e.sampler.render(mix, 256, 1.0)
+    assert e.sampler.looping == "" and len(e.sampler.voices) == 1     # parou o loop e tocou 1 vez
+    # e o PC mostra o loop e o STOP de lá para
+    p.cmd("rec_ouvir", nome=name, loop=True)
+    assert wait(app, lambda: len(e.sampler.events) >= 1)
+    e.sampler.render(mix, 256, 1.0)
+    rec = win.dock.recorder
+    rec._loop_tick()
+    assert rec.stop_btn.isEnabled() and "loop" in rec.time.text()
+    rec.stop()
+    e.sampler.render(mix, 256, 1.0)
+    rec._loop_tick()
+    assert e.sampler.looping == "" and not rec.stop_btn.isEnabled() and rec.time.text() == ""
+    p.close()
+
+
+def test_restricted_old_profiles_stay_restricted(win, app):
+    """Perfil antigo só com Tempo/Mute (telas que saíram) fica sem tela: não ganha Guitarra, Baixo nem
+    Faders; o PC mostra "nenhuma tela" para o administrador ver. Quem tinha as 6 telas ganha todas."""
+    assert wcfg.clean_panels(["tempo", "emergencia"]) == [] and wcfg.clean_panels(["tempo"]) == []
+    assert wcfg.clean_panels([]) == [] and wcfg.clean_panels(["pads", "tempo"]) == ["pads"]
+    assert wcfg.clean_panels(["pads", "faders", "setlist", "tempo", "emergencia", "timbre"]) == list(wcfg.PANEL_IDS)
+    cfg = wcfg.default()
+    wcfg.set_user(cfg, "mesa", "1234", ["faders"])
+    cfg["usuarios"][0]["telas"] = ["tempo", "emergencia"]
+    cfg["login"] = True
+    wcfg.save(cfg)
+    loaded = wcfg.load()
+    assert loaded["usuarios"][0]["telas"] == []
+    port = serve(win, login=True, usuarios=loaded["usuarios"])
+    p = Page(port)
+    assert p.recv()["t"] == "precisa_login"
+    p.send(t="login", nome="mesa", senha="1234")
+    m = p.until("auth")
+    assert m["ok"] and m["telas"] == []
+    g = win.engine.tracks["guitar"].values["track"]["volume"]
+    p.cmd("trilha_volume", trilha="guitar", valor=0)
+    p.cmd("trilha_volume", trilha="bass", valor=0)
+    p.cmd("fader", id="Drive", valor=90)
+    drain(app, p)
+    assert win.engine.tracks["guitar"].values["track"]["volume"] == g and p.state == {}
+    p.close()
+    from ampsim.ui.webserver_dialog import WebServerDialog
+    d = WebServerDialog(win.remote, win)
+    assert "nenhuma tela" in d.users.item(0).text()
+    d.close()
+
+
+def test_track_screen_shows_nam_and_short_amp_names(win, app):
+    from ampsim.dsp.params import AMP_MODELS
+    port = serve(win)
+    b = win.engine.tracks["bass"]
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    assert p.state["baixo"]["nam"] == ""
+    amp = {x["k"]: x for x in next(f for f in p.state["baixo"]["efeitos"] if f["k"] == "amp")["params"]}
+    assert amp["model"]["opcoes"] == [m["name"] for m in AMP_MODELS]          # sem o "(estilo …)"
+    b.values["nam"]["file"] = "dUg DP3X"
+    b.values["nam"]["on"] = True
+    b.set_param("track", "volume", -60.0)
+    win.remote.push()
+    drain(app, p)
+    assert p.state["baixo"]["nam"] == "dUg DP3X"
+    assert p.state["baixo"]["txt"] == "-∞ dB" and p.state["baixo"]["on"]      # volume no mínimo não é "mudo"
+    p.close()

@@ -3,6 +3,28 @@
 **Amplificador de guitarra e baixo, pads de louvor, pianos, órgãos e bateria nos pads — tudo
 gratuito, rodando no computador que você já tem.**
 
+## ⬇️ [Baixar o AmpSim para Windows (instalador)](https://github.com/MarcelinoJunior/ampsim/releases/latest/download/AmpSim-Setup.exe)
+
+O link acima baixa **sempre a versão mais nova**. Abra o arquivo **AmpSim-Setup.exe** e siga os
+passos: não precisa instalar Python nem mais nada. Se o Windows mostrar *"O Windows protegeu o
+computador"*, clique em **Mais informações → Executar assim mesmo** (o instalador é gratuito e
+não tem certificado pago). Depois de instalado, o AmpSim se atualiza sozinho.
+
+> 🐧📱 **Em breve:** versão para **Linux** e para **smartphone**.
+
+| Pad/Piano | Guitarra |
+|---|---|
+| ![Pad/Piano com o controlador na tela](docs/img/pad-piano.png) | ![Guitarra: amplificador e pedais](docs/img/guitarra.png) |
+
+**Tela remota no celular** (Pads, Faders, Timbre e Guitarra — veja [como usar](#tela-remota-no-celular-ou-tablet-webserver)):
+
+<p>
+<img src="docs/img/remoto-pads.png" width="200" alt="Pads no celular">
+<img src="docs/img/remoto-faders.png" width="200" alt="Faders no celular">
+<img src="docs/img/remoto-timbre.png" width="200" alt="Timbres no celular">
+<img src="docs/img/remoto-guitarra.png" width="200" alt="Guitarra no celular">
+</p>
+
 O AmpSim nasceu para ajudar **igrejas, ministérios de louvor, projetos sociais, escolas de
 música e bandas com orçamento apertado**. Em vez de pedaleiras, amplificadores, módulos de
 som e assinaturas de bibliotecas caras, um notebook com uma placa de som simples (ou até a
@@ -24,8 +46,6 @@ Todos os timbres usados são **gratuitos e de licença livre**, e o AmpSim é **
 > Fender, Yamaha, Roland…) são **homenagens** que indicam o *estilo* que inspirou a tela. **O som
 > não é cópia nem amostra dos equipamentos originais.** Os sons foram criados pelo próprio AmpSim
 > ou vêm de bancos gratuitos, e o AmpSim não tem relação com esses fabricantes.
-
-![Pad/Piano com o controlador na tela](docs/img/pad-piano.png)
 
 ---
 
@@ -53,8 +73,8 @@ internet na instalação.
 
 ### Jeito fácil: o instalador (recomendado)
 
-1. Abra **https://github.com/MarcelinoJunior/ampsim/releases**, pegue a versão mais nova e baixe o
-   arquivo **`AmpSim-Setup-<versão>.exe`**.
+1. Baixe o instalador mais novo: **[AmpSim-Setup.exe](https://github.com/MarcelinoJunior/ampsim/releases/latest/download/AmpSim-Setup.exe)**
+   (versões anteriores ficam em **https://github.com/MarcelinoJunior/ampsim/releases**).
 2. Dê duplo-clique. O Windows pode mostrar “O Windows protegeu o computador” (o instalador não tem
    certificado pago): clique em **Mais informações → Executar assim mesmo**.
 3. Escolha o que quer junto:
@@ -163,7 +183,7 @@ Todas as abas seguem o mesmo desenho:
 | **Banco de Presets** (esquerda) | busca e lista de tudo: timbres do Pad/Piano (prontos e os seus), presets de Guitarra e Baixo, amp/efeitos das teclas e os arquivos `.ampsim` de Documentos\AmpSim. Botão direito num item: exportar, copiar código, excluir |
 | **Centro** | a aba aberta |
 | **Painel da direita** | **Instrumento / Layer** no Pad/Piano; trilha e gabinete na Guitarra/Baixo |
-| **Barra de baixo** | **Pads** (pads contínuos e de bateria), **Faders / Pads** (volume das camadas L1–L4, pad contínuo e pads com mute de emergência; rotação, velocidade da rotação, reverb, drive, delay e click; os 8 pads e o gravador: REC/STOP grava o som do AmpSim ou uma entrada, e a gravação vai para um pad), **MIDI / Controlador** e **Configurações**. A seta à direita recolhe a barra; cada aba lembra se ela fica aberta ou fechada |
+| **Barra de baixo** | **Pads** (pads contínuos e de bateria), **Faders / Pads** (volume das camadas L1–L4, pad contínuo e pads com mute de emergência; rotação, velocidade da rotação, reverb, drive, delay e master; os 8 pads e o gravador: REC/STOP grava o som do AmpSim ou uma entrada, e a gravação vai para um pad), **MIDI / Controlador** e **Configurações**. A seta à direita recolhe a barra; cada aba lembra se ela fica aberta ou fechada |
 | **Teclas de atalho** | Alt+Espaço: mute geral (faixa vermelha “SEM SOM”) · Alt+1 a Alt+4: mute das camadas · Alt+P / Alt+B: mute do pad contínuo / dos pads · Ctrl+→ / Ctrl+←: próximo / anterior preset · F1 F2 F3: abas · Esc: pânico · Ctrl+R: gravar · Ctrl+T: tap tempo · Ctrl+Espaço: parar o pad. Troque em Configurações → Teclas de atalho |
 
 ![Faders / Pads na barra de baixo](docs/img/mixer.png)
@@ -285,17 +305,25 @@ direto no navegador (sem instalar nada no aparelho):
 2. Aponte a câmera do celular para o **QR code** (ou digite o link que aparece, ex.
    `http://192.168.0.10:8080`). Na primeira vez o Windows pode perguntar sobre o Firewall:
    permita em **Redes privadas**.
-3. Pronto: no celular aparecem abas embaixo (**Pads, Faders, Setlist, Tempo, Mute, Timbre**); no
-   tablet deitado e no PC, tudo lado a lado.
+3. Pronto: no topo da página escolha a sessão: **Pad/Piano** (abas embaixo: **Pads, Faders, Setlist,
+   Timbre**), **Guitarra** ou **Baixo**. Com o celular deitado as abas ficam numa coluna à esquerda e
+   cada tela em duas colunas; no tablet deitado e no PC, as telas da sessão ficam lado a lado.
 
-O que dá para fazer pelo aparelho: pad contínuo (tom, timbre, parar) e pads de bateria; faders com
-**MUTE** de cada canal; escolher a música da setlist (◀ ▶); BPM, **TAP** e click; **MUTE GERAL** e
-**PÂNICO**; trocar o preset do Pad/Piano. Tudo vale na hora nos dois lados, e vários aparelhos
-podem ficar conectados ao mesmo tempo. O número no canto (ex. *4 ms*) é o atraso da rede.
+O que dá para fazer pelo aparelho: pad contínuo (tom, timbre, parar) e pads de bateria, cada um com
+o seu fader de volume em pé e **M**; gravador com **PLAY** (um toque toca uma vez; dois toques seguidos
+repetem em loop até o **STOP**, que também aparece no gravador do PC); faders com **MUTE** de cada canal, o **Master** e o **Compressor** da
+saída (0 = desligado; mais para cima segura o volume que vai somando com muitas notas presas no pedal
+e suaviza a queda quando o pedal é solto; também dá para pôr num knob do teclado; como o Master, fica na
+sessão e trocar de preset não mexe nele); escolher a música da setlist
+(◀ ▶); trocar o preset do Pad/Piano e as camadas (desligar a L2, remover a L3/L4), e **💾 Salvar setup** (guarda o timbre atual em
+*Meus timbres*); na **Guitarra** e no **Baixo**: preset (◀ ▶ ou a lista), volume e liga/desliga da
+trilha, os pedais (toque liga/desliga, segure para ajustar os knobs dele) e **💾 Salvar preset**.
+Tudo vale na hora nos dois lados, sem trocar a aba do PC, e vários aparelhos podem ficar conectados
+ao mesmo tempo. O número no canto (ex. *4 ms*) é o atraso da rede.
 
 **Quem vê o quê:** sem senha, qualquer aparelho na rede entra e vê as telas marcadas. Com **usuário
-e senha**, crie um usuário para cada pessoa (ex.: *baterista* só com Pads e Tempo, *mesa* com
-Faders e Mute) ou use **Espelho** para ver tudo. Em rede aberta (de visitantes), prefira com senha.
+e senha**, crie um usuário para cada pessoa (ex.: *baterista* só com Pads, *guitarrista* só com
+Guitarra, *mesa* com Faders) ou use **Espelho** para ver tudo. Em rede aberta (de visitantes), prefira com senha.
 A página funciona só dentro da sua rede, não fica na internet. A porta (8080) pode ser trocada na
 mesma janela se outro programa já usar.
 

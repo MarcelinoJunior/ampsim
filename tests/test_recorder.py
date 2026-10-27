@@ -108,3 +108,55 @@ def test_bank_rename_delete_and_limits(engine, tmp_path):
     for _ in range(100):                                                # 60 s a 1 kHz = 60000 amostras
         r.feed(np.ones((1000, 2), np.float32))
     assert not r.active and r.full
+
+
+def test_double_tap_turns_the_playing_recording_into_a_loop_until_stop():
+    """PLAY duas vezes seguidas (tela remota): a mesma voz que já começou passa a repetir até o STOP."""
+    s = smp.Sampler()
+    s.set_fs(48000)
+    s.put("x", tone(secs=0.1, amp=0.4), 48000)                 # 4800 amostras
+    mix = np.zeros((N, 2))
+
+    def block():
+        mix[:] = 0.0
+        s.render(mix, N, 1.0)
+        return float(np.abs(mix).max())
+
+    s.trigger("x")
+    assert block() > 0.1 and s.looping == ""
+    s.loop("x")                                                # 2º toque: vira loop, sem voz nova
+    block()
+    assert len(s.voices) == 1 and s.looping == "x"
+    for _ in range(int(0.5 * 48000 / N)):                      # bem depois do fim da gravação
+        assert block() > 0.0
+    assert len(s.voices) == 1
+    s.stop_all()
+    assert s.looping == "" and block() == 0.0 and not s.voices
+    # um toque só: toca uma vez e acaba
+    s.trigger("x")
+    for _ in range(int(0.2 * 48000 / N)):
+        block()
+    assert not s.voices and block() == 0.0
+    # loop sem nada tocando começa uma voz nova; gravação menor que o bloco repete dentro do bloco
+    s.put("curta", np.full((100, 2), 0.25, np.float32), 48000)
+    s.loop("curta")
+    block()
+    assert s.looping == "curta" and np.all(mix[:, 0] > 0.0)
+    s.loop("x")                                                # outro loop: só um por vez
+    block()
+    assert s.looping == "x" and sum(1 for v in s.voices if v[4]) == 1
+
+
+def test_stop_reaches_the_audio_thread_even_mid_block():
+    """STOP enquanto o callback ainda segura a lista antiga de vozes: o loop para no bloco seguinte."""
+    s = smp.Sampler()
+    s.put("x", tone(secs=0.1, amp=0.4), 48000)
+    s.loop("x")
+    mix = np.zeros((N, 2))
+    s.render(mix, N, 1.0)
+    old = s.voices
+    s.stop_all()
+    s.voices = old                                             # o callback devolveu a lista antiga
+    mix[:] = 0.0
+    s.render(mix, N, 1.0)
+    assert not s.voices and float(np.abs(mix).max()) == 0.0

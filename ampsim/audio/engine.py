@@ -308,6 +308,7 @@ class AudioEngine:
         self.sampler.render(mix, frames, drums_g)        # gravações nos pads: volume/mute dos pads
         if t.D[Ly.T_ON] > 0.5:
             self._run_track(t, self._synth_out, 0, frames, mix)
+        self._lim[3] = inst.levels.get("comp", 0) / 100.0   # compressor da saída (fader Compressor)
         write_output_lim(mix, frames, outdata, self.out_offset,
                          self._glide("master", 0.0 if self.muted else self.master), self._lim)
         if rec.active and rec.source == "out":

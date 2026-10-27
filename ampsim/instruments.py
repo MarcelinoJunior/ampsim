@@ -262,7 +262,7 @@ KNOB_FUNCS = ("Nenhuma", "Volume teclas", "Volume camada 1", "Volume camada 2", 
               "Reverb", "Shimmer", "Reverb da bateria", "Chorus", "Rotação (intensidade)",
               "Rotação (velocidade)", "Drive",
               "Delay (mix)", "Tempo do delay", "Repetições do delay", "Brilho", "Release", "Ataque",
-              "Sensibilidade ao toque", "BPM", "Volume do metrônomo", "Master")
+              "Sensibilidade ao toque", "BPM", "Volume do metrônomo", "Master", "Compressor")
 DEFAULT_KNOB_FUNCS = ["Volume teclas", "Volume camada 2", "Volume bateria", "Volume pad contínuo",
                       "Reverb", "Shimmer", "Brilho", "Master"]
 BUTTON_FUNCS = ("Nenhuma", "Tap tempo (BPM)", "Timbre anterior", "Próximo timbre", "Preset de pads anterior",
@@ -419,7 +419,8 @@ class Instruments:
         self._chord_pending = None           # (tom, instante) esperando a próxima batida
         self._beat_ref = time.monotonic()    # grade das batidas (recomeça no tap tempo)
         self.levels = dict(keys=80, drums=85, pad=70, reverb=110, chorus=40, shimmer=65,
-                           drumverb=35, bright=64, release=64, attack=0, touch=100)
+                           drumverb=35, bright=64, release=64, attack=0, touch=100,
+                           comp=0)                  # compressor da saída 0-100 (0 = desligado)
         self.mapping = dict(pads=[list(p) for p in DEFAULT_PADS],
                             pads_b=[list(p) for p in DEFAULT_PADS_B],
                             knobs=[None] * KNOB_COUNT, buttons=[None] * len(BUTTONS))
@@ -1037,6 +1038,8 @@ class Instruments:
             self.apply_fx()
         elif func == "Master":
             self.engine.master = (value / 127) ** 2 * 2.0
+        elif func == "Compressor":
+            lv["comp"] = pct
         elif func in ("Rotação (intensidade)", "Drive", "Delay (mix)", "Tempo do delay",
                       "Repetições do delay"):
             fx = self.fx

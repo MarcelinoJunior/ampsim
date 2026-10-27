@@ -14,9 +14,9 @@ PANELS = (
     ("pads", "Pads (contínuo e bateria)"),
     ("faders", "Faders e mute"),
     ("setlist", "Setlist"),
-    ("tempo", "BPM, tap e click"),
-    ("emergencia", "Mute geral e pânico"),
     ("timbre", "Timbre atual e presets"),
+    ("guitarra", "Guitarra (presets, pedais e volume)"),
+    ("baixo", "Baixo (presets, pedais e volume)"),
 )
 PANEL_IDS = tuple(p for p, _ in PANELS)
 DEFAULT_PORT = 8080
@@ -33,8 +33,19 @@ def default():
             "usuarios": []}                        # [{"nome", "sal", "hash", "telas": [...]}]
 
 
+# todas as telas da 1.1 (antes de Guitarra/Baixo; Tempo e Mute saíram): quem via tudo continua vendo tudo
+OLD_ALL = {"pads", "faders", "setlist", "tempo", "emergencia", "timbre"}
+
+
 def clean_panels(v):
-    return [p for p in PANEL_IDS if isinstance(v, list) and p in v]
+    """Telas válidas, na ordem da página. Quem via todas as telas antigas continua vendo tudo; um perfil
+    restrito continua restrito (só Tempo/Mute, que saíram, vira nenhuma tela: o PC mostra "nenhuma tela")."""
+    if not isinstance(v, list):
+        return []
+    old = set(x for x in v if isinstance(x, str))
+    if OLD_ALL <= old:
+        return list(PANEL_IDS)
+    return [p for p in PANEL_IDS if p in old]
 
 
 def load():

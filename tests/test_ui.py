@@ -445,7 +445,10 @@ def test_midi_learn_maps_screen_control(win, monkeypatch):
 def test_mixer_moves_volumes_and_effects(win):
     win.dock.show_tab(1)
     strips = {arg: s for (kind, arg), s, *_ in win.dock.strips}
-    assert "guitar" not in strips and "Master" not in strips and "Volume teclas" not in strips
+    assert "guitar" not in strips and "Volume teclas" not in strips
+    assert "Volume do metrônomo" not in strips and list(strips)[-1] == "Master"      # Master no lugar do Click
+    strips["Master"].setValue(50)
+    assert abs(win.engine.master - 0.5) < 0.02                  # mesma curva do knob MIDI "Master"
     strips["Volume bateria"].setValue(40)
     assert win.inst.levels["drums"] == 40
     strips["Drive"].setValue(60)

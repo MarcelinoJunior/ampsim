@@ -90,8 +90,8 @@ class Sampler:
         self.fs = 48000
         self.raw = {}            # nome -> (array, taxa do arquivo)
         self.samples = {}        # nome -> array na taxa do motor (trocado inteiro, nunca editado)
-        self.events = deque()    # (nome, velocidade) vindos da interface ou do MIDI
-        self.voices = []         # [array, posição, ganho]
+        self.events = deque()    # (nome, velocidade, loop) vindos da interface ou do MIDI
+        self.voices = []         # [array, posição, ganho, nome, loop]
 
     # ------------------------------------------------------------------ interface
     def set_fs(self, fs):
@@ -111,32 +111,71 @@ class Sampler:
         self.samples = samples
 
     def trigger(self, name, vel=110):
-        self.events.append((name, vel))
+        self.events.append((name, vel, False))
+
+    def loop(self, name, vel=110):
+        """Toca `name` em loop até o STOP (stop_all). Se ele já está tocando (o 1º toque do duplo
+        toque), essa mesma voz passa a repetir: nada recomeça nem dobra."""
+        self.events.append((name, vel, True))
+
+    @property
+    def looping(self):
+        """Nome da gravação que está em loop ("" se nenhuma). Lido pela interface."""
+        for v in list(self.voices):
+            if v[4]:
+                return v[3]
+        return ""
 
     # ------------------------------------------------------------------ tempo real
     def render(self, mix, frames, gain):
         q = self.events
         while q:
-            name, vel = q.popleft()
+            item = q.popleft()
+            if item is None:                         # STOP pedido pela interface
+                self.voices = []
+                continue
+            name, vel, loop = item
             a = self.samples.get(name)
-            if a is not None and len(a):
-                if len(self.voices) >= MAX_VOICES:
-                    self.voices.pop(0)
-                self.voices.append([a, 0, (vel / 127.0) ** 1.5])
+            if a is None or not len(a):
+                continue
+            if loop:
+                # a voz mais nova desta gravação (o toque de agora há pouco) vira loop; um loop só por vez
+                cur = None
+                for v in self.voices:
+                    v[4] = False
+                    if v[0] is a:
+                        cur = v
+                if cur is not None:
+                    cur[4] = True
+                    continue
+            if len(self.voices) >= MAX_VOICES:
+                self.voices.pop(0)
+            self.voices.append([a, 0, (vel / 127.0) ** 1.5, name, loop])
         if not self.voices:
             return
         keep = []
         for v in self.voices:
-            a, pos, g = v
-            n = min(frames, len(a) - pos)
-            if n > 0:
-                mix[:n] += a[pos:pos + n] * (g * gain)
-                v[1] = pos + n
-            if v[1] < len(a):
+            a, pos, g = v[0], v[1], v[2]
+            k = 0
+            while k < frames:
+                n = min(frames - k, len(a) - pos)
+                if n > 0:
+                    mix[k:k + n] += a[pos:pos + n] * (g * gain)
+                    pos += n
+                    k += n
+                if pos >= len(a):
+                    if not v[4]:
+                        break
+                    pos = 0                          # loop: volta ao começo sem buraco no bloco
+            v[1] = pos
+            if v[4] or pos < len(a):
                 keep.append(v)
         self.voices = keep
 
     def stop_all(self):
+        # a lista vazia vale já para a tela; o evento garante que o callback (que pode estar no meio
+        # de um bloco com a lista antiga) também pare, inclusive um loop
+        self.events.append(None)
         self.voices = []
 
 

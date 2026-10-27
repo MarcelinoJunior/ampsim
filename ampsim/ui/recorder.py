@@ -51,7 +51,7 @@ class RecorderPanel(QWidget):
         self.stop_btn.setFocusPolicy(Qt.NoFocus)
         self.stop_btn.setFixedSize(70, 26)
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setToolTip("Para a gravação e guarda no banco")
+        self.stop_btn.setToolTip("Para a gravação e guarda no banco (ou para a gravação que está em loop)")
         self.stop_btn.clicked.connect(self.stop)
         row.addWidget(self.stop_btn)
         self.time = QLabel("")
@@ -84,6 +84,14 @@ class RecorderPanel(QWidget):
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._tick)
+        self._recording = False
+        self._quiet = False                 # gravação pedida pela tela remota: nada de janela no PC
+        self.on_auto_stop = None            # (nome ou None) quando para sozinho no limite de tempo
+        # gravação em loop (PLAY duas vezes na tela remota): aparece aqui e o STOP para
+        self.loop_timer = QTimer(self)
+        self.loop_timer.setInterval(250)
+        self.loop_timer.timeout.connect(self._loop_tick)
+        self.loop_timer.start()
         self.load_bank()
 
     def _small_button(self, text, ic, slot):
@@ -140,14 +148,20 @@ class RecorderPanel(QWidget):
             b.setEnabled(has)
 
     # ------------------------------------------------------------------ gravar
-    def start(self):
+    def start(self, quiet=False):
+        """quiet: pedido da tela remota (sem janela no PC). -> "" ou o motivo de não gravar."""
+        if self.engine.recorder.active:
+            return ""
         if not self.engine.running:
-            QMessageBox.information(self, "Gravador", "Ligue o áudio primeiro (botão “Áudio” lá em cima).")
-            return
+            if not quiet:
+                QMessageBox.information(self, "Gravador", "Ligue o áudio primeiro (botão “Áudio” lá em cima).")
+            return "O áudio do AmpSim está desligado"
         src = self.source.currentData()
         if src is None:
-            return
+            return "Escolha a fonte do gravador no AmpSim"
         self.engine.recorder.start(self.engine.fs, src)
+        self._recording = True
+        self._quiet = bool(quiet)
         self.rec_btn.setText("● GRAVANDO")
         self.rec_btn.setStyleSheet(REC_ON)
         self.rec_btn.setEnabled(False)
@@ -155,15 +169,36 @@ class RecorderPanel(QWidget):
         self.source.setEnabled(False)
         self.timer.start()
         self._tick()
+        return ""
 
     def _tick(self):
         r = self.engine.recorder
         self.time.setText(f"{r.seconds:4.1f} s")
-        if not r.active and self.stop_btn.isEnabled():          # chegou nos 60 s: guarda sozinho
-            self.stop()
+        if not r.active and self._recording:                    # chegou nos 60 s: guarda sozinho
+            name = self.stop(quiet=self._quiet)
+            if self.on_auto_stop is not None:
+                self.on_auto_stop(name)
 
-    def stop(self):
+    def _loop_tick(self):
+        if self._recording:
+            return
+        name = self.engine.sampler.looping
+        self.stop_btn.setEnabled(bool(name))
+        if name:
+            self.time.setText("⟳ loop")
+            self.time.setToolTip(f"Repetindo “{name}” até o STOP")
+        elif self.time.text() == "⟳ loop":
+            self.time.setText("")
+            self.time.setToolTip("")
+
+    def stop(self, quiet=False):
         r = self.engine.recorder
+        if not r.active and not self._recording:
+            if self.engine.sampler.looping:                     # STOP com uma gravação em loop: para ela
+                self.engine.sampler.stop_all()
+                self._loop_tick()
+            return None
+        self._recording = False
         fs = r.fs
         data = r.stop()
         self.timer.stop()
@@ -174,8 +209,9 @@ class RecorderPanel(QWidget):
         self.source.setEnabled(True)
         if len(data) == 0:
             self.time.setText("silêncio")
-            QMessageBox.information(self, "Gravador", "Nada foi gravado: só chegou silêncio.\n"
-                                    "Confira a fonte escolhida ao lado do REC.")
+            if not quiet:
+                QMessageBox.information(self, "Gravador", "Nada foi gravado: só chegou silêncio.\n"
+                                        "Confira a fonte escolhida ao lado do REC.")
             return None
         name = smp.save_recording(data, fs)
         self.engine.sampler.put(name, data, fs)
@@ -185,8 +221,8 @@ class RecorderPanel(QWidget):
         return name
 
     # ------------------------------------------------------------------ usar
-    def preview(self):
-        name = self.current()
+    def preview(self, name=None):
+        name = name or self.current()
         if name:
             self.engine.sampler.trigger(name, 110)
 

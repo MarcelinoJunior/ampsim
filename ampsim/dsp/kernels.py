@@ -583,24 +583,54 @@ def mix_soundfont(B, n, mix, synth_out, shim, KBS, ROUTE, to_chain, keys_gain, d
 
 LIM_CEIL = 0.9          # teto do limitador da saída (folga de ~1 dB para o conversor)
 LIM_RELEASE_S = 0.3     # tempo para o volume voltar depois de um pico
+# compressor da saída ("nivelador"): segura o acúmulo de notas com o pedal e suaviza a queda ao soltar
+COMP_DETECT_S = 0.02    # janela do detector (média quadrática, ~RMS)
+COMP_ATTACK_S = 0.015   # tempo para abaixar quando o volume sobe
+COMP_RELEASE_S = 0.35   # tempo para voltar quando o volume cai (sem "buraco" ao soltar o pedal)
+COMP_KNEE_DB = 6.0      # joelho suave em volta do limiar
+COMP_MAKEUP_DB = 3.0    # ganho de compensação com o compressor no máximo (modesto)
+
+
+def _coef(seconds, fs):
+    return 1.0 - math.exp(-1.0 / (seconds * fs))
 
 
 def limiter_state(fs):
-    """[ganho atual, coeficiente de volta, menor ganho desde a última leitura] do limitador."""
-    return np.array([1.0, 1.0 - math.exp(-1.0 / (LIM_RELEASE_S * fs)), 1.0])
+    """Estado da saída (guardado entre blocos, sem alocar no callback):
+    [0] ganho do limitador, [1] coeficiente de volta do limitador, [2] menor ganho desde a última leitura,
+    [3] quantidade do compressor 0..1 (o motor escreve a cada bloco), [4] média quadrática do detector,
+    [5] ganho atual do compressor, [6]/[7]/[8] coeficientes de ataque, release e detector."""
+    return np.array([1.0, _coef(LIM_RELEASE_S, fs), 1.0, 0.0, 0.0, 1.0,
+                     _coef(COMP_ATTACK_S, fs), _coef(COMP_RELEASE_S, fs), _coef(COMP_DETECT_S, fs)])
 
 
 @njit(**JIT)
 def write_output_lim(mix, n, out, off, master, lim):
-    """Copia a mixagem para o buffer do driver passando pelo limitador da saída.
+    """Copia a mixagem para o buffer do driver passando pelo compressor e pelo limitador da saída.
 
-    Quando a soma passa do teto, o ganho cai na hora e volta devagar (~0,3 s): o volume abaixa um
-    pouco em vez de a onda ser cortada (cortar cada pico é o que vira chiado/"ruído" no alto-falante
-    com pad alto + piano). Ganho igual nos dois lados para não mexer no estéreo."""
+    Compressor (lim[3] = quantidade 0..1; 0 = desligado, o som não muda): detector ~RMS de 20 ms,
+    ataque ~15 ms e release ~350 ms, limiar de -6 a -24 dBFS e razão de 1,5:1 a 4:1 conforme a
+    quantidade, joelho suave e até +3 dB de compensação. Muitas notas presas no pedal somam menos
+    volume, e ao soltar o pedal o volume volta aos poucos em vez de despencar.
+
+    Limitador: quando a soma passa do teto, o ganho cai na hora e volta devagar (~0,3 s): o volume
+    abaixa um pouco em vez de a onda ser cortada (cortar cada pico é o que vira chiado/"ruído" no
+    alto-falante com pad alto + piano). Ganho igual nos dois lados para não mexer no estéreo."""
     nout = out.shape[1]
     g = lim[0]
     rel = lim[1]
     gmin = lim[2]
+    amt = min(max(lim[3], 0.0), 1.0)
+    ms = lim[4]
+    cg = lim[5]
+    catt = lim[6]
+    crel = lim[7]
+    cdet = lim[8]
+    comp = amt > 0.0 or cg != 1.0
+    thr = -6.0 - 18.0 * amt
+    slope = 1.0 - 1.0 / (1.5 + 2.5 * amt)
+    makeup = COMP_MAKEUP_DB * amt
+    half = 0.5 * COMP_KNEE_DB
     for i in range(n):
         for c in range(nout):
             out[i, c] = 0.0
@@ -610,6 +640,23 @@ def write_output_lim(mix, n, out, off, master, lim):
             vl = 0.0
         if not (abs(vr) < 1e6):
             vr = 0.0
+        if comp:
+            ms += (0.5 * (vl * vl + vr * vr) - ms) * cdet
+            target = 1.0
+            if amt > 0.0:
+                over = 10.0 * math.log10(ms + 1e-12) - thr
+                gr = 0.0
+                if over >= half:
+                    gr = slope * over
+                elif over > -half:
+                    x = over + half
+                    gr = slope * x * x / (2.0 * COMP_KNEE_DB)
+                target = 10.0 ** ((makeup - gr) / 20.0)
+            cg += (target - cg) * (catt if target < cg else crel)
+            if amt <= 0.0 and abs(cg - 1.0) < 1e-5:
+                cg = 1.0                    # desligado e já de volta: passa direto
+            vl *= cg
+            vr *= cg
         a = max(abs(vl), abs(vr))
         if a * g > LIM_CEIL:
             g = LIM_CEIL / a
@@ -627,15 +674,21 @@ def write_output_lim(mix, n, out, off, master, lim):
         mix[i, 1] = 0.0
     lim[0] = g
     lim[2] = gmin
+    lim[4] = ms
+    lim[5] = cg
 
 
 @njit(**JIT)
 def write_output(mix, n, out, off, master):
-    """write_output_lim sem guardar o estado entre blocos (testes e aquecimento)."""
-    lim = np.empty(3)
+    """write_output_lim sem guardar o estado entre blocos (testes e aquecimento; compressor desligado)."""
+    lim = np.zeros(9)
     lim[0] = 1.0
     lim[1] = 1.0 - math.exp(-1.0 / (LIM_RELEASE_S * 48000.0))
     lim[2] = 1.0
+    lim[5] = 1.0
+    lim[6] = 1.0 - math.exp(-1.0 / (COMP_ATTACK_S * 48000.0))
+    lim[7] = 1.0 - math.exp(-1.0 / (COMP_RELEASE_S * 48000.0))
+    lim[8] = 1.0 - math.exp(-1.0 / (COMP_DETECT_S * 48000.0))
     write_output_lim(mix, n, out, off, master, lim)
 
 

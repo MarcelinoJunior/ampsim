@@ -4,8 +4,9 @@ Protocolo (JSON pelo WebSocket em /ws):
   aparelho -> {"t": "login", "nome", "senha"} | {"t": "token", "token"} | {"t": "cmd", "c": ..., ...}
               | {"t": "ping", "id"}
   servidor -> {"t": "precisa_login"} | {"t": "auth", "ok", "nome", "telas", "token", "erro"}
-              | {"t": "estado", "telas": {tela: dados}} (só as telas liberadas e só o que mudou)
-              | {"t": "pong", "id"}
+              | {"t": "estado", "telas": {tela: dados}} (só as telas liberadas e só o que mudou;
+                "tela.parte" é um pedaço da tela que muda pouco, ex. "pads.sons" com o catálogo)
+              | {"t": "pong", "id"} | {"t": "aviso", "texto"} (só para o aparelho que pediu)
 
 Comandos chegam em on_command(cmd, telas) na thread do servidor; quem usa decide o que roda direto
 (ex.: tocar um pad) e o que vai para a thread da interface.
@@ -25,15 +26,29 @@ FILES = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index
          "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/app.css": ("app.css", "text/css; charset=utf-8"),
          "/icone.svg": ("icone.svg", "image/svg+xml")}
 TOKEN_TTL = 12 * 3600
-# comando -> tela que precisa estar liberada
+# trilha do AmpSim -> tela da página que controla ela
+TRACK_PANEL = {"guitar": "guitarra", "bass": "baixo"}
+# comando -> tela que precisa estar liberada (um dict: depende da "trilha" do comando)
 COMMAND_PANEL = {
-    "pad": "pads", "pad_cont": "pads", "pad_parar": "pads", "pad_timbre": "pads",
+    "pad": "pads", "pad_cont": "pads", "pad_parar": "pads", "pad_timbre": "pads", "pad_som": "pads",
+    "rec": "pads", "rec_parar": "pads", "rec_ouvir": "pads", "pad_volume": "pads", "pad_mute": "pads",
     "fader": "faders", "mute": "faders",
     "musica": "setlist", "musica_passo": "setlist", "setlist": "setlist",
-    "tap": "tempo", "click": "tempo", "bpm": "tempo",
-    "mute_geral": "emergencia", "panico": "emergencia",
-    "preset_passo": "timbre",
+    "preset_passo": "timbre", "timbre_camada": "timbre", "timbre_salvar": "timbre",
+    "timbre_l2": "timbre", "timbre_remover": "timbre",
+    "trilha_preset_passo": TRACK_PANEL, "trilha_preset": TRACK_PANEL, "trilha_volume": TRACK_PANEL,
+    "trilha_on": TRACK_PANEL, "efeito_on": TRACK_PANEL, "efeito_param": TRACK_PANEL, "trilha_salvar": TRACK_PANEL,
 }
+
+
+def command_panel(msg):
+    """Tela que o comando precisa (None = comando desconhecido ou trilha inválida)."""
+    c = msg.get("c")
+    p = COMMAND_PANEL.get(c) if isinstance(c, str) else None
+    if isinstance(p, dict):
+        t = msg.get("trilha")
+        return p.get(t) if isinstance(t, str) else None
+    return p
 
 
 def local_ips():
@@ -185,9 +200,8 @@ class WebServer:
         if c.telas is None:
             return
         out = {}
-        for tela in c.telas:
-            data = self._state.get(tela)
-            if data is None:
+        for tela, data in list(self._state.items()):
+            if tela.split(".", 1)[0] not in c.telas:
                 continue
             text = json.dumps(data, sort_keys=True, ensure_ascii=False)
             if full or c.sent.get(tela) != text:
@@ -221,6 +235,11 @@ class WebServer:
         headers = Headers([("Content-Type", item[1]), ("Cache-Control", "no-cache"),
                            ("Content-Length", str(len(body)))])
         return Response(200, "OK", headers, body)
+
+    def tell(self, c, text):
+        """Aviso curto só para o aparelho `c` (ex.: "o áudio está desligado")."""
+        if self.loop is not None and c in self.clients:
+            self.loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._send(c, {"t": "aviso", "texto": text})))
 
     async def _send(self, c, msg):
         try:
@@ -275,8 +294,9 @@ class WebServer:
                     else:
                         await self._send(c, {"t": "auth", "ok": False, "erro": ""})
                 elif t == "cmd" and c.telas is not None:
-                    tela = COMMAND_PANEL.get(msg.get("c"))
+                    tela = command_panel(msg)
                     if tela is not None and tela in c.telas:
+                        msg["_c"] = c                    # quem pediu (para avisos)
                         try:
                             self.on_command(msg, c.telas)
                         except Exception:  # noqa: BLE001 - comando estranho não derruba o servidor
