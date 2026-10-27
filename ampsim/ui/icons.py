@@ -12,7 +12,7 @@ GLYPHS = {
     "stop": "", "upload": "", "download": "", "share": "", "copy": "",
     "delete": "", "add": "", "refresh": "", "volume": "", "eq": "",
     "power": "", "info": "", "music": "", "close": "", "check": "",
-    "tap": "", "panic": "", "file": "",
+    "tap": "", "panic": "", "file": "", "globe": "",
 }
 _FAMILY = None
 _cache = {}

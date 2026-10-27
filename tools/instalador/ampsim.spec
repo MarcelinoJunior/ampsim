@@ -9,6 +9,7 @@ TP = os.path.join(ROOT, "third_party")
 
 datas = [
     (os.path.join(ROOT, "assets"), "assets"),
+    (os.path.join(ROOT, "ampsim", "web", "static"), os.path.join("ampsim", "web", "static")),   # tela remota
     (os.path.join(TP, "fluidsynth"), os.path.join("third_party", "fluidsynth")),
     (os.path.join(TP, "soundfonts"), os.path.join("third_party", "soundfonts")),
     (os.path.join(TP, "nam_models"), os.path.join("third_party", "nam_models")),
@@ -21,7 +22,8 @@ a = Analysis(
     [os.path.join(SPECPATH, "entrada.py")],
     pathex=[ROOT],
     datas=datas,
-    hiddenimports=collect_submodules("ampsim"),
+    # websockets e segno são importados só quando a tela remota liga
+    hiddenimports=collect_submodules("ampsim") + collect_submodules("websockets") + ["segno"],
     excludes=["tkinter", "matplotlib", "pytest", "IPython", "PySide6.QtWebEngineCore",
               "PySide6.QtWebEngineWidgets", "PySide6.QtQml", "PySide6.QtQuick", "PySide6.Qt3DCore",
               "PySide6.QtMultimedia", "PySide6.QtPdf", "PySide6.QtCharts", "PySide6.QtDataVisualization"],

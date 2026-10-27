@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a111d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>AmpSim Remoto</title>
+<link rel="icon" href="icone.svg">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><img src="icone.svg" alt=""><span>AmpSim</span><small>remoto</small></div>
+  <div class="status"><span id="dot" class="dot"></span><span id="lat">conectando…</span></div>
+  <button id="sair" class="ghost" hidden>Sair</button>
+</header>
+
+<section id="login" class="login" hidden>
+  <form id="loginForm" autocomplete="on">
+    <h1>Entrar</h1>
+    <label>Usuário<input id="nome" name="username" autocomplete="username" autocapitalize="none" required></label>
+    <label>Senha<input id="senha" name="password" type="password" autocomplete="current-password" required></label>
+    <p id="loginErro" class="erro"></p>
+    <button type="submit" class="primary big">Entrar</button>
+  </form>
+</section>
+
+<main id="app" hidden>
+  <div id="panels" class="panels"></div>
+</main>
+
+<nav id="tabs" class="tabs" hidden></nav>
+<div id="offline" class="offline" hidden>Sem conexão com o AmpSim · tentando de novo…</div>
+<script src="app.js"></script>
+</body>
+</html>

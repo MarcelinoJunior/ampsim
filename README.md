@@ -35,12 +35,14 @@ Todos os timbres usados são **gratuitos e de licença livre**, e o AmpSim é **
 2. [Primeiro uso: escolhendo a placa de som](#primeiro-uso-escolhendo-a-placa-de-som)
 3. [Guitarra e Baixo](#guitarra-e-baixo)
 4. [Pad/Piano](#padpiano)
-5. [Compartilhar cenas e presets (menu Arquivo)](#compartilhar-cenas-e-presets-menu-arquivo)
-6. [Mapeando o seu controlador MIDI](#mapeando-o-seu-controlador-midi)
-7. [Latência: dicas para tocar sem atraso](#latência-dicas-para-tocar-sem-atraso)
-8. [Problemas comuns](#problemas-comuns)
-9. [Para quem quer mexer no código](#para-quem-quer-mexer-no-código)
-10. [Licenças, créditos e marcas](#licenças-créditos-e-marcas)
+5. [Ao vivo: setlist, metrônomo e saúde do áudio](#ao-vivo-setlist-metrônomo-e-saúde-do-áudio)
+6. [Tela remota no celular ou tablet (Webserver)](#tela-remota-no-celular-ou-tablet-webserver)
+7. [Compartilhar cenas e presets (menu Arquivo)](#compartilhar-cenas-e-presets-menu-arquivo)
+8. [Mapeando o seu controlador MIDI](#mapeando-o-seu-controlador-midi)
+9. [Latência: dicas para tocar sem atraso](#latência-dicas-para-tocar-sem-atraso)
+10. [Problemas comuns](#problemas-comuns)
+11. [Para quem quer mexer no código](#para-quem-quer-mexer-no-código)
+12. [Licenças, créditos e marcas](#licenças-créditos-e-marcas)
 
 ---
 
@@ -274,6 +276,29 @@ Há atalhos prontos como *Sem embolar* e *Atrás da banda*.
 - **Pianos gravados** (menu ☰ → Timbres adicionais): Piano de Armário, Piano de Cauda YDP e
   Salamander (Yamaha C5), baixados quando você quiser.
 
+## Tela remota no celular ou tablet (Webserver)
+
+Use um celular, tablet ou outro computador **na mesma rede Wi-Fi** como segunda tela do AmpSim,
+direto no navegador (sem instalar nada no aparelho):
+
+1. Clique em **Webserver** na barra de cima e marque **Ligar a tela remota**.
+2. Aponte a câmera do celular para o **QR code** (ou digite o link que aparece, ex.
+   `http://192.168.0.10:8080`). Na primeira vez o Windows pode perguntar sobre o Firewall:
+   permita em **Redes privadas**.
+3. Pronto: no celular aparecem abas embaixo (**Pads, Faders, Setlist, Tempo, Mute, Timbre**); no
+   tablet deitado e no PC, tudo lado a lado.
+
+O que dá para fazer pelo aparelho: pad contínuo (tom, timbre, parar) e pads de bateria; faders com
+**MUTE** de cada canal; escolher a música da setlist (◀ ▶); BPM, **TAP** e click; **MUTE GERAL** e
+**PÂNICO**; trocar o preset do Pad/Piano. Tudo vale na hora nos dois lados, e vários aparelhos
+podem ficar conectados ao mesmo tempo. O número no canto (ex. *4 ms*) é o atraso da rede.
+
+**Quem vê o quê:** sem senha, qualquer aparelho na rede entra e vê as telas marcadas. Com **usuário
+e senha**, crie um usuário para cada pessoa (ex.: *baterista* só com Pads e Tempo, *mesa* com
+Faders e Mute) ou use **Espelho** para ver tudo. Em rede aberta (de visitantes), prefira com senha.
+A página funciona só dentro da sua rede, não fica na internet. A porta (8080) pode ser trocada na
+mesma janela se outro programa já usar.
+
 ## Compartilhar cenas e presets (menu Arquivo)
 
 No botão **☰ Arquivo**:
@@ -335,6 +360,7 @@ ampsim/
   audio/      motor de áudio, dispositivos, FluidSynth, VST3
   dsp/        amplificadores, efeitos, NAM, synth, bateria worship, efeitos das teclas
   midi/       entrada MIDI nativa do Windows
+  web/        tela remota: servidor da página (websockets) e a página do celular (web/static)
   ui/         interface (barra superior, banco de presets, Pad/Piano, guitarra/baixo, barra inferior)
   instruments.py   timbres, pads, mapeamento do controlador
 tools/        baixar_extras.py (timbres gratuitos), make_icon.py

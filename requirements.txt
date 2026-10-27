@@ -4,3 +4,5 @@ sounddevice>=0.5
 PySide6>=6.7
 scipy>=1.14
 pedalboard>=0.9.20
+websockets>=13.0
+segno>=1.6

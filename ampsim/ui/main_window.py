@@ -35,6 +35,8 @@ from .panels import SynthPanel, TrackPage
 from .preset_bank import PresetBank
 from .theme import ACCENT, C
 from .topbar import TopBar
+from .webserver_dialog import WebServerDialog
+from ..web.remote import Remote
 from .widgets import find_data
 
 TITLES = {"guitar": "Guitarra", "bass": "Baixo", "pads": "Pad/Piano"}
@@ -200,6 +202,13 @@ class MainWindow(QMainWindow):
         self.stale_timer.start(30000)
         if self.auto_update and not os.environ.get("AMPSIM_NO_UPDATE"):    # testes não acessam a rede
             QTimer.singleShot(2500, self.check_updates)
+        # tela remota (celular/tablet na rede): liga sozinho se ficou ligado da última vez
+        self.remote = Remote(self)
+        self.topbar.web_btn.clicked.connect(lambda *_: self.open_webserver())
+        if self.remote.cfg["ligado"] and not os.environ.get("AMPSIM_NO_WEB"):
+            if not self.remote.start():
+                QTimer.singleShot(1500, lambda: self.flash_status(self.remote.server.error, 8000))
+        self._update_web_btn()
 
     # ------------------------------------------------------------------ construção
     def _build_ready_combo(self):
@@ -281,8 +290,8 @@ class MainWindow(QMainWindow):
             self.pages[kind].set_compact(not on)
 
     # ------------------------------------------------------------------ presets e banco
-    def preset_step(self, d):
-        kind = self.current_kind()
+    def preset_step(self, d, kind=None):
+        kind = kind or self.current_kind()
         if kind != "pads":
             self.pages[kind].preset_step(d)
             self._sync_bank()
@@ -938,12 +947,26 @@ class MainWindow(QMainWindow):
             self.watch_audio(time.monotonic())
         if self._cpu_tick % 15 == 0:
             style_badge(self.topbar.health_btn, e)
+            self._update_web_btn()
+        if self._cpu_tick % 3 == 0 and self.remote.server.clients:     # ~10x por segundo para os aparelhos
+            self.remote.push()
         if e.running and self._cpu_tick % 15 == 0:          # 2x por segundo basta
             cfg = e.config
             _, _, total = e.latency_ms()
             self.topbar.info2.setText(f"Buffer {cfg.blocksize} · {total:.1f} ms · CPU {e.cpu_load() * 100:.0f}%")
             self.topbar.power.setToolTip(f"Áudio ligado · CPU {e.cpu_load() * 100:.0f}% · falhas {e.xruns}\n"
                                          "Clique para desligar")
+
+    # ------------------------------------------------------------------ tela remota
+    def open_webserver(self):
+        WebServerDialog(self.remote, self).exec()
+        self._update_web_btn()
+
+    def _update_web_btn(self):
+        srv = self.remote.server
+        urls = srv.urls()
+        self.topbar.set_web(srv.running, len([c for c in list(srv.clients) if c.telas is not None]),
+                            urls[0] if urls else "")
 
     # ------------------------------------------------------------------ cenas (menu Arquivo)
     def scene_state(self):
@@ -1044,6 +1067,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, ev):
         self.hotplug_timer.stop()
+        self.remote.stop()
         self.stale_timer.stop()
         self.save_state()
         if self.midi:

@@ -46,8 +46,8 @@ class TopBar(QFrame):
         self.setObjectName("topbar")
         self.setFixedHeight(66)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(16, 8, 14, 8)
-        lay.setSpacing(10)
+        lay.setContentsMargins(14, 8, 12, 8)
+        lay.setSpacing(7)
 
         logo = QLabel()
         logo.setPixmap(pixmap("logo", ACCENT, 34))
@@ -71,7 +71,7 @@ class TopBar(QFrame):
         sub.setObjectName("appsub")
         names.addWidget(sub)
         lay.addLayout(names)
-        lay.addSpacing(18)
+        lay.addSpacing(6)
 
         self.nav = []
         for i, (_key, text, ic) in enumerate(NAV):
@@ -82,7 +82,7 @@ class TopBar(QFrame):
             b.setIcon(icon(ic, C["text"], 22))
             b.setIconSize(QSize(22, 22))
             b.setMinimumHeight(48)
-            b.setMinimumWidth(b.sizeHint().width() + 8)
+            b.setMinimumWidth(b.sizeHint().width())
             b.clicked.connect(lambda _, i=i: self.pageRequested.emit(i))
             self.nav.append(b)
             lay.addWidget(b)
@@ -107,7 +107,7 @@ class TopBar(QFrame):
         ptxt.addWidget(self.power_title)
         ptxt.addWidget(self.power_state)
         pl.addLayout(ptxt)
-        self.power.setMinimumSize(150, 46)
+        self.power.setMinimumSize(136, 46)
         # sem passar pelo argumento do clicked(): no PySide6 ele pode vir vazio
         self.power.clicked.connect(lambda *_: self.powerToggled.emit(self.power.isChecked()))
         lay.addWidget(self.power)
@@ -124,7 +124,7 @@ class TopBar(QFrame):
         self.info2.setObjectName("small")
         il.addWidget(self.info1)
         il.addWidget(self.info2)
-        self.info.setMinimumSize(168, 46)
+        self.info.setMinimumSize(146, 46)
         self.info.setCursor(Qt.PointingHandCursor)
         self.info.clicked.connect(lambda *_: self.audioSettings.emit())
         lay.addWidget(self.info)
@@ -132,7 +132,7 @@ class TopBar(QFrame):
         self.health_btn = QPushButton("")
         self.health_btn.setFocusPolicy(Qt.NoFocus)
         self.health_btn.setCursor(Qt.PointingHandCursor)
-        self.health_btn.setFixedWidth(96)
+        self.health_btn.setFixedWidth(84)
         self.health_btn.setVisible(False)
         lay.addWidget(self.health_btn)
         lay.addWidget(self._sep())
@@ -148,7 +148,7 @@ class TopBar(QFrame):
         self.prev_btn = self._icon_btn("left", "Preset anterior", lambda: self.presetStep.emit(-1))
         prow.addWidget(self.prev_btn)
         self.preset_stack = QStackedWidget()
-        self.preset_stack.setFixedWidth(226)
+        self.preset_stack.setFixedWidth(190)
         prow.addWidget(self.preset_stack)
         self.next_btn = self._icon_btn("right", "Próximo preset", lambda: self.presetStep.emit(1))
         prow.addWidget(self.next_btn)
@@ -165,6 +165,15 @@ class TopBar(QFrame):
         self.update_btn.setMinimumHeight(38)
         self.update_btn.setVisible(False)
         lay.addWidget(self.update_btn)
+        # tela remota (ampsim/web): celular/tablet na mesma rede como segunda tela
+        self.web_btn = QPushButton(" Webserver")
+        self.web_btn.setFocusPolicy(Qt.NoFocus)
+        self.web_btn.setCursor(Qt.PointingHandCursor)
+        self.web_btn.setMinimumHeight(38)
+        self.web_btn.setIconSize(QSize(16, 16))
+        self.web_btn.setStyleSheet("padding: 4px 8px;")
+        self.set_web(False)
+        lay.addWidget(self.web_btn)
         self.file_btn = QPushButton(" Arquivo")
         self.file_btn.setIcon(icon("folder", C["text"], 18))
         self.file_btn.setFocusPolicy(Qt.NoFocus)
@@ -210,6 +219,14 @@ class TopBar(QFrame):
         self.power_state.setStyleSheet(f"color: {C['red'] if error else C['dim']}; font-size: 8.5pt;")
         self.info1.setText(line1)
         self.info2.setText(line2)
+
+    def set_web(self, on, clients=0, url=""):
+        self.web_btn.setIcon(icon("globe", C["green"] if on else C["dim"], 16))
+        # largura fixa (a barra é justa em 1536 px): quantos aparelhos fica no ícone/dica
+        self.web_btn.setText(" Webserver")
+        self.web_btn.setProperty("clients", clients if on else 0)
+        self.web_btn.setToolTip((f"Tela remota ligada em {url}\n{clients} aparelho(s) conectado(s)\n" if on else
+                                 "Tela remota desligada\n") + "Clique para configurar")
 
     def set_menu(self, file_menu, main_menu: QMenu):
         self.file_btn.setMenu(file_menu)

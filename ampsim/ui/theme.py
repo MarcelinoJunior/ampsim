@@ -70,7 +70,7 @@ QPushButton#danger:hover {{ background: #5a1e2a; }}
 QPushButton#flat {{ background: transparent; border: none; padding: 4px 8px; color: {dim}; }}
 QPushButton#flat:hover {{ color: {text}; background: {card2}; }}
 QPushButton#flat:checked {{ color: white; background: {accent2}; }}
-QPushButton#nav {{ background: {card}; border: 1px solid {border2}; border-radius: 9px; padding: 8px 16px;
+QPushButton#nav {{ background: {card}; border: 1px solid {border2}; border-radius: 9px; padding: 8px 12px;
     font-size: 12pt; color: {text}; text-align: left; }}
 QPushButton#nav:hover {{ background: {card2}; }}
 QPushButton#nav:checked {{ background: {accent}; border-color: #5b9bff; color: white; font-weight: 600; }}

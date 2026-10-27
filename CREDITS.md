@@ -36,6 +36,8 @@ falhar, o script baixa das fontes oficiais listadas abaixo.
 | [PySide6 / Qt](https://www.qt.io/qt-for-python) | LGPL-3.0 |
 | [sounddevice](https://github.com/spatialaudio/python-sounddevice) + [PortAudio](http://www.portaudio.com/) | MIT |
 | [NumPy](https://numpy.org/), [SciPy](https://scipy.org/), [Numba](https://numba.pydata.org/) | BSD |
+| [websockets](https://github.com/python-websockets/websockets) (tela remota) | BSD-3-Clause |
+| [segno](https://github.com/heuer/segno) (QR code da tela remota) | BSD-3-Clause |
 
 ## Baixados na instalação
 
