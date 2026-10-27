@@ -581,23 +581,62 @@ def mix_soundfont(B, n, mix, synth_out, shim, KBS, ROUTE, to_chain, keys_gain, d
     return peak
 
 
+LIM_CEIL = 0.9          # teto do limitador da saída (folga de ~1 dB para o conversor)
+LIM_RELEASE_S = 0.3     # tempo para o volume voltar depois de um pico
+
+
+def limiter_state(fs):
+    """[ganho atual, coeficiente de volta, menor ganho desde a última leitura] do limitador."""
+    return np.array([1.0, 1.0 - math.exp(-1.0 / (LIM_RELEASE_S * fs)), 1.0])
+
+
 @njit(**JIT)
-def write_output(mix, n, out, off, master):
-    """Copia a mixagem para o buffer do driver, com limitador suave de segurança."""
+def write_output_lim(mix, n, out, off, master, lim):
+    """Copia a mixagem para o buffer do driver passando pelo limitador da saída.
+
+    Quando a soma passa do teto, o ganho cai na hora e volta devagar (~0,3 s): o volume abaixa um
+    pouco em vez de a onda ser cortada (cortar cada pico é o que vira chiado/"ruído" no alto-falante
+    com pad alto + piano). Ganho igual nos dois lados para não mexer no estéreo."""
     nout = out.shape[1]
+    g = lim[0]
+    rel = lim[1]
+    gmin = lim[2]
     for i in range(n):
         for c in range(nout):
             out[i, c] = 0.0
-        for k in range(2):
-            v = mix[i, k] * master
-            if not (abs(v) < 1e6):         # NaN/inf de algum efeito: silencia esta amostra
-                v = 0.0
-            a = abs(v)
-            if a > 0.9:
-                v = math.copysign(0.9 + 0.1 * math.tanh((a - 0.9) * 10.0), v)
-            if off + k < nout:
-                out[i, off + k] = v
-            mix[i, k] = 0.0
+        vl = mix[i, 0] * master
+        vr = mix[i, 1] * master
+        if not (abs(vl) < 1e6):            # NaN/inf de algum efeito: silencia esta amostra
+            vl = 0.0
+        if not (abs(vr) < 1e6):
+            vr = 0.0
+        a = max(abs(vl), abs(vr))
+        if a * g > LIM_CEIL:
+            g = LIM_CEIL / a
+        else:
+            g += (1.0 - g) * rel
+        if g < gmin:
+            gmin = g
+        vl *= g
+        vr *= g
+        if off < nout:
+            out[i, off] = vl
+        if off + 1 < nout:
+            out[i, off + 1] = vr
+        mix[i, 0] = 0.0
+        mix[i, 1] = 0.0
+    lim[0] = g
+    lim[2] = gmin
+
+
+@njit(**JIT)
+def write_output(mix, n, out, off, master):
+    """write_output_lim sem guardar o estado entre blocos (testes e aquecimento)."""
+    lim = np.empty(3)
+    lim[0] = 1.0
+    lim[1] = 1.0 - math.exp(-1.0 / (LIM_RELEASE_S * 48000.0))
+    lim[2] = 1.0
+    write_output_lim(mix, n, out, off, master, lim)
 
 
 # ======================================================================= synth de pads
@@ -907,6 +946,7 @@ def warmup(fs=48000.0):
     process_track(src, 0, n, mix, *t.arrays)
     out = np.zeros((n, 2), dtype=np.float32)
     write_output(mix, n, out, 0, 1.0)
+    write_output_lim(mix, n, out, 0, 1.0, limiter_state(48000.0))
     so = np.zeros((n, 1), dtype=np.float32)
     sh = np.zeros(n)
     route = np.full(8, -1, dtype=np.int64)

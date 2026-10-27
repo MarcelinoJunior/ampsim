@@ -11,7 +11,7 @@ from .metronome import Metronome
 from .sampler import Recorder, Sampler
 from ..dsp import layout as Ly
 from ..dsp.kernels import (
-    mix_soundfont, process_post, process_pre, process_track, render_synth, write_output,
+    mix_soundfont, process_post, process_pre, process_track, render_synth, write_output_lim, limiter_state,
 )
 from ..dsp.synth import SynthDSP
 from ..dsp.track import TrackDSP
@@ -56,6 +56,7 @@ class AudioEngine:
         self.recorder = Recorder()      # REC da aba Faders / Pads
         self.sampler = Sampler()        # gravações tocadas pelos pads
         self.metronome = Metronome(self.fs, Ly.MAX_BLOCK)
+        self._lim = limiter_state(self.fs)  # limitador da saída (ver write_output_lim)
         self.click_offset = -2          # saída do click aberta agora (-2 nenhuma, -1 principal, n par n)
         self.sampler.set_fs(self.fs)
         self._route = channel_routes()
@@ -200,6 +201,7 @@ class AudioEngine:
             self.fs = float(fs)
             self.sampler.set_fs(self.fs)
             self.metronome.set_fs(self.fs, Ly.MAX_BLOCK)
+            self._lim = limiter_state(self.fs)
             for name in TRACKS:
                 old = self.tracks[name]
                 t = TrackDSP(self.fs)
@@ -306,7 +308,8 @@ class AudioEngine:
         self.sampler.render(mix, frames, drums_g)        # gravações nos pads: volume/mute dos pads
         if t.D[Ly.T_ON] > 0.5:
             self._run_track(t, self._synth_out, 0, frames, mix)
-        write_output(mix, frames, outdata, self.out_offset, self._glide("master", 0.0 if self.muted else self.master))
+        write_output_lim(mix, frames, outdata, self.out_offset,
+                         self._glide("master", 0.0 if self.muted else self.master), self._lim)
         if rec.active and rec.source == "out":
             rec.feed(outdata[:frames, self.out_offset:self.out_offset + 2])
         m = self.metronome

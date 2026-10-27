@@ -115,3 +115,8 @@ class DeviceWatcher:
         new_midis = [m for m in midis if m not in self._midis]
         self._outs, self._midis = outs, midis
         return new_outs, new_midis
+
+    @property
+    def midis(self):
+        """Entradas MIDI da última leitura."""
+        return list(self._midis or [])

@@ -139,6 +139,34 @@ def test_output_limiter():
     assert np.all(mix == 0)
 
 
+def test_output_limiter_lowers_volume_instead_of_distorting():
+    """Pad alto + piano passando do teto: o limitador abaixa o volume, sem cortar os picos
+    (o corte de cada pico é o que soava como chiado no alto-falante)."""
+    from ampsim.dsp.kernels import limiter_state, write_output_lim
+    fs = 48000
+    t = np.arange(fs) / fs
+    sig = 2.0 * np.sin(2 * np.pi * 220 * t)              # o dobro do que cabe
+    lim = limiter_state(fs)
+    out = np.zeros((fs, 2), dtype=np.float32)
+    for i in range(0, fs, BLOCK):
+        mix = np.stack([sig[i:i + BLOCK]] * 2, axis=1).astype(np.float64)
+        write_output_lim(mix, len(mix), out[i:i + BLOCK], 0, 1.0, lim)
+    y = out[fs // 10:, 0].astype(np.float64)              # depois do primeiro pico
+    assert np.abs(out).max() <= 0.9 + 1e-3
+    spec = np.abs(np.fft.rfft(y * np.hanning(len(y))))
+    f = np.fft.rfftfreq(len(y), 1 / fs)
+    fund = spec[np.abs(f - 220) < 5].max()
+    harm = sum(spec[np.abs(f - 220 * k) < 5].max() ** 2 for k in range(2, 10)) ** 0.5
+    assert harm / fund < 0.01, harm / fund                # menos de 1% de distorção
+    assert lim[2] < 0.5                                    # e registrou o quanto abaixou
+    # sinal normal passa intacto
+    lim = limiter_state(fs)
+    mix = np.full((BLOCK, 2), 0.5)
+    out = np.zeros((BLOCK, 2), dtype=np.float32)
+    write_output_lim(mix, BLOCK, out, 0, 1.0, lim)
+    assert np.allclose(out, 0.5) and lim[2] == 1.0
+
+
 def test_realtime_budget():
     """Três trilhas com tudo ligado + synth com 16 vozes precisam caber folgado em 64 amostras."""
     tracks = [TrackDSP(FS) for _ in range(3)]

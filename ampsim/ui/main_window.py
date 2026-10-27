@@ -125,7 +125,7 @@ class MainWindow(QMainWindow):
         self.bank.requestDelete.connect(self._bank_delete)
         self.bank.requestPart.connect(self.load_part)
         self.dock.collapsedChanged.connect(self._dock_collapsed)
-        self.dock.rescan.clicked.connect(self._reload_midi)
+        self.dock.rescan.clicked.connect(lambda *_: (self._reload_midi(), self.reopen_midi("botão ↻")))
         self.dock.midi_combo.activated.connect(lambda _: self._open_midi(self.dock.midi_combo.currentText()))
         self.dock.kbd_enable.toggled.connect(self._kbd_toggled)
         self.dock.device.addItems(DEVICES)
@@ -167,6 +167,7 @@ class MainWindow(QMainWindow):
         self._unmapped_at = 0.0
         self.tabs.currentChanged.connect(self._tab_changed)
         self.midi = winmm.MidiInput(inst.handle_midi) if winmm.available else None
+        self._midi_lost = None              # teclado que sumiu e deve ser religado quando voltar
 
         self.shortcuts = Shortcuts(self)
         self._want_audio = False            # o usuário quer o áudio ligado (para religar se cair)
@@ -659,9 +660,28 @@ class MainWindow(QMainWindow):
         if current:
             combo.setCurrentText(current)
 
+    def reopen_midi(self, why):
+        """Fecha e abre de novo o teclado MIDI atual. Quando o USB do teclado reinicia (o áudio cai e
+        volta, cabo mexido), a conexão antiga fica muda: as teclas param de chegar sem nenhum erro."""
+        if self.midi is None:
+            return False
+        name = self.midi.name or self._midi_lost
+        if not name:
+            return False
+        self.midi.close()
+        try:
+            self.midi.open(name)
+        except RuntimeError:
+            self._midi_lost = name                  # ainda não voltou: tenta quando reaparecer
+            return False
+        self._midi_lost = None
+        self.dock.log_midi(f"Teclado MIDI religado ({why}): {name}")
+        return True
+
     def _open_midi(self, name):
         if self.midi is None:
             return
+        self._midi_lost = None
         self.midi.close()
         if name and name != NO_MIDI:
             try:
@@ -771,6 +791,16 @@ class MainWindow(QMainWindow):
         if getattr(self, "_asking", False):             # pergunta aberta: o timer continua rodando
             return
         new_outs, new_midis = self.watcher.poll()
+        # o teclado aberto sumiu (USB desligado/reiniciando): religa assim que ele voltar
+        current = self.midi.name if self.midi else None
+        if current and current not in self.watcher.midis:
+            self._midi_lost = current
+            self.midi.close()
+            self.dock.log_midi(f"Teclado MIDI desconectado: {current}")
+            self.flash_status(f"Teclado MIDI desconectado: {current}")
+        elif self._midi_lost and self._midi_lost in self.watcher.midis:
+            if self.reopen_midi("voltou"):
+                self.flash_status(f"Teclado MIDI de volta: {self.midi.name}")
         if new_midis:
             self._reload_midi()
             current = self.midi.name if self.midi else None
@@ -898,6 +928,8 @@ class MainWindow(QMainWindow):
         self._update_status()
         self.flash_status("Áudio religado sozinho")
         self.dock.log_midi("Áudio religado sozinho")
+        # o mesmo tropeço no USB costuma derrubar o MIDI do teclado sem avisar
+        self.reopen_midi("junto com o áudio")
         return True
 
     def flash_status(self, text, ms=8000):
@@ -1053,7 +1085,7 @@ class MainWindow(QMainWindow):
             "master_db": self.master_db(),
             "keyboard": {"octave": self.kbd.octave, "velocity": self.kbd.velocity,
                          "enabled": self.kbd.enabled},
-            "midi_input": self.midi.name if self.midi else None,
+            "midi_input": (self.midi.name or self._midi_lost) if self.midi else None,
             "tab": self.tabs.currentIndex(),
             "running": e.running,
             "ui": {"layout": 2, "auto_update": self.auto_update,

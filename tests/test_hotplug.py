@@ -159,3 +159,71 @@ def test_hotplug_question_names_the_instrument(win, monkeypatch):
     monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(self.text()) or 0)
     win.ask_use_output("OUT (VR-730)")
     assert "Roland VR-730" in shown[0]
+
+
+class CountingMidi:
+    """MIDI de mentira que conta quantas vezes foi aberto (cada abertura = conexão nova)."""
+
+    def __init__(self, available):
+        self.available = available
+        self.name = None
+        self.opens = 0
+
+    def open(self, name):
+        if name not in self.available[0]:
+            raise RuntimeError("Dispositivo MIDI não encontrado")
+        self.name = name
+        self.opens += 1
+
+    def close(self):
+        self.name = None
+
+
+def test_keyboard_that_vanishes_is_reopened_when_back(win, monkeypatch):
+    """USB do teclado reiniciou: a conexão antiga fica muda, então o AmpSim abre de novo sozinho."""
+    outs, midis = [[]], [["Digital Keyboard-1"]]
+    _fake_devices(win, outs, midis)
+    monkeypatch.setattr("ampsim.midi.winmm.list_inputs", lambda: midis[0])
+    win.midi = CountingMidi(midis)
+    win.midi.open("Digital Keyboard-1")
+    midis[0] = []                                     # sumiu
+    win.check_new_devices()
+    assert win.midi.name is None and win._midi_lost == "Digital Keyboard-1"
+    win.save_state()                                  # fechar o AmpSim agora não esquece o teclado
+    import json
+    from ampsim import storage
+    assert json.loads(storage.STATE_FILE.read_text(encoding="utf-8"))["midi_input"] == "Digital Keyboard-1"
+    win.check_new_devices()                           # ainda fora: nada
+    assert win.midi.opens == 1
+    midis[0] = ["Digital Keyboard-1"]                 # voltou
+    win.check_new_devices()
+    assert win.midi.name == "Digital Keyboard-1" and win.midi.opens == 2
+    assert win._midi_lost is None
+    assert "religado" in win.dock.midi_log[-1]
+
+
+def test_audio_reconnect_also_reopens_midi(win, monkeypatch):
+    """O áudio caiu e voltou (mesmo tropeço no USB): o MIDI é aberto de novo junto."""
+    midis = [["Digital Keyboard-1"]]
+    win.midi = CountingMidi(midis)
+    win.midi.open("Digital Keyboard-1")
+    e = win.engine
+    win._want_audio = True
+    win._reconnect_at = 0.0
+    monkeypatch.setattr(type(e), "running", property(lambda self: True), raising=False)
+    monkeypatch.setattr(type(e), "lost", property(lambda self: True), raising=False)
+    monkeypatch.setattr(e, "stop", lambda: None)
+    monkeypatch.setattr(e, "start", lambda cfg: None)
+    monkeypatch.setattr("ampsim.audio.devices.refresh", lambda: None)
+    monkeypatch.setattr("ampsim.audio.devices.find_device", lambda *a: object())
+    win.watch_audio(10.0)
+    assert win.midi.opens == 2 and win.midi.name == "Digital Keyboard-1"
+
+
+def test_rescan_button_reopens_the_keyboard(win, monkeypatch):
+    midis = [["Digital Keyboard-1"]]
+    monkeypatch.setattr("ampsim.midi.winmm.list_inputs", lambda: midis[0])
+    win.midi = CountingMidi(midis)
+    win.midi.open("Digital Keyboard-1")
+    win.dock.rescan.click()
+    assert win.midi.opens == 2 and win.midi.name == "Digital Keyboard-1"
