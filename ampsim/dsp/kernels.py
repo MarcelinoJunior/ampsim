@@ -462,6 +462,15 @@ def process_pre(src, ch, n, D, BQ, Z, ST, H, OSU, OSD, W):
 @njit(**JIT)
 def process_post(n, mix, D, BQ, Z, ST, IR, IRH, CHB, DLB, RVB, RVOFF, RVLEN, RVPOS, RVFS, W):
     """Gabinete -> EQ -> chorus -> delay -> reverb -> volume/pan, somando em `mix`."""
+    process_post_fx(n, D, BQ, Z, ST, IR, IRH, CHB, DLB, RVB, RVOFF, RVLEN, RVPOS, RVFS, W)
+    process_post_out(n, mix, D, Z, ST, W)
+
+
+# a cadeia FX (plugins VST3) de uma trilha entra entre as duas metades: depois do reverb (W[3]/W[4],
+# estéreo) e antes do volume/pan da trilha
+@njit(**JIT)
+def process_post_fx(n, D, BQ, Z, ST, IR, IRH, CHB, DLB, RVB, RVOFF, RVLEN, RVPOS, RVFS, W):
+    """Gabinete -> EQ -> chorus -> delay -> reverb, em W[3] (L) e W[4] (R)."""
     x = W[0]
     L = W[3]
     R = W[4]
@@ -480,6 +489,12 @@ def process_post(n, mix, D, BQ, Z, ST, IR, IRH, CHB, DLB, RVB, RVOFF, RVLEN, RVP
     if D[RV_ON] > 0.5:
         fx_reverb(L, R, n, D, RVB, RVOFF, RVLEN, RVPOS, RVFS)
 
+
+@njit(**JIT)
+def process_post_out(n, mix, D, Z, ST, W):
+    """Volume/pan da trilha, somando W[3]/W[4] em `mix`."""
+    L = W[3]
+    R = W[4]
     vl = D[T_VOL] * D[T_PANL]
     vr = D[T_VOL] * D[T_PANR]
     peak = ST[S_PEAK_OUT]
@@ -505,14 +520,15 @@ def process_track(src, ch, n, mix, D, BQ, Z, ST, H, OSU, OSD, IR, IRH, CHB, DLB,
 
 @njit(**JIT)
 def mix_soundfont(B, n, mix, synth_out, shim, KBS, ROUTE, to_chain, keys_gain, drums_gain, pad_gain,
-                  keys_shim, pad_shim, EQB, EQZ, EQP):
+                  keys_shim, pad_shim, EQB, EQZ, EQP, TAP):
     """Soma a saída do FluidSynth (um grupo por canal; ver audio/soundfont.py) e monta o envio do
     Shimmer.
 
     ROUTE[canal]: 0-3 = camada das teclas (vai para KBS[camada], onde cada uma tem os seus efeitos),
     4 = pad contínuo (com o EQ próprio: EQB/EQZ/EQP), 5 = bateria, -1 = não usado.
-    Teclas com to_chain vão para a trilha (mono, passam pelo amplificador). Retorna o pico do que
-    foi direto para a saída.
+    Teclas com to_chain vão para a trilha (mono, passam pelo amplificador), menos as camadas com
+    TAP[camada] > 0.5 (cadeia FX ligada): essas vão para KBS também com to_chain, e o motor passa a cadeia
+    nelas antes de somar no caminho do amplificador. Retorna o pico do que foi direto para a saída.
     """
     peak = 0.0
     eq_on = EQP[0] > 0.5
@@ -542,6 +558,10 @@ def mix_soundfont(B, n, mix, synth_out, shim, KBS, ROUTE, to_chain, keys_gain, d
             if dest < nl:
                 l *= keys_gain
                 r *= keys_gain
+                if to_chain and TAP[dest] > 0.5:
+                    KBS[dest, i, 0] += l           # plugins da camada antes do amplificador
+                    KBS[dest, i, 1] += r
+                    continue
                 keys_mono += (l + r) * 0.5
                 if not to_chain:
                     KBS[dest, i, 0] += l
@@ -599,9 +619,13 @@ def limiter_state(fs):
     """Estado da saída (guardado entre blocos, sem alocar no callback):
     [0] ganho do limitador, [1] coeficiente de volta do limitador, [2] menor ganho desde a última leitura,
     [3] quantidade do compressor 0..1 (o motor escreve a cada bloco), [4] média quadrática do detector,
-    [5] ganho atual do compressor, [6]/[7]/[8] coeficientes de ataque, release e detector."""
+    [5] ganho atual do compressor, [6]/[7]/[8] coeficientes de ataque, release e detector,
+    [9] pico da saída (depois do compressor e do limitador) e [10] menor ganho nos picos (compressor x
+    limitador, sem a compensação) desde a última leitura: medidores do Master e do Compressor (a interface lê
+    e zera, ver AudioEngine.read_output_meter); [11] redução atual do compressor (ganho aplicado sem a
+    compensação, com o mesmo ataque/release do ganho)."""
     return np.array([1.0, _coef(LIM_RELEASE_S, fs), 1.0, 0.0, 0.0, 1.0,
-                     _coef(COMP_ATTACK_S, fs), _coef(COMP_RELEASE_S, fs), _coef(COMP_DETECT_S, fs)])
+                     _coef(COMP_ATTACK_S, fs), _coef(COMP_RELEASE_S, fs), _coef(COMP_DETECT_S, fs), 0.0, 1.0, 1.0])
 
 
 @njit(**JIT)
@@ -631,6 +655,10 @@ def write_output_lim(mix, n, out, off, master, lim):
     slope = 1.0 - 1.0 / (1.5 + 2.5 * amt)
     makeup = COMP_MAKEUP_DB * amt
     half = 0.5 * COMP_KNEE_DB
+    unmk = 10.0 ** (-makeup / 20.0)        # tira a compensação para medir só a redução
+    opk = lim[9]
+    tmin = lim[10]
+    cr = lim[11]
     for i in range(n):
         for c in range(nout):
             out[i, c] = 0.0
@@ -657,15 +685,30 @@ def write_output_lim(mix, n, out, off, master, lim):
                 cg = 1.0                    # desligado e já de volta: passa direto
             vl *= cg
             vr *= cg
+            # redução de verdade (o ganho aplicado sem a compensação): suavizada igual ao ganho, então um
+            # estalo curto mostra o que o compressor abaixou, não o alvo instantâneo
+            tr = target * unmk
+            cr += (tr - cr) * (catt if tr < cr else crel)
+            if amt <= 0.0 and abs(cr - 1.0) < 1e-5:
+                cr = 1.0
         a = max(abs(vl), abs(vr))
         if a * g > LIM_CEIL:
             g = LIM_CEIL / a
         else:
             g += (1.0 - g) * rel
+            if a * g > LIM_CEIL:            # a volta do ganho não pode passar do teto (sinal muito alto)
+                g = LIM_CEIL / a
         if g < gmin:
             gmin = g
+        # redução total nos picos (compressor x limitador): o que o fader Compressor mostra
+        tot = g * cr if comp else g
+        if tot < tmin:
+            tmin = tot
         vl *= g
         vr *= g
+        a = max(abs(vl), abs(vr))
+        if a > opk:
+            opk = a
         if off < nout:
             out[i, off] = vl
         if off + 1 < nout:
@@ -676,12 +719,15 @@ def write_output_lim(mix, n, out, off, master, lim):
     lim[2] = gmin
     lim[4] = ms
     lim[5] = cg
+    lim[9] = opk
+    lim[10] = tmin
+    lim[11] = cr
 
 
 @njit(**JIT)
 def write_output(mix, n, out, off, master):
     """write_output_lim sem guardar o estado entre blocos (testes e aquecimento; compressor desligado)."""
-    lim = np.zeros(9)
+    lim = np.zeros(12)
     lim[0] = 1.0
     lim[1] = 1.0 - math.exp(-1.0 / (LIM_RELEASE_S * 48000.0))
     lim[2] = 1.0
@@ -689,6 +735,8 @@ def write_output(mix, n, out, off, master):
     lim[6] = 1.0 - math.exp(-1.0 / (COMP_ATTACK_S * 48000.0))
     lim[7] = 1.0 - math.exp(-1.0 / (COMP_RELEASE_S * 48000.0))
     lim[8] = 1.0 - math.exp(-1.0 / (COMP_DETECT_S * 48000.0))
+    lim[10] = 1.0
+    lim[11] = 1.0
     write_output_lim(mix, n, out, off, master, lim)
 
 
@@ -1007,12 +1055,19 @@ def warmup(fs=48000.0):
     kbs = np.zeros((4, n, 2))
     for chain in (True, False):
         mix_soundfont(np.zeros((48, n), dtype=np.float32), n, mix, so, sh, kbs, route, chain, 1.0, 1.0, 1.0,
-                      0.5, 0.5, np.zeros((14, 5)), np.zeros((14, 2)), np.array([1.0, 1.0, 1.0]))
+                      0.5, 0.5, np.zeros((14, 5)), np.zeros((14, 2)), np.array([1.0, 1.0, 1.0]),
+                      np.array([0.0, 1.0, 0.0, 0.0]))
     from .keysfx import warmup as warmup_keysfx
     from .worship import warmup as warmup_worship
 
+    from ..audio.vst import warmup as warmup_vst
+
     warmup_worship(fs)
     warmup_keysfx(fs)
+    from .vocal import warmup as warmup_vocal
+
+    warmup_vocal(fs)                # trilha Vocal (dsp/vocal.py)
+    warmup_vst()                    # cópia/mistura dos slots de plugin VST3 (audio/vst.py)
     s = SynthDSP(fs)
     ev = np.zeros((4, 3), dtype=np.int32)
     ev[0] = (EV_NOTE_ON, 60, 100)

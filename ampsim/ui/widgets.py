@@ -75,6 +75,7 @@ class Knob(QWidget):
         self.style = "arc"            # "arc" (moderno) ou estilos de amp: tophat, skirt, chicken, chrome
         self.skirt = QColor("#111111")
         self.upper = False
+        self.midi_tag = ""            # controle físico mapeado ("CC21"): ponto verde no canto (ui/ctl_map_ui.py)
         self._value = param.default
         self._drag = None
         self.setFocusPolicy(Qt.NoFocus)
@@ -153,7 +154,16 @@ class Knob(QWidget):
             fine = 0.005 if e.modifiers() & Qt.ShiftModifier else 0.025
             self.setValue(self._from_norm(self._to_norm(self._value) + steps * fine), emit=True)
 
-    def paintEvent(self, _):
+    def paintEvent(self, e):
+        self._paint(e)
+        if self.midi_tag:                       # mapeado no controlador: ponto verde no canto de cima
+            qp = QPainter(self)
+            qp.setRenderHint(QPainter.Antialiasing)
+            qp.setPen(QPen(QColor(0, 0, 0, 160), 1))
+            qp.setBrush(QColor(C["green"]))
+            qp.drawEllipse(QPointF(self.width() - 5.5, 5.5), 3.5, 3.5)
+
+    def _paint(self, _):
         qp = QPainter(self)
         qp.setRenderHint(QPainter.Antialiasing)
         w = self.width()

@@ -1,4 +1,5 @@
 """Motor de áudio: abre o stream PortAudio e roda o DSP no callback."""
+import math
 from collections import deque
 from threading import get_ident
 from time import perf_counter
@@ -9,28 +10,35 @@ from . import devices as dev
 from .devices import promote_audio_thread, sd
 from .metronome import Metronome
 from .sampler import Recorder, Sampler
+from .vst import PluginChain, mono_to_stereo, stereo_to_mono
 from ..dsp import layout as Ly
 from ..dsp.kernels import (
-    mix_soundfont, process_post, process_pre, process_track, render_synth, write_output_lim, limiter_state,
+    mix_soundfont, process_post, process_post_fx, process_post_out, process_pre, process_track, render_synth,
+    write_output_lim, limiter_state,
 )
 from ..dsp.synth import SynthDSP
 from ..dsp.track import TrackDSP
+from ..dsp.vocal import VocalChain
 from ..dsp.keysfx import KeysFX, add_stereo
 from ..dsp.padeq import PadEQ
 from ..dsp.worship import DrumSynth, ShimmerDSP, render_drums
 from ..instruments import MAX_LAYERS, Instruments, channel_routes
 
-TRACKS = ("guitar", "bass", "pads")
-INPUT_TRACKS = ("guitar", "bass")
+TRACKS = ("guitar", "bass", "pads", "vocal")    # todas as trilhas (engine.tracks)
+DSP_TRACKS = ("guitar", "bass", "pads")          # as que são TrackDSP (a Vocal é dsp/vocal.py)
+INPUT_TRACKS = ("guitar", "bass")                # TrackDSP com entrada da placa
+INPUT_CHANNEL_TRACKS = ("guitar", "bass", "vocal")   # cada uma escolhe o seu canal de entrada
 RTA_N = 8192                    # amostras guardadas para o analisador (ui/analyzer.py)
 
 
 class AudioEngine:
     def __init__(self, fs=48000):
         self.fs = float(fs)
-        self.tracks = {name: TrackDSP(self.fs) for name in TRACKS}
+        self.tracks = {name: TrackDSP(self.fs) for name in DSP_TRACKS}
+        # trilha Vocal (microfone): desligada até alguém ligar, para não abrir o microfone sem querer
+        self.tracks["vocal"] = VocalChain(self.fs)
         self.synth = SynthDSP(self.fs)
-        self.input_channel = {"guitar": 0, "bass": 1}
+        self.input_channel = {"guitar": 0, "bass": 1, "vocal": 2}
         self.master = 1.0
         self.muted = False              # mute geral (Alt+Espaço): silencia a saída sem mexer no master
         self.config = dev.AudioConfig()
@@ -67,9 +75,17 @@ class AudioEngine:
         self.rta_pos_in = self.rta_pos_out = 0
         self._rta_mix = np.zeros((Ly.MAX_BLOCK, 2))
         self._rta_tmp = np.zeros(Ly.MAX_BLOCK)
+        # cadeias FX de plugins VST3 (audio/vst.py): uma por camada das teclas (depois de drive/rotação/
+        # delay), uma no Master (antes do compressor/limitador, que continuam protegendo a saída) e uma em
+        # cada trilha (TrackDSP.fx_chain: depois do reverb, antes do volume da trilha)
+        self.layer_chains = [PluginChain(self.fs, Ly.MAX_BLOCK, f"L{k + 1}") for k in range(MAX_LAYERS)]
+        self.master_chain = PluginChain(self.fs, Ly.MAX_BLOCK, "Master")
+        self._tap = np.zeros(MAX_LAYERS)          # camadas com FX ligada quando as teclas vão pelo amp
+        self._synth_kb = np.zeros((Ly.MAX_BLOCK, 2))   # o synth AmpSim (mono) passando pela FX da camada
         self._make_worship()
         self.instruments = Instruments(self)
         self.instruments.start(self.fs, Ly.MAX_BLOCK)
+        self.tracks["vocal"].set_bpm(self.instruments.bpm)
 
     # ------------------------------------------------------------------ eventos do synth
     def send_event(self, kind, a=0, b=0):
@@ -122,7 +138,7 @@ class AudioEngine:
         common = dict(samplerate=config.samplerate, blocksize=config.blocksize, dtype="float32",
                       dither_off=True, clip_off=True)
         if in_dev is not None:
-            want = max(self.input_channel[t] for t in INPUT_TRACKS) + 1
+            want = max(self.input_channel[t] for t in INPUT_CHANNEL_TRACKS) + 1
             self.n_in = max(1, min(in_dev.max_in, want))
             stream = sd.Stream(device=(in_dev.index, out_dev.index), channels=(self.n_in, n_out),
                                latency=(lat, lat), extra_settings=(extra, extra),
@@ -195,6 +211,20 @@ class AudioEngine:
         s = self.stream
         return s.cpu_load if s is not None else 0.0
 
+    def read_output_meter(self):
+        """(pico da saída, redução nos picos em dB) desde a última leitura, e zera (interface, ~30x/s).
+
+        O pico é o que vai para as caixas (depois do master, do compressor e do limitador). A redução é a
+        total nos picos: compressor (ganho aplicado, sem a compensação) vezes limitador, porque para quem
+        toca as duas são "compressão nos picos" (com o Compressor em 0 aparece o que o limitador segura).
+        O callback grava em self._lim (sem alocar)."""
+        lim = self._lim
+        peak, cmin = float(lim[9]), float(lim[10])
+        lim[9] = 0.0
+        lim[10] = 1.0
+        gr = -20.0 * math.log10(cmin) if 0.0 < cmin < 1.0 else 0.0
+        return peak, gr
+
     def _rebuild(self, fs):
         """Recria os buffers de DSP se a taxa mudou; senão só zera o estado."""
         if float(fs) != self.fs:
@@ -204,7 +234,11 @@ class AudioEngine:
             self._lim = limiter_state(self.fs)
             for name in TRACKS:
                 old = self.tracks[name]
-                t = TrackDSP(self.fs)
+                t = VocalChain(self.fs) if name == "vocal" else TrackDSP(self.fs)
+                t.fx_chain = old.fx_chain          # os plugins continuam carregados (só trocam a taxa)
+                t.fx_chain.set_fs(self.fs)
+                if name == "vocal":
+                    t.bpm = old.bpm
                 t.load_state(old.get_state())
                 self.tracks[name] = t
             s = SynthDSP(self.fs)
@@ -213,6 +247,8 @@ class AudioEngine:
             self.synth = s
             self.instruments.start(self.fs, Ly.MAX_BLOCK)
             self._make_worship()
+            for chain in self.layer_chains + [self.master_chain]:
+                chain.set_fs(self.fs)
         else:
             for t in self.tracks.values():
                 t.reset_dsp_state()
@@ -260,6 +296,13 @@ class AudioEngine:
                         self._run_track_rta(t, indata, ch, frames, mix)
                     else:
                         self._run_track(t, indata, ch, frames, mix)
+            v = tracks["vocal"]
+            ch = self.input_channel["vocal"]
+            if v.running and ch < n_in:                 # microfone: cadeia de voz (dsp/vocal.py)
+                if self.rta_track == "vocal":
+                    self._run_vocal_rta(v, indata, ch, frames, mix)
+                else:
+                    v.process(indata, ch, frames, mix)
         s = self.synth
         render_synth(self._synth_out, frames, self._ev, self._drain_events(), s.SD, s.VS, s.SST,
                      self.fs)
@@ -273,6 +316,15 @@ class AudioEngine:
             buf = self._synth_out[:frames, 0]
             buf *= g if g == g0 else np.linspace(g0, g, frames, dtype=np.float32)
         self._synth_gain = g
+        lch = self.layer_chains
+        syn = inst.synth_layer_index()              # camada (0-3) que toca o synth AmpSim, ou -1
+        if syn >= 0:
+            ch = lch[syn]
+            if ch.slots and ch.active:              # FX da camada no synth (mono): antes da trilha
+                kb = self._synth_kb
+                mono_to_stereo(self._synth_out, kb, frames)
+                ch.process(kb, frames)
+                stereo_to_mono(kb, self._synth_out, frames, False)
         drums_g = self._glide("drums", inst.drums_gain())
         pad_g = self._glide("pad", inst.pad_gain())
         sf = inst.sf
@@ -281,13 +333,27 @@ class AudioEngine:
         if sf is not None:
             sf.render(frames)
             to_chain = t.D[Ly.T_AMP] > 0.5 and t.D[Ly.T_ON] > 0.5
+            tap = self._tap
+            for k in range(len(tap)):
+                ch = lch[k]
+                tap[k] = 1.0 if (to_chain and k != syn and ch.slots and ch.active) else 0.0
             eq = self.pad_eq
             pk = mix_soundfont(sf.buf, frames, mix, self._synth_out, shim, self._kbs, self._route, to_chain,
                                inst.keys_gain(), drums_g, pad_g, shimmer,
-                               inst.pad_eq["shimmer"] / 100.0, eq.BQ, eq.Z, eq.P)
-            if not to_chain:
-                for kfx in self.keys_fx:
+                               inst.pad_eq["shimmer"] / 100.0, eq.BQ, eq.Z, eq.P, tap)
+            if to_chain:
+                # teclas pelo amplificador: a FX da camada entra antes do amp (o caminho do amp é mono)
+                for k in range(len(tap)):
+                    if tap[k] > 0.5:
+                        kb = self._kbs[k]
+                        lch[k].process(kb, frames)
+                        stereo_to_mono(kb, self._synth_out, frames, True)
+            else:
+                for k, kfx in enumerate(self.keys_fx):
                     kfx.process(frames)
+                    ch = lch[k]
+                    if ch.slots and k != syn:
+                        ch.process(kfx.KB, frames)
                     pk = max(pk, add_stereo(mix, kfx.KB, frames))
             if pk > self.sf_peak:
                 self.sf_peak = pk
@@ -308,6 +374,9 @@ class AudioEngine:
         self.sampler.render(mix, frames, drums_g)        # gravações nos pads: volume/mute dos pads
         if t.D[Ly.T_ON] > 0.5:
             self._run_track(t, self._synth_out, 0, frames, mix)
+        mc = self.master_chain
+        if mc.slots:
+            mc.process(mix, frames)                         # FX do Master, antes do compressor/limitador
         self._lim[3] = inst.levels.get("comp", 0) / 100.0   # compressor da saída (fader Compressor)
         write_output_lim(mix, frames, outdata, self.out_offset,
                          self._glide("master", 0.0 if self.muted else self.master), self._lim)
@@ -339,9 +408,33 @@ class AudioEngine:
         self.rta_pos_out = _ring_write(self.rta_out, self.rta_pos_out, tmp)
         self.rta_pos_in = _ring_write(self.rta_in, self.rta_pos_in, indata[:frames, ch])
 
+    def _run_vocal_rta(self, v, indata, ch, frames, mix):
+        tm = self._rta_mix
+        tm[:frames] = 0.0
+        v.process(indata, ch, frames, tm)
+        mix[:frames] += tm[:frames]
+        tmp = self._rta_tmp[:frames]
+        np.add(tm[:frames, 0], tm[:frames, 1], out=tmp)
+        tmp *= 0.5
+        self.rta_pos_out = _ring_write(self.rta_out, self.rta_pos_out, tmp)
+        self.rta_pos_in = _ring_write(self.rta_in, self.rta_pos_in, indata[:frames, ch])
+
+    def vocal_channel_ok(self):
+        """O canal escolhido para o microfone existe na entrada aberta agora?"""
+        return self.n_in > 0 and self.input_channel.get("vocal", 0) < self.n_in
+
     @staticmethod
     def _run_track(t, src, ch, frames, mix):
-        if t.external_active():
+        chain = t.fx_chain
+        if chain.slots and chain.active:
+            # FX da trilha (plugins VST3): depois do reverb, antes do volume/pan da trilha
+            process_pre(src, ch, frames, *t.pre_arrays)
+            if t.external_active():
+                t.run_external(t.W[0], frames)
+            process_post_fx(frames, *t.post_arrays)
+            chain.process_lr(t.W[3], t.W[4], frames)
+            process_post_out(frames, mix, t.D, t.Z, t.ST, t.W)
+        elif t.external_active():
             process_pre(src, ch, frames, *t.pre_arrays)
             t.run_external(t.W[0], frames)
             process_post(frames, mix, *t.post_arrays)

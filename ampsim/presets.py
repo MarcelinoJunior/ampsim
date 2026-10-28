@@ -1,4 +1,5 @@
 """Presets de fábrica. Só é preciso listar o que difere do padrão."""
+from .vocal_presets import DEFAULT_VOCAL_PRESET, VOCAL_FACTORY
 
 
 def _p(on, **values):
@@ -100,7 +101,11 @@ FACTORY = {
     },
 }
 
-DEFAULT_PRESET = {"guitar": "Crunch Clássico", "bass": "Baixo Limpo", "pads": "Pad Ambiente"}
+# aba Vocal: presets de voz em vocal_presets.py (cadeia própria, dsp/vocal.py)
+FACTORY["vocal"] = VOCAL_FACTORY
+
+DEFAULT_PRESET = {"guitar": "Crunch Clássico", "bass": "Baixo Limpo", "pads": "Pad Ambiente",
+                  "vocal": DEFAULT_VOCAL_PRESET}
 
 # Redutor de ruído ligado em todos os presets de guitarra e baixo (menos o DI puro), e gate
 # mais alto nos timbres com distorção, onde o chiado da entrada é amplificado.

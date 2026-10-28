@@ -21,7 +21,7 @@ from .icons import icon
 from .theme import C
 
 ROLE = Qt.UserRole                 # (tipo, nome): ("ready"|"keys_user"|"track"|"file", ...)
-TRACK_TITLES = (("guitar", "Guitarra", "guitar"), ("bass", "Baixo", "bass"))
+TRACK_TITLES = (("guitar", "Guitarra", "guitar"), ("bass", "Baixo", "bass"), ("vocal", "Vocal", "mic"))
 
 
 class PresetBank(QFrame):
@@ -38,7 +38,7 @@ class PresetBank(QFrame):
     def __init__(self):
         super().__init__()
         self.setObjectName("side")
-        self.setFixedWidth(242)
+        # subjanela: a largura acompanha o divisor (padrão 242; mínimo = o que cabe sem cortar nada)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 12, 10)
         lay.setSpacing(8)
@@ -49,6 +49,7 @@ class PresetBank(QFrame):
         t = QLabel("Banco de Presets")
         t.setObjectName("h2")
         head.addWidget(t, 1)
+        self.head_widgets = (hi, t)           # numa subjanela o título já está na barra dela
         lay.addLayout(head)
         self.search = QLineEdit()
         self.search.setPlaceholderText("Buscar presets…")
@@ -83,6 +84,7 @@ class PresetBank(QFrame):
             b.setToolTip(tip)
             b.setFocusPolicy(Qt.NoFocus)
             b.clicked.connect(lambda *_, s=sig: s.emit())
+            b.setMinimumWidth(b.sizeHint().width() + 6)      # "Importar" nunca cortado
             row.addWidget(b)
         lay.addLayout(row)
         self.page = "pads"                       # aba aberta lá em cima: "guitar", "bass" ou "pads"
@@ -116,6 +118,7 @@ class PresetBank(QFrame):
     def _leaf(self, parent, text, data, ic="file"):
         it = QTreeWidgetItem([self._indent(parent) + text])
         it.setData(0, ROLE, data)
+        it.setToolTip(0, text)                   # nome inteiro (a lista corta com "…" se for estreita)
         it.setIcon(0, icon(ic, C["dim"], 15, active="#ffffff"))
         parent.addChild(it)
         return it
@@ -235,7 +238,7 @@ class PresetBank(QFrame):
             part("Só os efeitos (rotação, drive, delay) na camada selecionada", "fx")
             if sound in CONT_PAD_SOUNDS:
                 part(f"Usar “{sound}” no pad contínuo", "cont")
-        elif kind == "track":
+        elif kind == "track" and arg[0] != "vocal":       # a Vocal não tem amp: o preset é um só
             name = arg[0]
             m.addSeparator()
             part("Só o amplificador e o gabinete", "amp")
@@ -256,7 +259,8 @@ class PresetBank(QFrame):
 
 
 def _file_page(path):
-    """Aba a que um arquivo .ampsim pertence ("guitar", "bass", "pads"); None = cena (vale em todas)."""
+    """Aba a que um arquivo .ampsim pertence ("guitar", "bass", "pads", "vocal"); None = cena (vale em
+    todas)."""
     try:
         with open(path, encoding="utf-8") as f:
             doc = json.loads(f.read(200_001))
@@ -265,4 +269,4 @@ def _file_page(path):
     if not isinstance(doc, dict) or doc.get("tipo") != "preset":
         return None
     trilha = doc.get("trilha")
-    return "pads" if trilha in ("pads", "teclas") else trilha if trilha in ("guitar", "bass") else None
+    return "pads" if trilha in ("pads", "teclas") else trilha if trilha in ("guitar", "bass", "vocal") else None

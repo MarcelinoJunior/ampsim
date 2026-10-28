@@ -3,7 +3,7 @@
 Clique numa música = carrega o som dela. "+ Música" guarda o som de agora com um nome. Arraste para
 mudar a ordem. ◀ ▶ (ou Ctrl+PgUp / Ctrl+PgDn, ou um botão do controlador) vão para a anterior/próxima.
 """
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem,
@@ -28,11 +28,13 @@ def _tool(ic, tip, slot, text=""):
 
 
 class SetlistPanel(QFrame):
+    foldedChanged = Signal(bool)              # recolheu/expandiu (a subjanela encolhe e devolve o espaço)
+
     def __init__(self, win):
         super().__init__()
         self.win = win
         self.setObjectName("side")
-        self.setFixedWidth(242)
+        # subjanela: a largura acompanha o divisor (padrão 242; mínimo = o que cabe sem cortar nada)
         self.data = setlist.load()
         self.current = None                  # índice da música carregada (destacada)
         lay = QVBoxLayout(self)
@@ -46,6 +48,7 @@ class SetlistPanel(QFrame):
         t = QLabel("Setlist")
         t.setObjectName("h2")
         head.addWidget(t, 1)
+        self.head_widgets = (hi, t)           # numa subjanela o título já está na barra dela
         self.more = QPushButton()
         self.more.setIcon(icon("menu", C["text"], 14))
         self.more.setToolTip("Novo setlist, renomear, apagar")
@@ -75,7 +78,9 @@ class SetlistPanel(QFrame):
         self.songs.setDragDropMode(QAbstractItemView.InternalMove)
         self.songs.setDefaultDropAction(Qt.MoveAction)
         self.songs.setIconSize(QSize(14, 14))
-        self.songs.setFixedHeight(128)
+        self.songs.setMinimumHeight(90)       # cresce com a subjanela
+        self.songs.setWordWrap(True)          # dica e nomes longos quebram a linha em vez de cortar
+        self.songs.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.songs.setToolTip("Clique: carregar o som da música · arraste: mudar a ordem · botão direito: mais")
         self.songs.itemClicked.connect(lambda it: self.load_song(self.songs.row(it)))
         self.songs.model().rowsMoved.connect(lambda *_: self._reordered())
@@ -89,7 +94,8 @@ class SetlistPanel(QFrame):
         row.addWidget(_tool("add", "Guardar o som de agora como uma música deste setlist", self.add_song,
                             " Música"), 1)
         bl.addLayout(row)
-        lay.addWidget(self.body)
+        lay.addWidget(self.body, 100)
+        lay.addStretch(1)                     # recolhido: o título fica em cima
         self.refresh()
         self.set_folded(self.data["recolhido"], save=False)
 
@@ -133,6 +139,7 @@ class SetlistPanel(QFrame):
         self.body.setVisible(not on)
         self.fold.setIcon(icon("down" if on else "up", C["dim"], 14))
         self.fold.setToolTip("Mostrar o setlist" if on else "Recolher o setlist")
+        self.foldedChanged.emit(bool(on))
         if save:
             self._save()
 

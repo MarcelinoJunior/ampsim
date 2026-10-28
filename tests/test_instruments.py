@@ -353,8 +353,20 @@ def test_latching_button_toggles_on_both_values(engine, monkeypatch):
     inst.handle_midi(0xB0, 31, 127)                      # botão que trava: 1º toque manda 127
     assert inst.screen_bank == 1
     t[0] += 5.0
-    inst.handle_midi(0xB0, 31, 0)                        # 2º toque (bem depois) manda 0
+    inst.handle_midi(0xB0, 31, 0)                        # momentâneo (padrão): o 0 da soltura não conta,
+    assert inst.screen_bank == 1                         # mesmo segurado 5 s (antes alternava de novo)
+    inst.button_latch[7] = True                          # marcado como "botão que trava"
+    inst.handle_midi(0xB0, 31, 127)                      # 1º toque manda 127
     assert inst.screen_bank == 0
+    t[0] += 5.0
+    inst.handle_midi(0xB0, 31, 0)                        # 2º toque (bem depois) manda 0
+    assert inst.screen_bank == 1
+    inst.handle_midi(0xB0, 31, 127)
+    t[0] += 0.1
+    inst.handle_midi(0xB0, 31, 0)                        # toques rápidos também
+    assert inst.screen_bank == 1
+    inst.button_latch[7] = False
+    inst.screen_bank = 0
 
 
 def test_learning_pads_with_same_notes_in_both_banks_and_pc_button(engine):

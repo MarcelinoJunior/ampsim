@@ -104,8 +104,20 @@ def _logo(qp, s, color):
         qp.drawLine(QPointF(x, s * (0.5 - h / 2)), QPointF(x, s * (0.5 + h / 2)))
 
 
+def _mic(qp, s, color):
+    """Microfone de mão (aba Vocal): cápsula, haste e base."""
+    qp.setPen(_pen(color, s * 0.07))
+    qp.drawRoundedRect(QRectF(s * 0.36, s * 0.08, s * 0.28, s * 0.46), s * 0.14, s * 0.14)
+    path = QPainterPath()
+    path.moveTo(s * 0.24, s * 0.36)
+    path.cubicTo(s * 0.24, s * 0.72, s * 0.76, s * 0.72, s * 0.76, s * 0.36)
+    qp.drawPath(path)
+    qp.drawLine(QPointF(s * 0.5, s * 0.66), QPointF(s * 0.5, s * 0.86))
+    qp.drawLine(QPointF(s * 0.34, s * 0.88), QPointF(s * 0.66, s * 0.88))
+
+
 DRAWN = {"guitar": _guitar, "bass": lambda qp, s, c: _guitar(qp, s, c, bass=True), "keys": _keys,
-         "pads": _pads, "mixer": _mixer, "midi": _midi, "logo": _logo}
+         "pads": _pads, "mixer": _mixer, "midi": _midi, "logo": _logo, "mic": _mic}
 
 
 def pixmap(name, color="#e6edf8", size=20, dpr=2.0):

@@ -19,6 +19,7 @@ ACTIONS = (
     ("mute_l4", "Mute da L4", "Alt+4"),
     ("mute_pad", "Mute do pad contínuo", "Alt+P"),
     ("mute_drums", "Mute dos pads (bateria)", "Alt+B"),
+    ("mute_vocal", "Mute do vocal (microfone)", "Alt+V"),
     ("preset_next", "Próximo preset", "Ctrl+Right"),
     ("preset_prev", "Preset anterior", "Ctrl+Left"),
     ("song_next", "Setlist: próxima música", "Ctrl+PgDown"),
@@ -26,6 +27,7 @@ ACTIONS = (
     ("tab_guitar", "Aba Guitarra", "F1"),
     ("tab_bass", "Aba Baixo", "F2"),
     ("tab_pads", "Aba Pad/Piano", "F3"),
+    ("tab_vocal", "Aba Vocal", "F4"),
     ("panic", "Pânico (solta as notas e para o pad)", "Esc"),
     ("rec", "Gravador: REC / STOP", "Ctrl+R"),
     ("tap", "Tap tempo (BPM)", "Ctrl+T"),
@@ -43,6 +45,11 @@ def clean_keys(d):
         for a, k in d.items():
             if a in DEFAULTS and isinstance(k, str):
                 out[a] = QKeySequence(k).toString() if k else ""
+        # ação nova (ex.: Aba Vocal em F4) cuja tecla o usuário já deu a outra ação: fica sem tecla
+        mine = {out[a] for a in d if a in DEFAULTS and out[a]}
+        for a in DEFAULTS:
+            if a not in d and out[a] in mine:
+                out[a] = ""
     return out
 
 

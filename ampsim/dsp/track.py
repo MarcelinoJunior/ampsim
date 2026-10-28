@@ -49,6 +49,9 @@ class TrackDSP:
         self.vst = None               # VstSlot ativo
         self.vst_error = None
         self.vst_mix = 1.0
+        from ..audio.vst import PluginChain
+        # cadeia FX (plugins VST3 em série) no fim da trilha: depois do reverb, antes do volume/pan
+        self.fx_chain = PluginChain(self.fs, Ly.MAX_BLOCK, "trilha")
 
         self.D = np.zeros(Ly.D_SIZE)
         self.BQ = np.zeros((Ly.NBQ, 5))
@@ -97,9 +100,12 @@ class TrackDSP:
         self._update(effect)
 
     def get_state(self):
+        from ..audio.vst import portable_ref
         if self.vst is not None:
             self.values["vst"]["state"] = self.vst.get_state()
-        return {"values": copy.deepcopy(self.values), "ir_path": self.ir_path}
+        values = copy.deepcopy(self.values)
+        values["vst"]["path"] = portable_ref(values["vst"]["path"])     # "vst3:…" abre em outro PC também
+        return {"values": values, "ir_path": self.ir_path, "fx_chain": self.fx_chain.to_list()}
 
     # ------------------------------------------------------------------ NAM e VST3
     def external_active(self):
@@ -150,8 +156,9 @@ class TrackDSP:
         self.nam = model
 
     def load_vst(self, path, state=""):
-        from ..audio.vst import VstSlot
+        from ..audio.vst import VstSlot, resolve_ref
 
+        path = resolve_ref(path or "")
         self.vst = None
         self.values["vst"]["path"] = path or ""
         self.values["vst"]["state"] = state or ""
@@ -177,11 +184,14 @@ class TrackDSP:
         path = state.get("ir_path")
         if path and path != self.ir_path:
             self.load_ir_file(path)
+        from ..audio.vst import resolve_ref
         vst = vals["vst"]
+        vst["path"] = resolve_ref(vst["path"])
         if vst["path"] != (self.vst.path if self.vst else ""):
             self.load_vst(vst["path"], vst["state"])
         elif self.vst is not None and vst["state"]:
             self.vst.set_state(vst["state"])
+        self.fx_chain.apply(state.get("fx_chain", []))     # preset sem a chave: trilha sem plugins
         self.update_all()
 
     def load_ir_file(self, path):
@@ -219,8 +229,7 @@ class TrackDSP:
         if self.nam is not None:
             self.nam.reset()
         if self.vst is not None:
-            self.vst.plugin.reset()
-            self.vst.error = None
+            self.vst.reset()              # na thread dos plugins (ver audio/vst.py)
 
     # ------------------------------------------------------------------ cálculo de coeficientes
     def update_all(self):

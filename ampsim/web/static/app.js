@@ -5,17 +5,18 @@
 const $ = (s, el = document) => el.querySelector(s);
 const TABS = {
   pads: ["▦", "Pads"], faders: ["≡", "Faders"], setlist: ["♫", "Setlist"], timbre: ["◉", "Timbre"],
-  guitarra: ["♪", "Guitarra"], baixo: ["♪", "Baixo"],
+  guitarra: ["♪", "Guitarra"], baixo: ["♪", "Baixo"], vocal: ["♪", "Vocal"],
 };
 const TITLES = {
   pads: "Pads", faders: "Faders e mute", setlist: "Setlist", timbre: "Timbre atual",
-  guitarra: "Guitarra", baixo: "Baixo",
+  guitarra: "Guitarra", baixo: "Baixo", vocal: "Vocal",
 };
-// as 3 escolhas do topo: cada uma é uma sessão do AmpSim com as telas dela
+// as 4 escolhas do topo: cada uma é uma sessão do AmpSim com as telas dela
 const MODES = [
   { id: "piano", nome: "Pad/Piano", telas: ["pads", "faders", "setlist", "timbre"] },
   { id: "guitarra", nome: "Guitarra", telas: ["guitarra"] },
   { id: "baixo", nome: "Baixo", telas: ["baixo"] },
+  { id: "vocal", nome: "Vocal", telas: ["vocal"] },
 ];
 
 let ws = null, retry = 400, telas = [], state = {}, built = {}, tab = null, mode = null, modes = [], pingTimer = null;
@@ -102,6 +103,8 @@ function onMessage(m) {
     for (const t of touched) if (built[t] && state[t]) built[t].update(merged(t));
   } else if (m.t === "aviso") {
     toast(m.texto);
+  } else if (m.t === "vu") {
+    if (built.faders && built.faders.vu) built.faders.vu(+m.m || 0, +m.c || 0);
   }
 }
 
@@ -216,7 +219,7 @@ function showApp(list) {
   }
   seg.hidden = modes.length < 2;
   $(".top").classList.toggle("com-modos", modes.length > 1);
-  // link direto: http://…:8080/#guitarra, #baixo, #piano ou uma aba (#faders)
+  // link direto: http://…:8080/#guitarra, #baixo, #vocal, #piano ou uma aba (#faders)
   const hash = location.hash.slice(1);
   const byTab = modes.find(m => m.telas.includes(hash) && telas.includes(hash));
   if (modes.some(m => m.id === hash)) setMode(hash);
@@ -269,16 +272,24 @@ function setTab(t) {
 // onVal(v 0..100) / onMute(on): o que ele faz (aba Faders, volume da trilha, parâmetro de pedal...)
 // Feito com pointer events: no dedo, arrastar de lado mexe no fader e arrastar para cima/baixo rola a
 // lista (touch-action: pan-y); um toque parado não muda nada. No mouse, clicar no trilho pula até lá.
-function faderRow(nome, onVal, onMute) {
+// opts.inv: invertido (0 com o cursor na DIREITA, como o Compressor do PC tem o 0 em cima);
+// opts.vu: "level" (nível da saída, acende da esquerda) ou "gr" (redução do compressor, acende da direita)
+function faderRow(nome, onVal, onMute, opts = {}) {
+  const inv = !!opts.inv;
   const val = el("span", { class: "val" });
   const cap = el("div", { class: "hf-cap" });
   const fill = el("div", { class: "hf-fill" });
-  const slot = el("div", { class: "hf-slot", role: "slider", tabindex: 0, "aria-label": nome,
-    "aria-valuemin": 0, "aria-valuemax": 100 }, el("div", { class: "hf-groove" }, fill), cap);
+  const groove = el("div", { class: "hf-groove" }, fill);
+  if (opts.vu) groove.append(el("div", { class: "hf-vu " + opts.vu }));
+  const slot = el("div", { class: "hf-slot" + (opts.vu ? " com-vu" : ""), role: "slider", tabindex: 0, "aria-label": nome,
+    "aria-valuemin": 0, "aria-valuemax": 100 }, groove, cap);
   const r = { slot, val, mute: null, mudo: false, txt: false, v: 0, drag: false, off: false };
   let raf = 0, rect = null, grab = 0, start = null;
+  const pos = v => inv ? 1 - v / 100 : v / 100;                  // posição do cursor 0..1 (esquerda->direita)
+  const fromX = x => (inv ? 1 - x : x) * 100;
+  r.vu = m => slot.style.setProperty("--m", Math.max(0, Math.min(1, m)));
   r.paint = () => {
-    slot.style.setProperty("--p", r.v / 100);
+    slot.style.setProperty("--p", pos(r.v));
     slot.setAttribute("aria-valuenow", r.v);
     if (!r.txt) val.textContent = r.mudo ? "MUDO · " + r.v + "%" : r.v + "%";
   };
@@ -301,19 +312,19 @@ function faderRow(nome, onVal, onMute) {
     if (ev.pointerType === "mouse") {
       ev.preventDefault();
       slot.focus({ preventScroll: true });
-      const capX = rect.left + 11 + r.v / 100 * span();
+      const capX = rect.left + 11 + pos(r.v) * span();
       grab = Math.abs(ev.clientX - capX) <= 14 ? ev.clientX - capX : 0;     // pegou no cursor: não pula
       begin(ev);
-      set((ev.clientX - grab - rect.left - 11) / span() * 100);
+      set(fromX((ev.clientX - grab - rect.left - 11) / span()));
     } else {
       start = { x: ev.clientX, y: ev.clientY, v: r.v };                      // dedo: espera a direção
     }
   });
   slot.addEventListener("pointermove", ev => {
     if (r.drag && !start) {
-      set((ev.clientX - grab - rect.left - 11) / span() * 100);
+      set(fromX((ev.clientX - grab - rect.left - 11) / span()));
     } else if (r.drag) {
-      set(start.v + (ev.clientX - start.x) / span() * 100);
+      set(start.v + (inv ? -1 : 1) * (ev.clientX - start.x) / span() * 100);
     } else if (start) {
       const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
       if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.2) {          // de lado: é o fader
@@ -329,7 +340,7 @@ function faderRow(nome, onVal, onMute) {
   for (const t of ["pointerup", "pointercancel"]) slot.addEventListener(t, up);
   slot.addEventListener("keydown", ev => {
     if (r.off) return;
-    const d = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1, PageUp: 10, PageDown: -10 }[ev.key];
+    const d = { ArrowUp: 1, ArrowRight: inv ? -1 : 1, ArrowDown: -1, ArrowLeft: inv ? 1 : -1, PageUp: 10, PageDown: -10 }[ev.key];
     if (d) { ev.preventDefault(); set(r.v + d); }
     else if (ev.key === "Home") { ev.preventDefault(); set(0); }
     else if (ev.key === "End") { ev.preventDefault(); set(100); }
@@ -647,13 +658,37 @@ const BUILD = {
       box.style.setProperty("--rows", Math.max(1, Math.ceil(nAtivos / ncol)));
     };
     if (window.ResizeObserver) new ResizeObserver(() => colunas()).observe(box);
+    let vuM = 0, vuC = 0, hint = null;          // último medidor recebido (volta a acender se a lista for refeita)
+    const showVu = () => {
+      if (rows.Master) rows.Master.vu(vuM);
+      if (rows.Compressor) rows.Compressor.vu(vuC);
+      if (hint) hint.classList.toggle("lit", vuC > 0.02);     // VU laranja aceso: a dica sai da frente
+    };
     return {
+      // {"t":"vu"}: nível da saída (Master) e redução nos picos (compressor + limitador), 0..1, ~15x/s
+      vu(m, c) {
+        vuM = m;
+        vuC = c;
+        showVu();
+      },
       update(d) {
-        keyed(box, d.canais.map(c => [c.id, c.nome, c.pode_mutar]), ([id, nome, pode]) => {
-          rows[id] = faderRow(nome, valor => cmd("fader", { id, valor }), pode ? on => cmd("mute", { id, on }) : null);
+        if (keyed(box, d.canais.map(c => [c.id, c.nome, c.pode_mutar]), ([id, nome, pode]) => {
+          const opts = id === "Master" ? { vu: "level" } : id === "Compressor" ? { vu: "gr", inv: true } : {};
+          rows[id] = faderRow(nome, valor => cmd("fader", { id, valor }), pode ? on => cmd("mute", { id, on }) : null, opts);
+          if (id === "Compressor") {
+            rows[id].row.title = "Compressor: 0 com o cursor à direita; arraste para a esquerda para comprimir mais. O laranja mostra quanto os picos estão sendo abaixados (compressor + limitador).";
+            // dica dentro do trilho enquanto está desligado (o cursor fica na direita)
+            hint = el("span", { class: "hf-hint" }, "◀ arraste p/ comprimir");
+            rows[id].slot.append(hint);
+          }
           return rows[id].row;
-        });
-        for (const c of d.canais) if (rows[c.id]) faderShow(rows[c.id], c);
+        })) showVu();
+        for (const c of d.canais) {
+          if (!rows[c.id]) continue;
+          faderShow(rows[c.id], c.id === "Compressor" ? Object.assign({}, c, { txt: c.valor ? c.valor + "%" : "desligado" }) : c);
+        }
+        const comp = d.canais.find(c => c.id === "Compressor");
+        if (hint && comp) hint.hidden = comp.valor > 0;
         // deitado: duas colunas (três quando são mais de 12 faders, ex. com as 4 camadas)
         nAtivos = d.canais.filter(c => c.ativo !== false).length;
         colunas();
@@ -812,18 +847,21 @@ const BUILD = {
 
   guitarra(sec) { return trackPanel(sec, "guitar", "da guitarra"); },
   baixo(sec) { return trackPanel(sec, "bass", "do baixo"); },
+  vocal(sec) { return trackPanel(sec, "vocal", "do vocal"); },
 };
 
-// Guitarra / Baixo: preset, volume da trilha, pedais (liga/desliga) e os ajustes do pedal escolhido.
-// de: "da guitarra" / "do baixo" (para os textos)
+// Guitarra / Baixo / Vocal: preset, volume da trilha, pedais (liga/desliga) e os ajustes do pedal escolhido.
+// de: "da guitarra" / "do baixo" / "do vocal" (para os textos). Na Vocal o primeiro pedal é o "Mic" (liga
+// e desliga o microfone) e o M do volume é o mudo da voz (o microfone continua ligado).
 function trackPanel(sec, trilha, de) {
-  let last = null, fxSel = store.get("ampsim_fx_" + trilha) || "amp";
+  const vocal = trilha === "vocal";
+  let last = null, fxSel = store.get("ampsim_fx_" + trilha) || (vocal ? "comp" : "amp");
   const tc = (c, extra = {}) => cmd(c, { trilha, ...extra });
-  const save = saveBox("💾 Salvar preset", "Nome do preset (amp e pedais " + de + ")",
+  const save = saveBox("💾 Salvar preset", "Nome do preset (" + (vocal ? "efeitos " : "amp e pedais ") + de + ")",
     () => last && last.nome_salvar, nome => tc("trilha_salvar", { nome }),
     key => ((last && last.presets) || []).some(g => g.sons.some(x => x.nome.startsWith("user:")
       && x.nome.slice(5).toLowerCase() === key)));
-  const status = el("span", { class: "dica" });
+  const status = el("span", { class: "dica uma-linha" });
   sec.firstChild.append(status, el("span", { class: "extra" }, save.chip));
   const [a, b] = cols(sec);
   // o nome do preset é o botão da lista (★ de fábrica e os seus); ◀ ▶ passam um por um
@@ -839,8 +877,9 @@ function trackPanel(sec, trilha, de) {
       tc("trilha_preset", { tipo: v.slice(0, i), nome: v.slice(i + 1) });
     });
   });
-  const vol = faderRow("Volume " + de, valor => tc("trilha_volume", { valor }), on => tc("trilha_on", { on: !on }));
-  vol.mute.setAttribute("aria-label", "Desligar a trilha " + de);
+  const vol = faderRow("Volume " + de, valor => tc("trilha_volume", { valor }),
+    vocal ? on => tc("trilha_mute", { on }) : on => tc("trilha_on", { on: !on }));
+  vol.mute.setAttribute("aria-label", vocal ? "Mudo da voz" : "Desligar a trilha " + de);
   const stomps = el("div", { class: "stomps" });
   const fxPick = el("select", { class: "fxpick", "aria-label": "Pedal para ajustar" });
   fxPick.addEventListener("change", () => choose(fxPick.value));
@@ -895,18 +934,31 @@ function trackPanel(sec, trilha, de) {
     return b;
   }
 
+  function micStomp() {
+    const b = el("button", { type: "button", class: "stomp mic", "data-k": "mic", title: "Microfone: liga/desliga a trilha Vocal" },
+      el("i", { class: "led" }), el("span", { class: "fit" }, "Mic"));
+    tap(b, () => tc("trilha_on", { on: !(last && last.on) }));
+    return b;
+  }
+
   function render() {
     const d = last;
     if (!d) return;
     const fxs = d.efeitos || [];
     if (!fxs.some(f => f.k === fxSel)) fxSel = (fxs[0] || {}).k;
     // captura NAM escolhida no PC: um pedal aceso só para ver (Amp ligado junto soma os dois amplificadores)
-    const items = (d.nam ? [["nam", "NAM", "Captura NAM: " + d.nam]] : []).concat(fxs.map(f => [f.k, f.curto, f.nome]));
-    if (keyed(stomps, items, ([k, curto, n]) => k === "nam" ? namStomp(n) : stomp({ k, curto, nome: n }))) {
+    const items = (vocal ? [["mic", "Mic", "Microfone"]] : []).concat(d.nam ? [["nam", "NAM", "Captura NAM: " + d.nam]] : [])
+      .concat(fxs.map(f => [f.k, f.curto, f.nome]));
+    if (keyed(stomps, items, ([k, curto, n]) => k === "mic" ? micStomp() : k === "nam" ? namStomp(n) : stomp({ k, curto, nome: n }))) {
       stomps.style.setProperty("--n", Math.ceil(items.length / 2));
       fitAll(stomps, ".fit", 12, 8);
     }
     for (const s of stomps.children) {
+      if (s.dataset.k === "mic") {
+        s.classList.toggle("on", !!d.on);
+        s.setAttribute("aria-pressed", !!d.on);
+        continue;
+      }
       if (s.dataset.k === "nam") continue;
       const f = fxs.find(x => x.k === s.dataset.k) || {};
       s.classList.toggle("on", !!f.on);
@@ -949,9 +1001,12 @@ function trackPanel(sec, trilha, de) {
     update(d) {
       last = d;
       if (nome.textContent !== (d.preset || "—")) { nome.textContent = d.preset || "—"; fitAll(lista, ".fit2", 16, 11); }
-      faderShow(vol, { valor: d.volume, txt: d.txt, mudo: !d.on });
-      vol.val.textContent = d.on ? d.txt : "DESLIGADA · " + d.txt;
-      status.textContent = !d.on ? "trilha desligada" : d.audio === false ? "áudio parado no PC" : "";
+      faderShow(vol, { valor: d.volume, txt: d.txt, mudo: vocal ? !!d.mudo : !d.on });
+      vol.val.textContent = !d.on ? "DESLIGADA · " + d.txt : vocal && d.mudo ? "MUDO · " + d.txt : d.txt;
+      vol.row.classList.toggle("off-trilha", vocal && !d.on);
+      status.textContent = !d.on ? (vocal ? "microfone desligado" : "trilha desligada")
+        : d.audio === false ? "áudio parado no PC" : (d.aviso || "");
+      status.title = status.textContent;
       render();
     },
   };

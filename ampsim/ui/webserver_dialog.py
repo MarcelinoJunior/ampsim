@@ -106,7 +106,7 @@ class WebServerDialog(QDialog):
         lay = QVBoxLayout(self)
 
         intro = QLabel("Use um celular, tablet ou outro computador <b>na mesma rede Wi-Fi</b> como segunda tela "
-                       "do AmpSim: pads, faders, setlist, timbres, guitarra e baixo, direto no navegador.")
+                       "do AmpSim: pads, faders, setlist, timbres, guitarra, baixo e vocal, direto no navegador.")
         intro.setWordWrap(True)
         lay.addWidget(intro)
 

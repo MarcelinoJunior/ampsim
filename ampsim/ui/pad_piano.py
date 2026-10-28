@@ -1,7 +1,7 @@
 """Aba Pad/Piano: cabeçalho do timbre, pads contínuos, knobs grandes, teclado e o painel
 "Instrumento / Layer" à direita. Também abriga o Synth AmpSim e o amp/efeitos das teclas.
 """
-from PySide6.QtCore import QObject, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QIntValidator, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
@@ -227,13 +227,25 @@ class PadSoundDialog(QDialog):
         super().done(r)
 
 
+class _FxCorner(QObject):
+    """Mantém o botão FX no canto de cima à direita de cada botão LAYER do cabeçalho."""
+
+    def eventFilter(self, obj, ev):
+        if ev.type() in (QEvent.Resize, QEvent.Show):
+            fx = getattr(obj, "fx_button", None)
+            if fx is not None:
+                fx.move(obj.width() - fx.width() - 4, 3)
+                fx.raise_()
+        return False
+
+
 class PadPianoView(QWidget):
     def __init__(self, win, amp_page, synth_panel):
         super().__init__()
         self.win = win
         self.engine = win.engine
         self.inst = win.engine.instruments
-        self.bridge = InstrumentBridge()
+        self.bridge = InstrumentBridge(self)          # filho da tela: some com ela (sem ciclo pelo C++)
         self.amp_page = amp_page
         self.synth_panel = synth_panel
         self.layer = 1                       # camada editada no painel da direita
@@ -246,13 +258,12 @@ class PadPianoView(QWidget):
 
         self.view_buttons = []
         self.views = QStackedWidget()
-        play = QWidget()
-        pl = QHBoxLayout(play)
-        pl.setContentsMargins(0, 0, 0, 0)
-        pl.setSpacing(10)
-        pl.addWidget(self._build_center(), 1)
-        pl.addWidget(self._build_side())
-        self.views.addWidget(play)
+        # subjanelas da janela principal (QDockWidget): cabeçalho do timbre, Pad contínuo e
+        # Instrumento / Layer ficam fora desta área; aqui fica o que toca (knobs e teclado)
+        self.header_card = self._build_header()
+        self.cont_card = self._build_cont_grid()
+        self.side_panel = self._build_side()
+        self.views.addWidget(self._build_center())
         for inner in (synth_panel, amp_page):
             page = QWidget()
             vl = QVBoxLayout(page)
@@ -261,11 +272,12 @@ class PadPianoView(QWidget):
             row = self._view_switch()
             row.addStretch(1)
             vl.addLayout(row)
-            if inner is synth_panel:
-                sc = QScrollArea()
-                sc.setWidgetResizable(True)
-                sc.setWidget(synth_panel)
-                inner = sc
+            # Synth e Amp rolam por dentro se a área central ficar baixa (a janela não cresce por causa deles)
+            sc = QScrollArea()
+            sc.setWidgetResizable(True)
+            sc.setFrameShape(QFrame.NoFrame)
+            sc.setWidget(inner)
+            inner = sc
             vl.addWidget(inner, 1)
             self.views.addWidget(page)
         root.addWidget(self.views, 1)
@@ -306,12 +318,6 @@ class PadPianoView(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
 
-        top = QHBoxLayout()
-        top.setSpacing(8)
-        top.addWidget(self._build_header(), 1)
-        top.addWidget(self._build_cont_grid())
-        lay.addLayout(top)
-
         self.knob_card = QFrame()
         self.knob_card.setObjectName("card")
         kl = QHBoxLayout(self.knob_card)
@@ -336,6 +342,8 @@ class PadPianoView(QWidget):
         head.addLayout(self._view_switch())
         head.addSpacing(8)
         self.kbd_info = _label("", "small")
+        self.kbd_info.setMinimumWidth(0)
+        self.kbd_info.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # texto longo não alarga a janela
         head.addWidget(self.kbd_info, 1)
         head.addWidget(_label("Na tela:", "small"))
         self.device = _combo(DEVICES, 190)
@@ -346,7 +354,7 @@ class PadPianoView(QWidget):
         self.kbd_stack = QStackedWidget()
         self.piano = PianoWidget(36, 96)
         self.piano.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.piano.setMinimumHeight(96)
+        self.piano.setMinimumHeight(64)          # tela baixa (1366x768) ainda cabe tudo
         self.piano.noteOn.connect(lambda n, v: self.inst.key_on(n, v))
         self.piano.noteOff.connect(lambda n: self.inst.key_off(n))
         self.piano.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -357,7 +365,7 @@ class PadPianoView(QWidget):
         dl.setContentsMargins(0, 0, 0, 0)
         dl.setSpacing(0)
         self.ctrl = ControllerWidget()
-        self.ctrl.setMinimumSize(300, 96)
+        self.ctrl.setMinimumSize(300, 56)
         dl.addWidget(self.ctrl, 1)
         tm = _label("Desenhos em homenagem aos instrumentos originais; marcas e logotipos são dos seus titulares.",
                     "small")
@@ -376,7 +384,7 @@ class PadPianoView(QWidget):
         g.setContentsMargins(12, 8, 12, 8)
         g.setHorizontalSpacing(12)
         g.setVerticalSpacing(6)
-        self.art = ArtTile(84)
+        self.art = ArtTile(72)
         g.addWidget(self.art, 0, 0, 2, 1, Qt.AlignTop)
         names = QVBoxLayout()
         names.setSpacing(2)
@@ -416,7 +424,7 @@ class PadPianoView(QWidget):
             b.setIconSize(QSize(16, 16))
             b.setFocusPolicy(Qt.NoFocus)
             b.setToolTip(tip + "\nBotão direito: mapear num botão do controlador")
-            b.setFixedSize(60, 50)
+            b.setFixedSize(52, 44)
             b.setCheckable(func in ("Sustain (segurar)", "Metrônomo liga/desliga"))
             b.clicked.connect(lambda _, f=func: self._action(f))
             w = Mapped(self, func, b, self._click_menu if func == "Metrônomo liga/desliga" else None)
@@ -429,17 +437,25 @@ class PadPianoView(QWidget):
 
         layers = QHBoxLayout()
         layers.setSpacing(8)
+        self._fx_corner = _FxCorner(self)
         self.layer_buttons = []
         for i in range(1, MAX_LAYERS + 1):
             b = QPushButton()
             b.setCheckable(True)
             b.setFocusPolicy(Qt.NoFocus)
-            b.setMinimumHeight(44)
+            b.setMinimumHeight(40)                # 2 linhas ("LAYER 1" / timbre) sem cortar
             b.setMinimumWidth(78)
             b.setIcon(icon("keys", C["text"], 22))
             b.setIconSize(QSize(22, 22))
-            b.setStyleSheet("QPushButton { text-align: left; padding: 6px 12px; }")
+            b.setStyleSheet("QPushButton { text-align: left; padding: 2px 12px; }")
             b.clicked.connect(lambda _, i=i: self.select_layer(i))
+            # botão FX (plugins VST3 da camada) dentro do botão, no canto de cima à direita: não muda o
+            # tamanho do cabeçalho
+            from .plugin_slot import FxButton
+            fxb = FxButton(lambda i=i: self.inst.layer_chain(i), lambda i=i: self.win.open_fx("layer", i), b,
+                           small=True)
+            b.fx_button = fxb
+            b.installEventFilter(self._fx_corner)
             self.layer_buttons.append(b)
             layers.addWidget(b, 1)
         self.mode = _combo(KEY_MODES)
@@ -473,6 +489,7 @@ class PadPianoView(QWidget):
         eq.setToolTip("EQ e ambiente do pad contínuo")
         eq.setFocusPolicy(Qt.NoFocus)
         eq.clicked.connect(self.open_pad_eq)
+        self.cont_eq_btn = eq
         head.addWidget(eq)
         self.stop_btn = QPushButton(" Parar")
         self.stop_btn.setIcon(icon("stop", "#ffffff", 13))
@@ -495,10 +512,10 @@ class PadPianoView(QWidget):
             if sharp:
                 flat = FLATS[key]
                 b = QPushButton(f"{key}\n{flat}")
-                b.setFixedSize(44, 34)
+                b.setFixedSize(40, 34)
             else:
                 b = QPushButton(key)
-                b.setFixedSize(44, 44)
+                b.setFixedSize(40, 44)
             b.setFocusPolicy(Qt.NoFocus)
             b.setProperty("sharp", sharp)
             b.setToolTip(f"Pad contínuo em {key}" + (f" / {FLATS[key]}" if sharp else "") +
@@ -546,7 +563,7 @@ class PadPianoView(QWidget):
     def _build_side(self):
         side = QFrame()
         side.setObjectName("side")
-        side.setFixedWidth(280)
+        side.setMinimumWidth(260)            # subjanela: dá para alargar
         outer = QVBoxLayout(side)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
@@ -560,7 +577,9 @@ class PadPianoView(QWidget):
         hi = QLabel()
         hi.setPixmap(icon("keys", C["text"], 18).pixmap(18, 18))
         head.addWidget(hi)
-        head.addWidget(_label("Instrumento / Layer", "h2"), 1)
+        ht = _label("Instrumento / Layer", "h2")
+        head.addWidget(ht, 1)
+        self.side_head = (hi, ht)             # numa subjanela o título já está na barra dela
         lay.addLayout(head)
 
         seg = QHBoxLayout()
@@ -686,14 +705,22 @@ class PadPianoView(QWidget):
         self.delay_div = _combo(DELAY_DIVS)
         self.delay_div.activated.connect(self._delay_div)
         fx.addWidget(self.delay_div, 3, 2)
-        fx.addWidget(QLabel("Toque"), 4, 1)
+        # plugins VST3 da camada (cadeia FX, audio/vst.py), depois de Rotação/Drive/Delay: uma linha com o
+        # resumo e o botão FX, que abre a janela da cadeia
+        from .plugin_slot import FxLine
+        self.fx_line = FxLine(lambda: self.inst.layer_chain(self.layer),
+                              lambda: self.win.open_fx("layer", self.layer), "Plugins")
+        self.fx_line.setToolTip("Plugins VST3 de efeito só desta camada (reverb, delay, EQ…), em série.\n"
+                                "Plugins grátis: menu ☰ → Downloads: timbres e plugins")
+        fx.addWidget(self.fx_line, 4, 0, 1, 3)
+        fx.addWidget(QLabel("Toque"), 5, 1)
         self.touch = QSlider(Qt.Horizontal)
         self.touch.setRange(0, 100)
         self.touch.setFocusPolicy(Qt.NoFocus)
         self.touch.setToolTip("Sensibilidade ao toque (todas as camadas): 0 = notas iguais, 100 = segue a força")
         self.touch.valueChanged.connect(lambda v: None if self._updating else
                                         set_func(self.engine, "Sensibilidade ao toque", v))
-        fx.addWidget(self.touch, 4, 2)
+        fx.addWidget(self.touch, 5, 2)
         fx.setColumnStretch(2, 1)
         lay.addLayout(fx)
         lay.addStretch(1)
@@ -952,18 +979,39 @@ class PadPianoView(QWidget):
         elif target == "button":
             title += f" ({self.inst.button_funcs[i]})"
         dlg = MidiLearnDialog(self.inst, self.bridge, title, self, kinds=kinds,
-                              current=self.physical_key(target, i), want=want)
+                              current=self.physical_key(target, i), want=want,
+                              latch=self.inst.button_latch[i] if target == "button" else None)
         if dlg.exec() and dlg.choice is not None:
-            self.assign_physical(target, i, dlg.choice)
+            self.assign_physical(target, i, dlg.choice, latch=getattr(dlg, "latch", None))
         self.win.refresh_sounds()
 
-    def assign_physical(self, target, i, key):
+    def set_button_latch(self, i, on):
+        """Botão físico i que trava (cada mensagem alterna) ou momentâneo (só o apertar; o padrão)."""
+        self.inst.button_latch[i] = bool(on)
+        self.inst.on_learn()
+
+    def latch_action(self, menu, i):
+        """Opção "Botão que trava" no botão direito de um botão mapeado por CC."""
+        cur = self.physical_key("button", i)
+        if not cur or cur[0] != "cc":
+            return None
+        from .ctl_map_ui import LATCH_TEXT, LATCH_TIP
+        a = menu.addAction(LATCH_TEXT)
+        a.setCheckable(True)
+        a.setChecked(bool(self.inst.button_latch[i]))
+        a.setToolTip(LATCH_TIP)
+        a.triggered.connect(lambda on: self.set_button_latch(i, on))
+        return a
+
+    def assign_physical(self, target, i, key, latch=None):
         """key = [tipo, canal, nº] ou [] para remover. Um controle físico vale para um lugar só."""
         m = self.inst.mapping
         group, kinds, _, _ = self.PHYSICAL[target]
         if key:
             kind, ch, num = key
             if kind not in kinds:
+                return False
+            if not self._take_from_tabs(key):
                 return False
             stored = list(key) if group == "buttons" else [ch, num]
             # um controle físico, um lugar: tira dos outros botões/knobs e dos atalhos livres
@@ -979,8 +1027,12 @@ class PadPianoView(QWidget):
                 if k == list(key):
                     del self.inst.free_map[f]
             m[group][i] = stored
+            if group == "buttons" and latch is not None:
+                self.inst.button_latch[i] = bool(latch) and kind == "cc"
         else:
             m[group][i] = None
+            if group == "buttons":
+                self.inst.button_latch[i] = False
         self.inst.on_learn()
         return True
 
@@ -1040,6 +1092,7 @@ class PadPianoView(QWidget):
                            lambda: self.map_physical("button", i))
             if cur:
                 menu.addAction(f"Remover mapeamento ({key_text(cur)})", lambda: self.assign_physical("button", i, []))
+            self.latch_action(menu, i)
             menu.addSection("Função")
             for func in BUTTON_FUNCS:
                 a = menu.addAction(func)
@@ -1109,9 +1162,26 @@ class PadPianoView(QWidget):
         self.win.refresh_sounds()
 
     # ------------------------------------------------------------------ mapeamento físico (_Mapped)
+    def _take_from_tabs(self, key):
+        """O controle físico já mexe em algo das abas Guitarra/Baixo/Vocal ou de um plugin (midi_map.py)?
+        Pergunta se substitui e tira de lá. -> False se a pessoa desistiu."""
+        used = [t for t, e in self.inst.ctl_map.items() if e.get("key") == list(key)]
+        if not used:
+            return True
+        names = "\n• ".join(self.inst.ctl_map[t].get("label") or t for t in used)
+        if QMessageBox.question(self, "Controle já usado",
+                                f"{key_text(key)} já está em uso:\n\n• {names}\n\n"
+                                "Usar este controle aqui e tirar de lá?") != QMessageBox.Yes:
+            return False
+        for t in used:
+            self.inst.ctl_map.pop(t, None)
+        return True
+
     def learn(self, func):
         dlg = MidiLearnDialog(self.inst, self.bridge, func, self)
         if dlg.exec() and dlg.choice is not None:
+            if dlg.choice and not self._take_from_tabs(dlg.choice):
+                return
             if dlg.choice:
                 for f, k in list(self.inst.free_map.items()):     # um controle físico, uma função
                     if k == dlg.choice:
@@ -1278,6 +1348,7 @@ class PadPianoView(QWidget):
             self._updating = False
         self.oct_label.setText("Oitava" if n >= 2 else "Oitava (teclado)")
         self.fx_title.setText(f"Efeitos da Layer {n}" + ("" if on else " (desligada)"))
+        self.fx_line.sync()                 # resumo dos plugins da camada escolhida
 
         follow = inst.pad_follow != PAD_FOLLOW[0]
         self.cont_title.setText("Pad contínuo · segue o acorde" if follow else "Pad contínuo")

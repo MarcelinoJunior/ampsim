@@ -10,6 +10,7 @@ from ..audio import sampler as smp
 from .. import storage
 from ..audio.sampler import MAX_SECONDS, REC_PREFIX
 from ..dsp.params import CAB_IR_INDEX, EFFECTS, TRACK_PARAMS
+from ..dsp.vocal import VOCAL_EFFECTS, latency_note
 from ..instruments import (
     CATEGORIES, CONT_PAD_SOUNDS, KEY_NAMES, MAX_LAYERS, PAD_CATEGORIES, PAD_COUNT, PAD_SOUND_BY_NAME, PAD_SOUNDS,
     SOUND_BY_NAME, SOUNDS,
@@ -19,17 +20,28 @@ from . import config as wcfg
 from .server import TRACK_PANEL, WebServer
 
 PAD_VOLUMES = ("Volume pad contínuo", "Volume bateria")
-# faders só da tela remota (a barra de baixo do PC não tem lugar): mesma função de knob do MIDI
-WEB_FADERS = (("Compressor", "Compressor"),)
+# nome do fader no celular quando o rótulo da barra do PC é abreviado
+WEB_NAMES = {"Compressor": "Compressor"}
 # pedais que dá para mexer pelo celular (captura NAM e plugin VST dependem de arquivos escolhidos no PC)
 REMOTE_EFFECTS = tuple(e for e in EFFECTS if e.key not in ("nam", "vst"))
 REMOTE_FX = {e.key: e for e in REMOTE_EFFECTS}
 FX_SHORT = {"denoise": "Ruído", "gate": "Gate", "comp": "Comp", "overdrive": "Drive", "amp": "Amp",
             "cab": "Gabinete", "eq": "EQ", "chorus": "Chorus", "delay": "Delay", "reverb": "Reverb"}
+# tela Vocal: os pedais da cadeia de voz (dsp/vocal.py); os plugins VST3 ficam no PC
+VOCAL_FX = {e.key: e for e in VOCAL_EFFECTS}
+VOCAL_SHORT = {"hpf": "Filtro", "gate": "Gate", "comp": "Comp", "eq": "EQ", "deess": "Anti-S",
+               "double": "Dobra", "delay": "Delay", "reverb": "Reverb"}
 TRACK_VOL = next(p for p in TRACK_PARAMS if p.key == "volume")
 NAME_MAX = 60
-TRACK_COMMANDS = ("trilha_preset_passo", "trilha_preset", "trilha_volume", "trilha_on", "efeito_on", "efeito_param",
-                  "trilha_salvar")
+TRACK_COMMANDS = ("trilha_preset_passo", "trilha_preset", "trilha_volume", "trilha_on", "trilha_mute", "efeito_on",
+                  "efeito_param", "trilha_salvar")
+
+
+def track_effects(name):
+    """(lista de EffectDef, {chave: EffectDef}, nomes curtos) que a tela remota mostra para a trilha."""
+    if name == "vocal":
+        return VOCAL_EFFECTS, VOCAL_FX, VOCAL_SHORT
+    return REMOTE_EFFECTS, REMOTE_FX, FX_SHORT
 
 
 def to_norm(p, v):
@@ -107,6 +119,9 @@ class Remote(QObject):
         self._track_sync.setInterval(66)
         self._track_sync.timeout.connect(self._sync_tracks)
         self._rec_by = None                 # aparelho que começou a gravação (recebe o aviso dos 60 s)
+        self._vu = [0.0, 0.0]               # medidores do Master e do Compressor (0..1, com queda suave)
+        self._vu_tick = 0
+        self._vu_sent = (0.0, 0.0)          # silêncio não precisa ser mandado
         rec = getattr(win, "dock", None) and win.dock.recorder
         if rec is not None:
             rec.on_auto_stop = self._rec_auto_stopped
@@ -173,14 +188,10 @@ class Remote(QObject):
             if sid is None or v is None or (c == "pad_volume" and sid not in PAD_VOLUMES):
                 return
             v = max(0.0, min(100.0, v))
-            if c == "fader" and sid in dict(WEB_FADERS):
-                from ..ui.funcs import set_func
-                set_func(win.engine, sid, v)
-            else:
-                target = self._strip(sid)
-                if target is None:
-                    return
-                win.dock._mix(target, int(round(v)))
+            target = self._strip(sid)
+            if target is None:
+                return
+            win.dock._mix(target, int(round(v)))
             # arrastar o fader manda muitos comandos: só os volumes da tela acompanham (como um knob)
             if not win._knob_sync.isActive():
                 win._knob_sync.start()
@@ -191,7 +202,9 @@ class Remote(QObject):
             if sid is None or not isinstance(on, bool) or (c == "pad_mute" and sid not in PAD_VOLUMES):
                 return
             target = self._strip(sid)
-            if target is None or target[0] != "func" or target[1] not in win.dock.mute_buttons:
+            if target is None or target[1] not in win.dock.mute_buttons:
+                return
+            if target[0] == "track" and c == "pad_mute":
                 return
             win.dock._mute(target[1], on)
         elif c == "musica":
@@ -314,10 +327,11 @@ class Remote(QObject):
         self.push()
 
     def _track_command(self, c, name, msg):
-        """Telas Guitarra e Baixo: os mesmos controles da aba da trilha no PC (sem trocar a aba)."""
+        """Telas Guitarra, Baixo e Vocal: os mesmos controles da aba da trilha no PC (sem trocar a aba)."""
         win = self.win
         page = win.track_pages[name]
         track = page.track()
+        _effects, fx_map, _short = track_effects(name)
         if c == "trilha_preset_passo":
             d = _step(msg.get("d"))
             if d is None:
@@ -341,13 +355,18 @@ class Remote(QObject):
             if not isinstance(on, bool):
                 return
             track.set_param("track", "on", on)
+        elif c == "trilha_mute":
+            on = msg.get("on")
+            if name != "vocal" or not isinstance(on, bool):       # só a Vocal tem mudo próprio
+                return
+            win.dock._mute("vocal", on)
         elif c == "efeito_on":
             eff, on = _str(msg.get("efeito")), msg.get("on")
-            if eff not in REMOTE_FX or not isinstance(on, bool):
+            if eff not in fx_map or not isinstance(on, bool):
                 return
             track.set_on(eff, on)
         elif c == "efeito_param":
-            eff = REMOTE_FX.get(_str(msg.get("efeito")) or "")
+            eff = fx_map.get(_str(msg.get("efeito")) or "")
             key = _str(msg.get("param"))
             p = next((p for p in eff.params if p.key == key), None) if eff else None
             v = _num(msg.get("valor"))
@@ -355,7 +374,7 @@ class Remote(QObject):
                 return
             if p.is_choice:
                 top = len(p.choices) - 1
-                if eff.key == "cab" and not track.ir_path:
+                if eff.key == "cab" and name != "vocal" and not track.ir_path:
                     top = CAB_IR_INDEX - 1          # IR de arquivo: só escolhendo o .wav no PC
                 v = float(min(max(int(v), 0), top))
             else:
@@ -379,6 +398,23 @@ class Remote(QObject):
             return
         win.refresh_track(name)
         win._sync_bank()
+
+    def meter(self, peak, gr_db):
+        """Chamado pela interface ~30x/s com o pico da saída e a redução nos picos. Manda {"t": "vu"}
+        ~15x/s quando muda (e 1x/s mesmo parado), só para quem vê a tela Faders (mensagem pequena, fora do estado)."""
+        from ..ui.deskfader import DECAY, level_from_gr, level_from_peak
+        m = max(level_from_peak(peak), self._vu[0] - DECAY)
+        c = max(level_from_gr(gr_db), self._vu[1] - DECAY)
+        self._vu = [m, c]
+        self._vu_tick += 1
+        if self._vu_tick % 2 or not self.server.running or not self.server.clients:
+            return
+        sent = (round(m, 2), round(c, 2))
+        # sem mudança, manda de novo 1x por segundo: quem acabou de entrar (ou recarregou) também recebe
+        if sent == self._vu_sent and self._vu_tick % 30:
+            return
+        self._vu_sent = sent
+        self.server.publish_vu({"t": "vu", "m": sent[0], "c": sent[1]})
 
     def _rec_auto_stopped(self, name):
         """O gravador parou sozinho nos 60 s: avisa o aparelho que começou a gravação."""
@@ -438,13 +474,10 @@ class Remote(QObject):
             else:
                 _, lo, hi, _ = FUNC_RANGES[arg]
                 v = (func_value(e, arg) - lo) / (hi - lo) * 100
-            faders.append({"id": arg, "nome": label.replace("\n", " "), "valor": round(v),
-                           "mudo": arg in inst.mutes, "pode_mutar": mutable,
+            mudo = bool(e.tracks[arg].values["track"].get("mute")) if kind == "track" else arg in inst.mutes
+            faders.append({"id": arg, "nome": WEB_NAMES.get(arg, label.replace("\n", " ")), "valor": round(v),
+                           "mudo": mudo, "pode_mutar": mutable,
                            "ativo": layer is None or layer <= count})
-            if arg == "Master":
-                for func, label in WEB_FADERS:               # logo depois do Master
-                    faders.append({"id": func, "nome": label, "valor": round(func_value(e, func)), "mudo": False,
-                                   "pode_mutar": False, "ativo": True})
         sl = win.setlist
         songs = sl.songs_list()
         k = inst.keys
@@ -484,8 +517,9 @@ class Remote(QObject):
         page = self.win.track_pages[name]
         t = page.track()
         tv = t.values["track"]
+        effects, _fx_map, short = track_effects(name)
         fx = []
-        for eff in REMOTE_EFFECTS:
+        for eff in effects:
             vals = t.values[eff.key]
             params = []
             for p in eff.params:
@@ -493,25 +527,37 @@ class Remote(QObject):
                 if p.is_choice:
                     # no celular só o nome do modelo (o "(estilo …)" do PC não cabe na lista)
                     opts = [ch.split("  (estilo")[0] for ch in p.choices]
-                    if eff.key == "cab" and not t.ir_path and int(round(v)) != CAB_IR_INDEX:
+                    if eff.key == "cab" and name != "vocal" and not t.ir_path and int(round(v)) != CAB_IR_INDEX:
                         opts = opts[:CAB_IR_INDEX]
                     params.append({"k": p.key, "nome": p.label, "i": int(round(v)), "opcoes": opts})
                 else:
                     params.append({"k": p.key, "nome": p.label, "valor": round(to_norm(p, v) * 100),
                                    "txt": fmt_value(p, v)})
-            fx.append({"k": eff.key, "nome": eff.title, "curto": FX_SHORT.get(eff.key, eff.title),
+            fx.append({"k": eff.key, "nome": eff.title, "curto": short.get(eff.key, eff.title),
                        "on": bool(vals.get("on")), "params": params})
         data = page.preset.currentData()
         vol = tv["volume"]
         # captura NAM (amp real) escolhida no PC: aparece acesa, só para ver (o Amp por cima soma os dois)
         nam = t.values.get("nam", {})
         nam_on = bool(nam.get("on") and nam.get("file"))
-        return {"preset": page.preset.currentText() or "—", "atual": ":".join(data) if data else "",
-                "nome_salvar": data[1] if data else "Meu preset",
-                "volume": round(to_norm(TRACK_VOL, vol) * 100),
-                "txt": "-∞ dB" if vol <= TRACK_VOL.lo + 0.05 else fmt_value(TRACK_VOL, vol),
-                "on": bool(tv["on"]), "efeitos": fx, "audio": self.win.engine.running,
-                "nam": str(nam.get("file")) if nam_on else ""}
+        out = {"preset": page.preset.currentText() or "—", "atual": ":".join(data) if data else "",
+               "nome_salvar": data[1] if data else "Meu preset",
+               "volume": round(to_norm(TRACK_VOL, vol) * 100),
+               "txt": "-∞ dB" if vol <= TRACK_VOL.lo + 0.05 else fmt_value(TRACK_VOL, vol),
+               "on": bool(tv["on"]), "efeitos": fx, "audio": self.win.engine.running,
+               "nam": str(nam.get("file")) if nam_on else ""}
+        if name == "vocal":
+            e = self.win.engine
+            out["mudo"] = bool(tv.get("mute"))
+            out["pode_mutar"] = True
+            aviso = ""
+            if tv["on"] and e.running:
+                if not e.config.input_device or not e.vocal_channel_ok():
+                    aviso = "Mic sem entrada (⚙ Áudio no PC)"
+                elif latency_note(e.config.blocksize, e.fs):
+                    aviso = f"Buffer {e.config.blocksize}: voz pode atrasar"
+            out["aviso"] = aviso
+        return out
 
     def _keys_user_presets(self):
         """Nomes em "Meus timbres" (para o celular avisar antes de salvar por cima de um)."""

@@ -58,7 +58,7 @@ GeneralUser GS e as capturas NAM, cada um com a sua licença. É montado com o
 
 ## Timbres adicionais (pianos, baixados à parte)
 
-Baixados pela tela **Timbres adicionais** (ou pelo instalador) da Release
+Baixados pela tela **Downloads: timbres e plugins** (ou pelo instalador) da Release
 [timbres-pianos-1](https://github.com/MarcelinoJunior/ampsim/releases/tag/timbres-pianos-1), cópias sem
 modificação dos pacotes do [FreePats](https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html).
 Cada pacote traz a própria licença.
@@ -68,6 +68,18 @@ Cada pacote traz a própria licença.
 | Upright Piano KW (Kawai de armário) | Gonzalo e Roberto, FreePats | CC0 1.0 |
 | YDP Grand Piano (Yamaha Disklavier Pro) | Roberto (FreePats), amostras Zenph Studios / OLPC | CC BY 3.0 |
 | Salamander Grand Piano V3 (Yamaha C5) | Alexander Holm; versão SF2 de Roberto (FreePats) | CC BY 3.0 |
+
+## Plugins VST3 gratuitos (baixados à parte)
+
+Baixados pela tela **Downloads: timbres e plugins** direto da release oficial de quem fez o plugin
+(não vão no instalador nem na release do AmpSim). O AmpSim confere o tamanho e o SHA-256 do arquivo e
+copia só as pastas `.vst3`, sem modificação, para a pasta de plugins do usuário
+(`%LOCALAPPDATA%\Programs\Common\VST3`). Eles rodam como plugins separados, carregados pelo
+pedalboard/JUCE.
+
+| Plugin | Origem | Licença |
+|---|---|---|
+| [Dragonfly Reverb](https://github.com/michaelwillis/dragonfly-reverb) 3.2.10 (Room, Hall, Plate e Early Reflections), arquivo `dragonfly-reverb-3.2.10-win64.zip` da [release 3.2.10](https://github.com/michaelwillis/dragonfly-reverb/releases/tag/3.2.10) | Michael Willis e colaboradores (usa o Freeverb3 e o DPF) | GPL-3.0 (o código-fonte está no repositório oficial) |
 
 ## Imagens dos timbres (guardadas no repositório)
 

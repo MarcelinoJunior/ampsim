@@ -151,6 +151,13 @@ def test_config_file_with_junk_falls_back(dirs):
     assert wcfg.load() == wcfg.default()
 
 
+def _write_old_config(cfg):
+    """webserver.json de uma versão antiga (sem "versao"): é o que dispara a migração das telas."""
+    d = {k: v for k, v in cfg.items() if k != "versao"}
+    wcfg.path().parent.mkdir(parents=True, exist_ok=True)
+    wcfg.path().write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+
 def test_old_config_with_removed_panels_still_loads(dirs):
     """Tempo e Mute saíram da página: configurações antigas carregam sem eles (o resto continua)."""
     assert {"guitarra", "baixo"} <= set(wcfg.default()["aberto"])
@@ -159,7 +166,7 @@ def test_old_config_with_removed_panels_still_loads(dirs):
     wcfg.set_user(old, "mesa", "1234", ["faders"])
     old["usuarios"][0]["telas"] = ["tempo", "emergencia", "faders"]
     old["aberto"] = ["pads", "tempo", "emergencia", "timbre"]
-    wcfg.save(old)
+    _write_old_config(old)
     c = wcfg.load()
     assert c["aberto"] == ["pads", "timbre"]
     assert c["usuarios"][0]["telas"] == ["faders"]
@@ -167,9 +174,10 @@ def test_old_config_with_removed_panels_still_loads(dirs):
     # quem via todas as telas antigas (sem senha ou "espelho") passa a ver também Guitarra e Baixo
     old["aberto"] = ["pads", "faders", "setlist", "tempo", "emergencia", "timbre"]
     old["usuarios"][0]["telas"] = list(old["aberto"])
-    wcfg.save(old)
+    _write_old_config(old)
     c = wcfg.load()
     assert c["aberto"] == list(wcfg.PANEL_IDS) and c["usuarios"][0]["telas"] == list(wcfg.PANEL_IDS)
+    assert json.loads(wcfg.path().read_text(encoding="utf-8"))["versao"] == wcfg.VERSION    # migrou 1 vez
 
 
 def test_page_only_sends_known_commands():
@@ -388,7 +396,8 @@ def test_only_changes_are_sent(win, app):
         win.remote.push()
     app.processEvents()
     with pytest.raises(TimeoutError):
-        p.recv(0.3)
+        while p.recv(0.3)["t"] == "vu":          # medidor (mensagem própria, 1x/s mesmo parado) não conta
+            pass
     win.engine.tracks["guitar"].set_param("track", "volume", -12.0)
     win.remote.push()
     m = p.until("estado")
@@ -898,7 +907,7 @@ def test_master_and_compressor_faders(win, app):
     logo depois do Master (só no celular), o mesmo knob "Compressor" do MIDI."""
     from ampsim.ui.dock import STRIPS
     from ampsim.ui.funcs import func_value
-    assert [s[2] for s in STRIPS][-1] == "Master" and "Volume do metrônomo" not in [s[2] for s in STRIPS]
+    assert [s[2] for s in STRIPS][-2:] == ["Master", "Compressor"] and "Volume do metrônomo" not in [s[2] for s in STRIPS]
     assert win.inst.levels["comp"] == 0                    # padrão: desligado (nenhum som muda)
     port = serve(win)
     p = Page(port)
@@ -1139,7 +1148,9 @@ def test_restricted_old_profiles_stay_restricted(win, app):
     Faders; o PC mostra "nenhuma tela" para o administrador ver. Quem tinha as 6 telas ganha todas."""
     assert wcfg.clean_panels(["tempo", "emergencia"]) == [] and wcfg.clean_panels(["tempo"]) == []
     assert wcfg.clean_panels([]) == [] and wcfg.clean_panels(["pads", "tempo"]) == ["pads"]
-    assert wcfg.clean_panels(["pads", "faders", "setlist", "tempo", "emergencia", "timbre"]) == list(wcfg.PANEL_IDS)
+    old11 = ["pads", "faders", "setlist", "tempo", "emergencia", "timbre"]
+    assert wcfg.clean_panels(old11, migrate=True) == list(wcfg.PANEL_IDS)
+    assert wcfg.clean_panels(old11) == ["pads", "faders", "setlist", "timbre"]       # sem migrar: como está
     cfg = wcfg.default()
     wcfg.set_user(cfg, "mesa", "1234", ["faders"])
     cfg["usuarios"][0]["telas"] = ["tempo", "emergencia"]
@@ -1184,3 +1195,283 @@ def test_track_screen_shows_nam_and_short_amp_names(win, app):
     assert p.state["baixo"]["nam"] == "dUg DP3X"
     assert p.state["baixo"]["txt"] == "-∞ dB" and p.state["baixo"]["on"]      # volume no mínimo não é "mudo"
     p.close()
+
+
+def test_vu_messages_only_for_the_faders_screen(win, app):
+    """Medidores do Master e do Compressor: mensagem curta {"t":"vu"} (~15x/s, só quando muda), só para
+    quem vê a tela Faders; o estado grande não é reenviado por causa deles."""
+    import numpy as np
+    cfg = wcfg.default()
+    wcfg.set_user(cfg, "mesa", "1", ["faders"])
+    wcfg.set_user(cfg, "batera", "1", ["pads"])
+    port = serve(win, login=True, usuarios=cfg["usuarios"])
+    win.timer.stop()                                     # o tick de verdade chamaria meter() com silêncio
+    pages = {}
+    for nome in ("mesa", "batera"):
+        p = Page(port)
+        p.recv()
+        p.send(t="login", nome=nome, senha="1")
+        assert p.until("auth")["ok"]
+        drain(app, p)
+        pages[nome] = p
+    # nível alto na saída e o compressor segurando 6 dB
+    e = win.engine
+    e._lim[9] = 0.5
+    e._lim[10] = 10 ** (-6 / 20)
+    peak, gr = e.read_output_meter()
+    assert abs(peak - 0.5) < 1e-9 and abs(gr - 6.0) < 1e-6
+    assert e.read_output_meter() == (0.0, 0.0)            # leu e zerou
+    for _ in range(2):
+        win.remote.meter(peak, gr)
+    got = []
+    end = time.monotonic() + 1.0
+    while time.monotonic() < end:
+        app.processEvents()
+        try:
+            m = pages["mesa"].recv(0.02)
+        except TimeoutError:
+            continue
+        if m["t"] == "vu":
+            got.append(m)
+        assert m["t"] != "estado"                         # nada de estado por causa do medidor
+    assert got and abs(got[-1]["m"] - round((20 * np.log10(0.5) + 60) / 60, 2)) < 0.011
+    assert abs(got[-1]["c"] - 0.3) < 0.011
+    other = []
+    end = time.monotonic() + 0.3
+    while time.monotonic() < end:
+        app.processEvents()
+        try:
+            other.append(pages["batera"].recv(0.02)["t"])
+        except TimeoutError:
+            pass
+    assert "vu" not in other
+    # sem mudança: não manda de novo; silêncio cai aos poucos (com queda suave) até zerar
+    n = len(got)
+    for _ in range(4):
+        win.remote.meter(0.0, 0.0)
+    drain(app, pages["mesa"], 0.3)
+    for p in pages.values():
+        p.close()
+    assert n >= 1
+
+
+def test_vu_bandwidth_is_small(win, app):
+    """~15 mensagens de ~25 bytes por segundo com o medidor mexendo o tempo todo."""
+    import json as js
+    sent = []
+    win.remote.server.publish_vu = lambda msg: sent.append(js.dumps(msg, separators=(",", ":")))
+    win.remote.server.server = object()                  # "ligado"
+    win.remote.server.clients = {object()}
+    for i in range(30):                                   # 1 s de ticks a 30/s
+        win.remote.meter(0.1 + 0.8 * (i % 2), 0.0)
+    win.remote.server.server = None
+    win.remote.server.clients = set()
+    assert len(sent) <= 15 and max(len(x) for x in sent) <= 30
+
+
+def test_vu_is_resent_every_second_even_without_change(win, app):
+    """Quem entra (ou recarrega) com o nível parado recebe o medidor em até 1 s."""
+    sent = []
+    srv = win.remote.server
+    srv.publish_vu = lambda msg: sent.append(msg)
+    srv.server, srv.clients = object(), {object()}
+    try:
+        for _ in range(65):                                # ~2 s de ticks a 30/s com o nível parado
+            win.remote.meter(0.5, 3.0)
+    finally:
+        srv.server, srv.clients = None, set()
+    assert len(sent) >= 3 and all(m == sent[0] for m in sent)
+
+
+# ------------------------------------------------------------------ tela Vocal
+def test_vocal_panel_permission_and_migration(dirs):
+    from ampsim.web.server import command_panel
+    assert "vocal" in wcfg.PANEL_IDS and wcfg.PANEL_IDS[-1] == "vocal"
+    assert command_panel({"c": "trilha_on", "trilha": "vocal"}) == "vocal"
+    assert command_panel({"c": "trilha_mute", "trilha": "vocal"}) == "vocal"
+    assert command_panel({"c": "efeito_param", "trilha": "vocal"}) == "vocal"
+    # perfil da 1.2 que via todas as telas passa a ver a Vocal; perfil restrito continua restrito
+    v12 = ["pads", "faders", "setlist", "timbre", "guitarra", "baixo"]
+    assert wcfg.clean_panels(v12, migrate=True) == list(wcfg.PANEL_IDS)
+    assert wcfg.clean_panels(v12) == v12
+    assert wcfg.clean_panels(["pads", "guitarra"], migrate=True) == ["pads", "guitarra"]
+    p = wcfg.path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"ligado": True, "aberto": v12, "usuarios": [
+        {"nome": "Líder", "sal": "00", "hash": "x", "telas": v12},
+        {"nome": "Batera", "sal": "00", "hash": "x", "telas": ["pads", "faders"]}]}), encoding="utf-8")
+    c = wcfg.load()
+    assert "vocal" in c["aberto"] and "vocal" in c["usuarios"][0]["telas"]
+    assert c["usuarios"][1]["telas"] == ["pads", "faders"]
+
+
+def test_vocal_screen_state_and_commands(win, app):
+    from ampsim.dsp.vocal import VOCAL_EFFECTS
+    port = serve(win)
+    v = win.engine.tracks["vocal"]
+    page = win.track_pages["vocal"]
+    win.tabs.setCurrentWidget(win.pad_view)               # o PC está em outra aba
+    pc_tab = win.tabs.currentIndex()
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    st = p.state["vocal"]
+    assert [f["k"] for f in st["efeitos"]] == [e.key for e in VOCAL_EFFECTS]
+    assert {f["curto"] for f in st["efeitos"]} >= {"Filtro", "Comp", "Anti-S", "Dobra", "Reverb"}
+    assert not st["on"] and not st["mudo"] and st["pode_mutar"] and st["aviso"] == ""
+    names = [s["nome"] for c in p.state["vocal.presets"] for s in c["sons"]]
+    assert names == ["factory:" + n for n in factory_names("vocal")]
+    # liga o microfone, mudo, volume
+    p.cmd("trilha_on", trilha="vocal", on=True)
+    assert wait(app, lambda: v.on)
+    p.cmd("trilha_mute", trilha="vocal", on=True)
+    assert wait(app, lambda: v.values["track"]["mute"])
+    drain(app, p)
+    assert p.state["vocal"]["mudo"] and win.dock.mute_buttons["vocal"].isChecked()
+    p.cmd("trilha_mute", trilha="vocal", on=False)
+    assert wait(app, lambda: not v.values["track"]["mute"])
+    p.cmd("trilha_volume", trilha="vocal", valor=50)
+    assert wait(app, lambda: abs(v.values["track"]["volume"] - (-24.0)) < 1e-6)
+    # pedais e parâmetros (número, log e escolha)
+    p.cmd("efeito_on", trilha="vocal", efeito="deess", on=True)
+    assert wait(app, lambda: v.values["deess"]["on"])
+    p.cmd("efeito_param", trilha="vocal", efeito="comp", param="amount", valor=75)
+    assert wait(app, lambda: v.values["comp"]["amount"] == 75.0)
+    p.cmd("efeito_param", trilha="vocal", efeito="hpf", param="freq", valor=100)
+    assert wait(app, lambda: v.values["hpf"]["freq"] == 200.0)
+    p.cmd("efeito_param", trilha="vocal", efeito="reverb", param="type", valor=9)
+    assert wait(app, lambda: v.values["reverb"]["type"] == 2.0)
+    # preset de fábrica pela lista
+    p.cmd("trilha_preset", trilha="vocal", tipo="factory", nome="Voz falada (pregação)")
+    assert wait(app, lambda: page.preset.currentData() == ("factory", "Voz falada (pregação)"))
+    assert v.on and v.values["comp"]["amount"] == 65
+    # fader Vocal na tela Faders, com mudo
+    drain(app, p)
+    fv = {f["id"]: f for f in p.state["faders"]["canais"]}["vocal"]
+    assert fv["pode_mutar"] and fv["nome"] == "Vocal"
+    p.cmd("mute", id="vocal", on=True)
+    assert wait(app, lambda: v.values["track"]["mute"])
+    p.cmd("pad_mute", id="vocal", on=False)                   # a tela Pads não mexe na voz
+    drain(app, p)
+    assert v.values["track"]["mute"]
+    # o que não existe é ignorado: pedal de guitarra na Vocal, mudo na guitarra
+    before = dict(v.values["comp"])
+    p.cmd("efeito_on", trilha="vocal", efeito="amp", on=True)
+    p.cmd("efeito_param", trilha="vocal", efeito="comp", param="amount", valor="x")
+    p.cmd("trilha_mute", trilha="guitar", on=True)
+    drain(app, p)
+    assert v.values["comp"] == before and "mute" not in win.engine.tracks["guitar"].values["track"]
+    assert win.tabs.currentIndex() == pc_tab                  # o celular não troca a aba do PC
+    p.close()
+
+
+def test_vocal_screen_needs_its_permission(win, app):
+    port = serve(win, aberto=["guitarra"])
+    v = win.engine.tracks["vocal"]
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    assert "vocal" not in p.state
+    p.cmd("trilha_on", trilha="vocal", on=True)
+    drain(app, p)
+    assert not v.on
+    p.close()
+
+
+def test_vocal_page_and_mode_in_the_web_app():
+    with open(os.path.join(STATIC, "app.js"), encoding="utf-8") as f:
+        js = f.read()
+    assert '{ id: "vocal", nome: "Vocal", telas: ["vocal"] }' in js
+    assert 'trackPanel(sec, "vocal", "do vocal")' in js and 'tc("trilha_mute"' in js
+
+
+def test_profile_without_vocal_stays_without_vocal(dirs, win):
+    """QA rodada 8: a migração 1.2 -> Vocal roda uma vez só (arquivo sem versão). Depois, um perfil (ou o acesso
+    aberto) com todas as telas menos a Vocal continua assim ao salvar e abrir de novo."""
+    v12 = ["pads", "faders", "setlist", "timbre", "guitarra", "baixo"]
+    cfg = wcfg.load()                                       # sem arquivo: padrão (versão atual)
+    assert cfg["versao"] == wcfg.VERSION
+    wcfg.set_user(cfg, "Líder", "1234", v12)
+    cfg["aberto"] = list(v12)
+    wcfg.save(cfg)
+    for _ in range(2):                                      # abrir e salvar de novo não muda nada
+        c = wcfg.load()
+        assert c["aberto"] == v12 and c["usuarios"][0]["telas"] == v12
+        assert wcfg.check(c, "Líder", "1234") == v12
+        wcfg.save(c)
+    # pela tela remota do PC (janela Webserver -> Remote.set_config): mesma coisa
+    c = wcfg.load()
+    c["ligado"] = False
+    win.remote.set_config(c)
+    assert wcfg.load()["aberto"] == v12
+    # arquivo antigo (1.2, sem versão) migra uma vez e grava a versão
+    _write_old_config({"ligado": False, "aberto": v12, "usuarios": [
+        {"nome": "Líder", "sal": "00", "hash": "x", "telas": v12},
+        {"nome": "Batera", "sal": "00", "hash": "x", "telas": ["pads", "faders"]}]})
+    c = wcfg.load()
+    assert "vocal" in c["aberto"] and "vocal" in c["usuarios"][0]["telas"]
+    assert c["usuarios"][1]["telas"] == ["pads", "faders"]
+    assert json.loads(wcfg.path().read_text(encoding="utf-8"))["versao"] == wcfg.VERSION
+    # depois da migração, tirar a Vocal de novo fica valendo
+    c["aberto"] = list(v12)
+    c["usuarios"][0]["telas"] = list(v12)
+    wcfg.save(c)
+    c = wcfg.load()
+    assert c["aberto"] == v12 and c["usuarios"][0]["telas"] == v12
+
+
+def test_vocal_fader_needs_vocal_permission(win, app):
+    """QA rodada 8: perfil com Faders e sem Vocal não vê nem mexe no fader Vocal (nem no mudo dele)."""
+    from ampsim.web.server import command_allowed, visible_state
+    assert not command_allowed({"c": "fader", "id": "vocal", "valor": 10}, ["faders"])
+    assert not command_allowed({"c": "mute", "id": "vocal", "on": True}, ["faders"])
+    assert command_allowed({"c": "fader", "id": "vocal", "valor": 10}, ["faders", "vocal"])
+    assert not command_allowed({"c": "fader", "id": "vocal", "valor": 10}, ["vocal"])          # sem Faders
+    assert command_allowed({"c": "fader", "id": "Master", "valor": 10}, ["faders"])
+    assert command_allowed({"c": "mute", "id": "Volume camada 1", "on": True}, ["faders"])
+    data = {"canais": [{"id": "Master"}, {"id": "vocal"}]}
+    assert visible_state("faders", data, ["faders"])["canais"] == [{"id": "Master"}]
+    assert visible_state("faders", data, ["faders", "vocal"]) == data
+    v = win.engine.tracks["vocal"]
+    vol = v.values["track"]["volume"]
+    port = serve(win, aberto=["faders"])
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    ids = [c["id"] for c in p.state["faders"]["canais"]]
+    assert "vocal" not in ids and "Master" in ids
+    m0 = win.engine.master
+    p.cmd("fader", id="vocal", valor=5)
+    p.cmd("mute", id="vocal", on=True)
+    p.cmd("fader", id="Master", valor=40)
+    assert wait(app, lambda: win.engine.master != m0)              # o resto da tela Faders funciona
+    drain(app, p)
+    assert v.values["track"]["volume"] == vol and not v.values["track"]["mute"]
+    p.close()
+    win.remote.stop()
+    port = serve(win, aberto=["faders", "vocal"])
+    p = Page(port)
+    p.until("auth")
+    drain(app, p)
+    assert "vocal" in [c["id"] for c in p.state["faders"]["canais"]]
+    p.cmd("mute", id="vocal", on=True)
+    assert wait(app, lambda: v.values["track"]["mute"])
+    p.close()
+
+
+def test_short_portrait_phone_keeps_drum_pads_above_tabs():
+    """QA: 320x568 (iPhone SE 1ª geração): na tela Pads a 2ª fileira de bateria ficava embaixo da barra de abas.
+    Há um bloco só para tela em pé bem baixa (até 600 px) que encurta a barra de abas e as fileiras; medido com
+    emulação de aparelho: 7 telas x 320x568, 320x640, 360x740, 390x844, 412x915, 740x360, 844x390, 768x1024 e
+    1366x768 sem rolagem nem corte."""
+    with open(os.path.join(STATIC, "app.css"), encoding="utf-8") as f:
+        css = f.read()
+    m = re.search(r"@media \(orientation: portrait\) and \(max-height: 600px\) and \(max-width: 1239px\) \{(.*?)\n\}",
+                  css, re.S)
+    assert m, "bloco do celular em pé bem baixo"
+    block = m.group(1)
+    tabs = int(re.search(r"--tabs-h: (\d+)px", block).group(1))
+    rows = int(re.search(r"\.drumrow \{ min-height: (\d+)px", block).group(1))
+    key = int(re.search(r"\.key \{ min-height: (\d+)px", block).group(1))
+    assert tabs <= 52 and rows <= 96 and key >= 34                # ainda dá para tocar com o dedo
+    assert "body.notabs { --tabs-h: 0px; }" in block               # sessão de uma tela só: sem barra

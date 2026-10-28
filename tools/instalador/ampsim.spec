@@ -17,13 +17,21 @@ datas = [
     (os.path.join(ROOT, "LICENSE"), "."),
     (os.path.join(ROOT, "CREDITS.md"), "."),
 ]
+# textos do Qt em português (Fechar/Cancelar/Sim/Não… dos diálogos): ui/i18n.py
+import PySide6  # noqa: E402
+
+_QM = os.path.join(os.path.dirname(PySide6.__file__), "translations", "qtbase_pt_BR.qm")
+if os.path.exists(_QM):
+    datas.append((_QM, os.path.join("PySide6", "translations")))
 
 a = Analysis(
     [os.path.join(SPECPATH, "entrada.py")],
     pathex=[ROOT],
     datas=datas,
-    # websockets e segno são importados só quando a tela remota liga
-    hiddenimports=collect_submodules("ampsim") + collect_submodules("websockets") + ["segno"],
+    # websockets e segno são importados só quando a tela remota liga; o pedalboard (plugins VST3,
+    # audio/vst.py) é importado dentro de um try e tem a parte nativa no módulo pedalboard_native (.pyd)
+    hiddenimports=collect_submodules("ampsim") + collect_submodules("websockets") + ["segno"]
+    + collect_submodules("pedalboard") + ["pedalboard_native"],
     excludes=["tkinter", "matplotlib", "pytest", "IPython", "PySide6.QtWebEngineCore",
               "PySide6.QtWebEngineWidgets", "PySide6.QtQml", "PySide6.QtQuick", "PySide6.Qt3DCore",
               "PySide6.QtMultimedia", "PySide6.QtPdf", "PySide6.QtCharts", "PySide6.QtDataVisualization"],

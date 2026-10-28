@@ -25,7 +25,7 @@ button:disabled { opacity: .35; }
 .dot.on { background: var(--green); } .dot.off { background: var(--red); }
 .ghost { background: none; border: 1px solid var(--border2); border-radius: 8px; padding: 6px 10px; flex: none; }
 
-/* as 3 escolhas do topo: Pad/Piano | Guitarra | Baixo */
+/* as 4 escolhas do topo: Pad/Piano | Guitarra | Baixo | Vocal */
 .modos { display: flex; gap: 2px; padding: 2px; background: var(--bg); border: 1px solid var(--border2);
   border-radius: 10px; flex: none; min-width: 0; }
 .modos button { background: none; border: 0; border-radius: 8px; padding: 5px 10px; font-size: 13px;
@@ -108,6 +108,9 @@ main { flex: 1; overflow: auto; padding: 12px; padding-bottom: calc(var(--tabs-h
 .chip { flex: none; background: var(--card); border: 1px solid var(--border2); border-radius: 18px; padding: 8px 12px; font-size: 13px; }
 .chip.on { background: var(--accent); border-color: #8fbaff; color: #fff; }
 .dica { color: var(--faint); font-weight: 400; font-size: 11px; margin-left: 6px; }
+/* aviso no cabeçalho de uma trilha: nunca empurra o "Salvar preset" para fora (texto inteiro na dica) */
+.dica.uma-linha { min-width: 0; flex: 0 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dica.uma-linha + .extra { flex-shrink: 0; }
 
 /* gravador */
 .recrow { margin-bottom: 8px; }
@@ -479,6 +482,21 @@ body.fill.notabs .col { min-height: 0; }
 @media (max-width: 359px) {
   .top.com-sair #lat { display: none; }
 }
+/* 4 escolhas no topo em celular estreito (320-399 px): botões mais justos e o texto da conexão some
+   (a bolinha verde/vermelha continua) */
+@media (max-width: 399px) {
+  .top.com-modos { gap: 6px; padding-left: 8px; padding-right: 8px; }
+  .top.com-modos .modos button { padding: 5px 6px; font-size: 12px; }
+  .top.com-modos #lat { display: none; }
+}
+@media (max-width: 339px) {
+  .top.com-modos .modos button { padding: 5px 4px; font-size: 11.5px; letter-spacing: -.01em; }
+}
+
+/* Vocal: o pedal "Mic" liga/desliga o microfone (destacado dos efeitos) */
+.stomp.mic { font-weight: 700; }
+.stomp.mic.on { border-color: #7a2a36; background: linear-gradient(#3a1d24, #26131a); }
+.stomp.mic.on .led { background: #ff5a6a; box-shadow: 0 0 8px #ff5a6a; }
 
 /* celular em pé mais baixo (ex. 320x640, 360x640): faders numa linha só (nome e valor à esquerda), Timbre
    mais compacto, para tudo caber sem esconder fader nem rolar */
@@ -495,4 +513,56 @@ body.fill.notabs .col { min-height: 0; }
   .segb small { height: 22px; line-height: 11px; }
   .hint { font-size: 11px; margin-top: 4px; }
   .btn.sq { min-height: 36px; }
+}
+
+/* Master e Compressor: o trilho acende com o nível da saída (verde -> amarelo -> vermelho, da esquerda)
+   e com a redução do compressor (laranja, da direita: a compressão "corta" os picos de cima) */
+.hf-slot { --m: 0; }
+.hf-slot.com-vu .hf-fill { display: none; }
+.hf-slot.com-vu .hf-groove { height: 10px; margin-top: -5px; }
+.hf-vu { position: absolute; inset: 0; border-radius: 4px; transition: clip-path .05s linear; }
+.hf-vu.level { background: linear-gradient(to right, #2fd67b 0%, #2fd67b 75%, #f2c94c 85%, #e5394a 100%);
+  clip-path: inset(0 calc((1 - var(--m)) * 100%) 0 0); }
+.hf-vu.gr { background: #f2994a; clip-path: inset(0 0 0 calc((1 - var(--m)) * 100%)); }
+
+/* no Master e no Compressor o cursor é vazado no meio: o medidor do trilho aparece através dele */
+.hf-slot.com-vu .hf-cap { background:
+  linear-gradient(to right, transparent 9px, #1d2433 9px, #1d2433 11px, transparent 11px) top / 100% 9px no-repeat,
+  linear-gradient(to right, transparent 9px, #1d2433 9px, #1d2433 11px, transparent 11px) bottom / 100% 9px no-repeat,
+  linear-gradient(#fbfcfe, #c9cfd9) top / 100% 9px no-repeat,
+  linear-gradient(#c9cfd9, #9da6b5) bottom / 100% 9px no-repeat; }
+.hf-slot.com-vu.drag .hf-cap { background:
+  linear-gradient(to right, transparent 9px, #1d2433 9px, #1d2433 11px, transparent 11px) top / 100% 9px no-repeat,
+  linear-gradient(to right, transparent 9px, #1d2433 9px, #1d2433 11px, transparent 11px) bottom / 100% 9px no-repeat,
+  linear-gradient(#ffffff, #dbe6ff) top / 100% 9px no-repeat,
+  linear-gradient(#dbe6ff, #a9bde4) bottom / 100% 9px no-repeat; }
+/* dica do Compressor desligado, dentro do trilho (à esquerda; o cursor está na direita): sem fundo (não
+   cobre o VU laranja) e some enquanto o VU está aceso */
+.hf-hint { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); padding: 0 5px;
+  font-size: 10px; line-height: 12px; color: #c9d4e6; text-shadow: 0 0 3px #000, 0 1px 2px #000;
+  white-space: nowrap; pointer-events: none; max-width: calc(100% - 50px); overflow: hidden;
+  transition: opacity .2s; }
+.hf-hint.lit { opacity: 0; }
+/* camada que não existe (L3/L4): sem fader também no PC largo */
+body.fill .faders-box .fader.off { display: none; }
+
+/* celular em pé bem baixo (320x568, iPhone SE 1ª geração): na tela Pads as 2 fileiras de bateria precisam
+   caber acima da barra de abas. Barra de abas mais baixa, teclas do pad contínuo, títulos, gravador e pads
+   de bateria mais justos (continuam com mais de 34 px de altura para o dedo) */
+@media (orientation: portrait) and (max-height: 600px) and (max-width: 1239px) {
+  :root { --tabs-h: 52px; }
+  body.notabs { --tabs-h: 0px; }
+  .tabs button { gap: 0; padding: 4px 2px; font-size: 10.5px; }
+  .tabs button b { font-size: 17px; }
+  .top { padding-top: max(6px, env(safe-area-inset-top)); padding-bottom: 6px; }
+  main { padding-top: 6px; }
+  .panel.show { padding: 8px 10px; }
+  .panel h2 { margin-bottom: 2px; }
+  .panel h3 { margin: 6px 0 4px; }
+  .key { min-height: 34px; }
+  .keys { gap: 4px; }
+  .recrow .btn, .recrow select { min-height: 38px; height: 38px; }
+  .drumrow { min-height: 96px; }
+  .drums { gap: 5px; }
+  .drum { font-size: 11px; line-height: 1.15; }
 }

@@ -10,8 +10,8 @@ import math
 import os
 import shutil
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QStandardItemModel
+from PySide6.QtCore import QObject, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QStandardItemModel
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
@@ -27,7 +27,7 @@ from ..presets import FACTORY
 from .amp_skins import SKINS, TRADEMARK_NOTICE, capture_face, paint_face
 from .icons import icon
 from .theme import ACCENT, C
-from .widgets import Knob, LedButton, Meter, ToggleSwitch, find_data
+from .widgets import Knob, LedButton, Meter, ToggleSwitch, find_data, fmt_value
 
 CALIB_TICKS = 70          # ~2,3 s com o timer de 33 ms da janela principal
 CALIB_SKIP = 10           # ignora o começo (clique do mouse, transientes)
@@ -35,6 +35,19 @@ CALIB_MARGIN_DB = 6.0     # limiar fica 6 dB acima do pico do ruído
 
 PRE_AMP = ("denoise", "gate", "comp", "overdrive")
 POST_AMP = ("eq", "chorus", "delay", "reverb")
+
+
+def _flex(knob):
+    """Knob de pedal que estreita quando falta largura (tela de 1366 px), até onde o rótulo e o valor
+    ainda cabem inteiros; com espaço continua com a largura normal."""
+    f = QFont("Segoe UI")                     # a fonte do tema (o knob ainda não recebeu o estilo aqui)
+    f.setPointSizeF(7.5)
+    fm = QFontMetrics(f)
+    p = knob.p
+    texts = [p.label] + [fmt_value(p, v) for v in (p.lo, p.hi, p.default)]
+    need = max(fm.horizontalAdvance(t) for t in texts) + 6
+    knob.setMinimumWidth(max(40, min(knob.maximumWidth(), need)))
+    return knob
 
 
 def _key(kind, arg):
@@ -99,7 +112,7 @@ class EffectPanel(QFrame):
         self.setObjectName("effect")
         self.controls = {}
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 5, 8, 4)
+        lay.setContentsMargins(6, 5, 6, 4)
         lay.setSpacing(2)
         head = QHBoxLayout()
         head.setSpacing(6)
@@ -121,7 +134,7 @@ class EffectPanel(QFrame):
                 self.controls[p.key] = combo
                 head.addWidget(combo)
             else:
-                knob = Knob(p, accent, size="small")
+                knob = _flex(Knob(p, accent, size="small"))
                 knob.valueChanged.connect(lambda v, k=p.key: self._changed(k, v))
                 self.controls[p.key] = knob
                 knobs.addWidget(knob)
@@ -192,12 +205,18 @@ class CabPanel(EffectPanel):
         self.ir_label.setText(txt)
 
 
+class _EditorSignals(QObject):
+    closed = Signal(str)            # painel do plugin fechou (vem da thread dos plugins)
+
+
 class AmpRigPanel(QFrame):
     """Escolha do amplificador em cima; embaixo só os controles do amp escolhido."""
 
     def __init__(self, page, accent):
         super().__init__()
         self.page = page
+        self._editor_sig = _EditorSignals(self)        # filho do painel: some com ele
+        self._editor_sig.closed.connect(self._vst_editor_closed)
         self.setObjectName("amppanel")
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -352,7 +371,10 @@ class AmpRigPanel(QFrame):
             if not path:
                 self.refresh()
                 return
-            kind, arg = "vst", path
+            kind, arg = "vst", vst.bundle_of(os.path.normpath(path))
+            browsed = True
+        else:
+            browsed = False
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             if kind == "model":
@@ -361,7 +383,9 @@ class AmpRigPanel(QFrame):
                 t.set_nam_file(arg)
             elif kind == "vst" and (t.vst is None or t.vst.path != arg):
                 if not t.load_vst(arg):
-                    QMessageBox.warning(self, "Plugin VST3", f"Não foi possível carregar:\n{t.vst_error}")
+                    QMessageBox.warning(self, "Plugin VST3", t.vst_error)
+                elif browsed:
+                    vst.trust_plugin(arg)       # escolhido aqui e abriu: presets deste PC abrem com ele
             t.set_on("amp", kind == "model")
             t.set_on("nam", kind == "nam")
             t.set_on("vst", kind == "vst" and t.vst is not None)
@@ -390,11 +414,17 @@ class AmpRigPanel(QFrame):
         t = self.track()
         if t.vst is None:
             return
-        self.vst_status.setText("Editor aberto — feche a janela do plugin para voltar.")
-        QApplication.processEvents()
-        t.vst.show_editor()
-        t.get_state()                    # guarda o novo estado do plugin
+        # o painel abre numa janela própria, na thread dos plugins: o AmpSim continua usável
+        t.vst.show_editor(on_closed=self._editor_sig.closed.emit)
+        self.vst_status.setText("Painel do plugin aberto numa janela própria (o AmpSim continua funcionando).")
+
+    def _vst_editor_closed(self, err):
+        t = self.track()
+        if t.vst is not None:
+            t.get_state()                # guarda o novo estado do plugin
         self.refresh()
+        if err:
+            self.vst_status.setText(f"Não deu para abrir o painel do plugin: {err}")
 
     # ------------------------------------------------------------------ aparência
     def _face_info(self):
@@ -545,6 +575,7 @@ class TrackPage(QWidget):
         self.name = name
         self.engine = engine
         self.panels = []
+        self.controls_by_id = {}        # id estável "guitar/<efeito>/<parâmetro>" -> controle (midi_map.py)
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(10)
@@ -559,7 +590,7 @@ class TrackPage(QWidget):
         has_rta = name != "pads"
         for caption, keys in (("Antes do amp", PRE_AMP), ("Depois do amp", POST_AMP)):
             row = QHBoxLayout()
-            row.setSpacing(6)
+            row.setSpacing(4)
             row.addWidget(_VLabel(caption))
             for key in keys:
                 if key == "eq" and has_rta:
@@ -589,6 +620,34 @@ class TrackPage(QWidget):
         self.preset.setToolTip("Preset desta aba (★ = de fábrica)")
         self.preset.activated.connect(self._load_preset)
         self.reload_presets()
+        if name in ("guitar", "bass"):
+            self._register_controls()
+
+    def _register_controls(self):
+        """Ids estáveis (como na aba Vocal) e o botão direito "Mapear controle físico…" em cada knob, LED e
+        chave: "guitar/delay/mix", "guitar/delay/on", "guitar/amp/gain", "guitar/track/volume"…"""
+        from .ctl_map_ui import install
+        n = self.name
+
+        def reg(cid, w):
+            self.controls_by_id[cid] = w
+            install(w, cid)
+        for panel in self.panels + [self.cab]:
+            reg(f"{n}/{panel.eff.key}/on", panel.led)
+            for key, w in panel.controls.items():
+                reg(f"{n}/{panel.eff.key}/{key}", w)
+        for key, w in self.rig.knobs.items():
+            reg(f"{n}/amp/{key}", w)
+        for key, w in self.rig.nam_knobs.items():
+            reg(f"{n}/nam/{key}", w)
+        reg(f"{n}/vst/mix", self.rig.vst_mix)
+        reg(f"{n}/track/on", self.enabled)
+        for key, w in self.track_knobs.items():
+            reg(f"{n}/track/{key}", w)
+
+    def control_ids(self):
+        """Identificadores estáveis dos controles da aba (para o mapeamento MIDI)."""
+        return list(self.controls_by_id)
 
     def _build_side(self, accent):
         side = QFrame()
@@ -652,7 +711,15 @@ class TrackPage(QWidget):
             self.calib_btn.setToolTip("Com o instrumento plugado e as cordas abafadas, mede o chiado da\n"
                                       "entrada por 2 s e ajusta os limiares do Gate e do Redutor de Ruído.")
             self.calib_btn.clicked.connect(self._start_calibration)
-            lay.addWidget(self.calib_btn)
+            # plugins VST3 da trilha (cadeia FX no fim: depois do reverb, antes do volume da trilha)
+            from .plugin_slot import FxButton
+            crow = QHBoxLayout()
+            crow.setSpacing(6)
+            crow.addWidget(self.calib_btn, 1)
+            self.fx_btn = FxButton(lambda: self.track().fx_chain, self._open_fx)
+            self.fx_btn.setFixedSize(44, 28)
+            crow.addWidget(self.fx_btn)
+            lay.addLayout(crow)
         else:
             row = QHBoxLayout()
             row.addWidget(QLabel("Teclas passam pelo amplificador"), 1)
@@ -671,6 +738,11 @@ class TrackPage(QWidget):
 
     def track(self):
         return self.engine.tracks[self.name]
+
+    def _open_fx(self):
+        win = self.window()
+        if hasattr(win, "open_fx"):
+            win.open_fx("track", self.name)
 
     def set_compact(self, on):
         """Barra inferior aberta: o EQ/RTA sai da tela (continua disponível em janela)."""

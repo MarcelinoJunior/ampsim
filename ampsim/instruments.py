@@ -11,9 +11,11 @@ from collections import deque
 from dataclasses import dataclass
 
 from .audio.sampler import REC_PREFIX
+from .audio.vst import clean_chain
 from .dsp import layout as Ly
 from .dsp.padeq import DEFAULT_PAD_EQ, VOICINGS, clean_pad_eq
 from .dsp.worship import DRUM_TYPE_NAMES
+from .midi_map import ControlMap, cc_press, clean_ctl_map, valid_key
 
 # ------------------------------------------------------------------ timbres das teclas
 @dataclass(frozen=True)
@@ -360,6 +362,49 @@ def note_name(n):
     return KEY_NAMES[n % 12] + str(n // 12 - 1)
 
 
+def _int_in(x, lo, hi):
+    return isinstance(x, int) and not isinstance(x, bool) and lo <= x <= hi
+
+
+def clean_map_item(group, x):
+    """Um item do mapeamento do Pad/Piano vindo de arquivo, ou None (descartado). pads/pads_b/knobs:
+    [canal, nº]; buttons: [tipo, canal, nº]."""
+    if group == "buttons":
+        return list(x) if valid_key(x) else None
+    if isinstance(x, (list, tuple)) and len(x) == 2 and _int_in(x[0], 0, 15) and _int_in(x[1], 0, 127):
+        return [x[0], x[1]]
+    return None
+
+
+MAP_SIZES = (("pads", PAD_COUNT), ("pads_b", PAD_COUNT), ("knobs", KNOB_COUNT), ("buttons", len(BUTTONS)))
+
+
+def clean_mapping(m, default):
+    """Mapeamento inteiro vindo de arquivo (sessão, perfil de controlador): lista com o tamanho errado fica no
+    padrão; cada item inválido (tipo errado, fora da faixa, ["cc", 0, 40] num knob…) vira None."""
+    out = {}
+    m = m if isinstance(m, dict) else {}
+    for k, n in MAP_SIZES:
+        v = m.get(k)
+        if isinstance(v, list) and len(v) == n:
+            out[k] = [clean_map_item(k, x) for x in v]
+        else:
+            out[k] = [list(x) if x else None for x in default[k]]
+    return out
+
+
+def clean_free_map(d):
+    """Atalhos do Pad/Piano vindos de arquivo: função conhecida e controle físico válido."""
+    if not isinstance(d, dict):
+        return {}
+    return {f: list(v) for f, v in d.items() if isinstance(f, str) and (f in KNOB_FUNCS or f in BUTTON_FUNCS)
+            and valid_key(v) and (f not in KNOB_FUNCS or v[0] == "cc")}
+
+
+def clean_latch(v):
+    return [x is True for x in v] if isinstance(v, list) and len(v) == len(BUTTONS) else None
+
+
 def clean_fx(d):
     """Efeitos de uma camada vindos de fora: só chaves conhecidas, com o tipo do padrão."""
     out = {}
@@ -395,7 +440,8 @@ OLD_DEFAULT_PADS = [[9, n] for n in range(36, 44)]          # padrão antigo (fi
 # PSR-E473: knobs A e B do LIVE CONTROL (CC 74 e 71) nos knobs 1 e 2 da tela; ele não tem pads MIDI
 PSR_KNOBS = [[0, 74], [0, 71]]
 OLD_DEFAULT_PADS_B = [[9, n] for n in range(44, 52)]
-LATCH_GAP = 1.5     # s: o "0" de um botão comum chega ao soltar; depois disso é um toque novo
+# botão por CC: momentâneo (alto ao apertar, 0 ao soltar: só o alto vale) ou que trava (button_latch: cada
+# mensagem vale). Antes era pelo tempo (1,5 s), e um botão segurado alternava duas vezes.
 # CCs de uso geral (modulação, volume, sustain, efeitos, banco, "all notes off"…): não são knobs
 GENERAL_CCS = {0, 1, 2, 7, 10, 11, 32, 64, 65, 66, 67, 91, 93, 120, 121, 122, 123, 124, 125, 126, 127}
 
@@ -442,6 +488,9 @@ class Instruments:
         self.transpose = 0
         self.sustain = False
         self.free_map = {}                   # função -> ["cc"|"note", canal, número] (atalhos rápidos)
+        # controles das abas Guitarra/Baixo/Vocal e dos plugins (midi_map.py): id -> {"key", "label", ...}
+        self.ctl_map = {}
+        self.ctl = ControlMap(engine)
         # mute de emergência (faders da aba Configurações): guarda o volume, só silencia; não é salvo
         self.mutes = set()                   # "Volume camada N", "Volume pad contínuo", "Volume bateria"
         self.pitch_func = PITCH_FUNCS[0]     # alavanca de pitch: tom, velocidade da rotação ou tempo do delay
@@ -457,7 +506,7 @@ class Instruments:
         self._melodic_off = []               # [(instante, canal, nota)]
         self.drum_events = deque()           # (tipo, velocidade) para a bateria sintetizada
         self._held = {}
-        self._btn_on = {}                    # botão (índice) -> instante do último valor > 0
+        self.button_latch = [False] * len(BUTTONS)   # botão físico que trava (ver cc_press)
         self._last_cc = None                 # (canal, nº, valor, instante): filtra a cópia em outro canal
         self.learn_steps = []
         self._learned = set()
@@ -489,6 +538,9 @@ class Instruments:
         self.extra_layers.append(dict(sound=sound, vol=90, oct=0, on=True, zone="all"))
         n = self.layer_count()
         self.layer_fx[n - 1] = dict(DEFAULT_FX)
+        chain = self.layer_chain(n)
+        if chain is not None:
+            chain.clear()                    # camada nova começa sem plugins
         self.ready = ""
         self.apply_all()
         self.apply_fx()
@@ -504,6 +556,14 @@ class Instruments:
         del self.extra_layers[i]
         del self.layer_fx[n - 1]
         self.layer_fx.append(dict(DEFAULT_FX))
+        chains = getattr(self.engine, "layer_chains", None)
+        if chains:                           # os plugins da camada vão embora; os das seguintes andam junto
+            gone = chains[n - 1]
+            gone.clear()
+            new = chains[:n - 1] + chains[n:] + [gone]
+            for k, chain in enumerate(new):
+                chain.label = f"L{k + 1}"
+            self.engine.layer_chains = new   # troca a lista inteira de uma vez (a thread de áudio lê)
         self.fx_layer = min(self.fx_layer, self.layer_count() - 1)
         self.ready = ""
         self.apply_all()
@@ -521,6 +581,62 @@ class Instruments:
         self.ready = ""
         self.apply_all()
         self.on_change()
+
+    # ------------------------------------------------------------------ plugins VST3 (audio/vst.py)
+    def layer_chain(self, n):
+        """Cadeia FX (plugins VST3) da camada n (1-4) ou None."""
+        chains = getattr(self.engine, "layer_chains", None)
+        return chains[n - 1] if chains and 1 <= n <= len(chains) else None
+
+    @property
+    def master_chain(self):
+        return getattr(self.engine, "master_chain", None)
+
+    def clear_layer_chains(self):
+        for chain in getattr(self.engine, "layer_chains", ()):
+            if chain.slots:
+                chain.clear()
+
+    def synth_layer_index(self):
+        """Camada (0-3) ligada que toca o synth AmpSim, ou -1 (thread de áudio, a cada bloco)."""
+        k = self.keys
+        s = SOUND_BY_NAME.get(k["sound1"] or "")
+        if s is not None and s.src == "synth":
+            return 0
+        if k["sound2"] and k["layer2_on"]:
+            s = SOUND_BY_NAME.get(k["sound2"])
+            if s is not None and s.src == "synth":
+                return 1
+        for i, x in enumerate(self.extra_layers):
+            s = SOUND_BY_NAME.get(x["sound"])
+            if x.get("on", True) and s is not None and s.src == "synth":
+                return 2 + i
+        return -1
+
+    def _plugin_states(self):
+        chains = getattr(self.engine, "layer_chains", None)
+        mc = self.master_chain
+        return dict(layer_chains=[c.to_list() for c in chains] if chains else [],
+                    master_chain=mc.to_list() if mc is not None else [])
+
+    def _load_plugin_states(self, st):
+        """Plugins das camadas (vêm com o timbre/preset) e do Master (só a sessão). Carregam na thread dos
+        plugins: o preset abre na hora e o slot mostra "Carregando…" / "não encontrado". Aceita o formato
+        de 1 plugin por camada ("layer_plugins"/"master_plugin")."""
+        chains = getattr(self.engine, "layer_chains", None)
+        src = st.get("layer_chains")
+        if not isinstance(src, list):
+            src = st.get("layer_plugins")
+        if chains and isinstance(src, list):
+            src = src[:MAX_LAYERS]
+            for k, chain in enumerate(chains):
+                items = clean_chain(src[k]) if k < len(src) else []
+                if items or chain.slots:
+                    chain.apply(items)
+        mc = self.master_chain
+        msrc = st.get("master_chain", st.get("master_plugin"))
+        if mc is not None and isinstance(msrc, (list, dict)):
+            mc.apply(clean_chain(msrc))
 
     def layer_sounds(self):
         """[(número, timbre, ligada)] de todas as camadas existentes."""
@@ -651,6 +767,7 @@ class Instruments:
         self.levels.update(reverb=fx.get("reverb", 45), chorus=fx.get("chorus", 15),
                            shimmer=fx.get("shimmer", 0), attack=fx.get("attack", 0))
         self.layer_fx = [dict(DEFAULT_FX) for _ in range(MAX_LAYERS)]
+        self.clear_layer_chains()            # plugins da camada fazem parte do timbre (os do Master ficam)
         for i, d in enumerate((fx, READY[name].get("fx2", {}))):       # efeitos da camada 1 e 2
             self.layer_fx[i].update({k: v for k, v in d.items() if k in DEFAULT_FX})
         self.fx_layer = 0
@@ -1081,8 +1198,15 @@ class Instruments:
     def set_bpm(self, bpm):
         self.bpm = int(max(40, min(220, round(bpm))))
         self.engine.synth.set_bpm(self.bpm)
+        self._vocal_bpm()
         self.apply_fx()
         self.on_change()
+
+    def _vocal_bpm(self):
+        """Delay da Vocal "no BPM" acompanha o andamento do app."""
+        v = getattr(self.engine, "tracks", {}).get("vocal")
+        if v is not None:
+            v.set_bpm(self.bpm)
 
     def tap_tempo(self):
         """Bata no ritmo: a média dos últimos toques define o BPM e o pulso recomeça no toque."""
@@ -1188,6 +1312,8 @@ class Instruments:
                 if b == ["pc", ch, d1]:
                     self.button(i)
                     return
+            if self._ctl_midi("pc", ch, d1, 127):
+                return
         if kind in (0x90, 0xB0) and self.free_map:
             key = ["cc" if kind == 0xB0 else "note", ch, d1]
             for func, k in self.free_map.items():
@@ -1199,6 +1325,10 @@ class Instruments:
                         self.do_button(func)
                         self.on_control(func, 127)
                     return
+        # abas Guitarra/Baixo/Vocal e plugins (valem em qualquer aba); a nota mapeada não toca som
+        if kind in (0x80, 0x90, 0xB0) and self.ctl_map:
+            if self._ctl_midi("cc" if kind == 0xB0 else "note", ch, d1, d2 if kind != 0x80 else 0):
+                return
         if self.learn_steps:
             self._learn(kind, ch, d1, d2)
             return
@@ -1237,12 +1367,8 @@ class Instruments:
                 self.on_unmapped(ch, d1)
             for i, b in enumerate(m["buttons"]):
                 if b == ["cc", ch, d1]:
-                    now = time.monotonic()
-                    if d2 > 0:
-                        self._btn_on[i] = now
+                    if cc_press(d2, self.button_latch[i]):
                         self.button(i)
-                    elif now - self._btn_on.get(i, 0.0) > LATCH_GAP:
-                        self.button(i)              # botão que trava: 127 num toque, 0 no seguinte
                     return
             if d1 == 64:
                 self.engine.send_event(Ly.EV_SUSTAIN, d2)
@@ -1256,6 +1382,15 @@ class Instruments:
                     self.sf.cc(c, d1, d2)
         elif kind == 0xE0:
             self.handle_bend(d1 | (d2 << 7))
+
+    def _ctl_midi(self, kind, ch, num, val):
+        """Mensagem de um controle mapeado em ctl_map? Vai para o ControlMap e -> True (já tratada)."""
+        key = [kind, ch, num]
+        for tid, e in list(self.ctl_map.items()):
+            if e.get("key") == key:
+                self.ctl.post(tid, e, kind, val)
+                return True
+        return False
 
     # ------------------------------------------------------------------ um mapeamento por controlador
     @staticmethod
@@ -1278,7 +1413,20 @@ class Instruments:
 
     def _map_snapshot(self):
         return {"mapping": {k: [list(x) if x else None for x in v] for k, v in self.mapping.items()},
-                "free_map": dict(self.free_map)}
+                "free_map": dict(self.free_map), "button_latch": list(self.button_latch),
+                "ctl_map": {t: dict(e, key=list(e["key"])) for t, e in self.ctl_map.items()}}
+
+    def _clean_profile(self, m):
+        mp = m.get("mapping") if isinstance(m.get("mapping"), dict) else {}
+        out = {"mapping": {k: [clean_map_item(k, x) for x in mp[k]] for k, n in MAP_SIZES
+                           if isinstance(mp.get(k), list) and len(mp[k]) == n},
+               "free_map": clean_free_map(m.get("free_map"))}
+        if "ctl_map" in m:
+            out["ctl_map"] = clean_ctl_map(m.get("ctl_map"))
+        latch = clean_latch(m.get("button_latch"))
+        if latch is not None:
+            out["button_latch"] = latch
+        return out
 
     def use_midi_device(self, name):
         """Abriu outra entrada MIDI: guarda o mapeamento da anterior e põe o desta (ou o padrão dela).
@@ -1298,18 +1446,16 @@ class Instruments:
         status = "assumido" if not self.midi_device else ("restaurado" if saved else "novo")
         self.midi_device = name
         if saved:
-            m = saved.get("mapping", {})
-            for k, n in (("pads", PAD_COUNT), ("pads_b", PAD_COUNT), ("knobs", KNOB_COUNT),
-                         ("buttons", len(BUTTONS))):
-                v = m.get(k)
-                self.mapping[k] = [list(x) if x else None for x in v] if isinstance(v, list) and len(v) == n \
-                    else self.default_mapping(name)[k]
-            fm = saved.get("free_map", {})
-            self.free_map = {f: v for f, v in fm.items() if (f in KNOB_FUNCS or f in BUTTON_FUNCS)
-                             and isinstance(v, list) and len(v) == 3} if isinstance(fm, dict) else {}
+            self.mapping = clean_mapping(saved.get("mapping"), self.default_mapping(name))
+            self.free_map = clean_free_map(saved.get("free_map"))
+            self.button_latch = clean_latch(saved.get("button_latch")) or [False] * len(BUTTONS)
+            if "ctl_map" in saved:                   # perfil de antes desta versão: fica o que já existe
+                self.ctl_map = clean_ctl_map(saved.get("ctl_map"))
         else:
             self.mapping = self.default_mapping(name)
             self.free_map = {}
+            self.ctl_map = {}
+            self.button_latch = [False] * len(BUTTONS)
         self.on_learn()
         return status
 
@@ -1320,6 +1466,9 @@ class Instruments:
             for i, b in enumerate(m["buttons"]):
                 if b == ["pc", ch, num]:
                     return f"Troca de programa {num} · canal {ch + 1} → botão {BUTTONS[i]}"
+            for tid, e in self.ctl_map.items():
+                if e.get("key") == ["pc", ch, num]:
+                    return f"Troca de programa {num} · canal {ch + 1} → {e.get('label') or tid}"
             return f"Troca de programa {num} · canal {ch + 1} → não usado"
         if kind == "bend":
             what = {PITCH_FUNCS[0]: "afinação das teclas", PITCH_FUNCS[1]: "velocidade da rotação",
@@ -1330,6 +1479,10 @@ class Instruments:
         for func, k in self.free_map.items():
             if k == key:
                 return f"{head} → {func}"
+        for tid, e in self.ctl_map.items():
+            if e.get("key") == key:
+                off = "" if self.ctl.active(tid, e) else " (plugin ausente: inativo)"
+                return f"{head} → {e.get('label') or tid}{off}"
         if kind == "note":
             if val == 0:
                 return f"{head} (soltou)"
@@ -1410,6 +1563,7 @@ class Instruments:
             self.mapping["knobs"][i] = [ch, d1]
         elif step == "buttons" and (key[0] in ("note", "pc") or d2 > 0):
             self.mapping["buttons"][i] = list(key)
+            self.button_latch[i] = False         # controle novo: momentâneo (o botão direito troca)
         elif step == "pads_b" and key[0] == "cc":
             return                        # o próprio botão PAD-B: ignora
         else:
@@ -1432,12 +1586,15 @@ class Instruments:
                     mapping={k: list(v) for k, v in self.mapping.items()},
                     knob_funcs=list(self.knob_funcs), button_funcs=list(self.button_funcs),
                     device=self.device, bpm=self.bpm, fx=dict(self.layer_fx[0]), free_map=dict(self.free_map),
+                    ctl_map={t: dict(e, key=list(e["key"])) for t, e in self.ctl_map.items()},
+                    button_latch=list(self.button_latch),
                     layer_fx=[dict(f) for f in self.layer_fx], fx_layer=self.fx_layer,
                     extra_layers=[dict(x) for x in self.extra_layers],
                     pad_eq=dict(self.pad_eq), pitch_func=self.pitch_func,
                     metronome=dict(volume=self.engine.metronome.volume, beats=self.engine.metronome.beats),
                     pad_follow=self.pad_follow,
-                    midi_device=self.midi_device, device_maps=self._device_maps_state())
+                    midi_device=self.midi_device, device_maps=self._device_maps_state(),
+                    **self._plugin_states())
 
     def load_state(self, st):
         if not st:
@@ -1484,26 +1641,27 @@ class Instruments:
             self.pitch_func = st["pitch_func"]
             self.bend = 0.0
         if isinstance(st.get("free_map"), dict):
-            self.free_map = {k: v for k, v in st["free_map"].items()
-                             if (k in KNOB_FUNCS or k in BUTTON_FUNCS) and isinstance(v, list) and len(v) == 3}
+            self.free_map = clean_free_map(st["free_map"])
+        if clean_latch(st.get("button_latch")) is not None:
+            self.button_latch = clean_latch(st["button_latch"])
+        if isinstance(st.get("ctl_map"), dict):
+            self.ctl_map = clean_ctl_map(st["ctl_map"])
         if isinstance(st.get("bpm"), (int, float)):
             self.bpm = int(st["bpm"])
             self.engine.synth.set_bpm(self.bpm)
+            self._vocal_bpm()
         if st.get("cont_sound") in CONT_PAD_SOUNDS:
             self.cont_sound = st["cont_sound"]
         self.levels.update({k: v for k, v in st.get("levels", {}).items() if k in self.levels})
-        for k, n in (("pads", PAD_COUNT), ("pads_b", PAD_COUNT), ("knobs", KNOB_COUNT),
-                     ("buttons", len(BUTTONS))):
-            v = st.get("mapping", {}).get(k)
-            if isinstance(v, list) and len(v) == n:
-                self.mapping[k] = v
+        if isinstance(st.get("mapping"), dict):      # item estragado é descartado (não derruba a abertura)
+            self.mapping = clean_mapping(st["mapping"], self.mapping)
         # sessões com o padrão antigo dos pads (fileiras invertidas no SMK-25): corrige sozinho
         if self.mapping["pads"] == OLD_DEFAULT_PADS:
             self.mapping["pads"] = [list(p) for p in DEFAULT_PADS]
         if self.mapping["pads_b"] == OLD_DEFAULT_PADS_B:
             self.mapping["pads_b"] = [list(p) for p in DEFAULT_PADS_B]
-        if isinstance(st.get("device_maps"), dict):
-            self.device_maps = {name: m for name, m in st["device_maps"].items()
+        if isinstance(st.get("device_maps"), dict):        # perfis: limpos ao carregar e de novo ao usar
+            self.device_maps = {name: self._clean_profile(m) for name, m in list(st["device_maps"].items())[:64]
                                 if isinstance(name, str) and isinstance(m, dict)}
         if isinstance(st.get("midi_device"), str):
             self.midi_device = st["midi_device"]
@@ -1512,6 +1670,7 @@ class Instruments:
             v = st.get(attr)
             if isinstance(v, list) and len(v) == n and all(x in valid for x in v):
                 setattr(self, attr, list(v))
+        self._load_plugin_states(st)
         self.apply_all()
         self.apply_fx()
         self.apply_pad_eq()

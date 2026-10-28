@@ -1,15 +1,18 @@
-"""Tela "Timbres adicionais": baixar ou remover os pacotes de pianos gravados (audio/packs.py)."""
+"""Tela "Downloads: timbres e plugins": baixar ou remover os pianos gravados e os plugins VST3 gratuitos
+(audio/packs.py)."""
 import threading
 
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFrame, QGridLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
-    QVBoxLayout,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
-from ..audio import packs
+from ..audio import packs, vst
 from ..audio.soundfont import available
 from .theme import C
+
+TITLE = "Downloads: timbres e plugins"
 
 
 class _Signals(QObject):
@@ -17,20 +20,38 @@ class _Signals(QObject):
     done = Signal(str, str)                      # pacote, erro ("" = deu certo)
 
 
+def _section(text):
+    lab = QLabel(f"<b>{text}</b>")
+    lab.setContentsMargins(0, 8, 0, 0)
+    return lab
+
+
 class PacksDialog(QDialog):
     def __init__(self, win, parent=None):
         super().__init__(parent or win)
         self.win = win
         self.inst = win.engine.instruments
-        self.setWindowTitle("Timbres adicionais")
-        self.resize(640, 520)
-        self.sig = _Signals()
+        self.setWindowTitle(TITLE)
+        self.resize(660, 640)
+        self.sig = _Signals(self)
         self.sig.progress.connect(self._progress)
         self.sig.done.connect(self._done)
         self.busy = None
         self._cancel = False
+        self._source = None
         self.queue = []                              # (pacote, arquivo já baixado) a instalar em seguida
-        lay = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        lay = QVBoxLayout(body)
+        lay.setContentsMargins(0, 0, 6, 0)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
+
+        lay.addWidget(_section("Pianos gravados"))
         intro = QLabel("Pianos gravados de instrumentos de verdade. Baixe só os que quiser: ficam no seu "
                        "computador e aparecem na lista de timbres (categoria Pianos).")
         intro.setWordWrap(True)
@@ -39,72 +60,126 @@ class PacksDialog(QDialog):
                        if available() else
                        "⚠ Pacote básico não instalado: rode instalar.bat (ou tools\\baixar_extras.py) uma vez."))
         base.setObjectName("small")
+        base.setWordWrap(True)
         base.setStyleSheet(f"color: {C['green'] if available() else C['yellow']};")
         lay.addWidget(base)
         self.rows = {}
         for p in packs.PACKS:
-            card = QFrame()
-            card.setObjectName("card")
-            g = QGridLayout(card)
-            g.setContentsMargins(10, 8, 10, 8)
-            title = QLabel(f"<b>{p.nome}</b>")
-            g.addWidget(title, 0, 0)
-            desc = QLabel(p.descricao)
-            desc.setWordWrap(True)
-            desc.setObjectName("small")
-            g.addWidget(desc, 1, 0)
-            info = QLabel(f"{p.licenca} · download {p.download_mb} MB · ocupa {p.disco_mb} MB")
-            info.setObjectName("small")
-            info.setStyleSheet(f"color: {C['dim']};")
-            g.addWidget(info, 2, 0)
-            status = QLabel("")
-            status.setObjectName("small")
-            g.addWidget(status, 3, 0)
-            bar = QProgressBar()
-            bar.setVisible(False)
-            bar.setTextVisible(True)
-            g.addWidget(bar, 4, 0, 1, 2)
-            btn = QPushButton("")
-            btn.setFocusPolicy(Qt.NoFocus)
-            btn.setMinimumWidth(110)
-            btn.clicked.connect(lambda _, p=p: self.toggle(p))
-            g.addWidget(btn, 0, 1, 4, 1, Qt.AlignVCenter)
-            g.setColumnStretch(0, 1)
-            lay.addWidget(card)
-            self.rows[p.id] = (status, bar, btn)
+            lay.addWidget(self._card(p, f"{p.licenca} · download {p.download_mb} MB · ocupa {p.disco_mb} MB"))
+
+        lay.addWidget(_section("Plugins de efeito (VST3)"))
+        pintro = QLabel("Plugins gratuitos para usar no slot “Plugin” das camadas do teclado (L1–L4) e do "
+                        "Master, e nas trilhas Guitarra/Baixo. Ficam na pasta de plugins do seu usuário "
+                        f"({vst.user_vst3_dir()}), que outros programas de áudio também enxergam.")
+        pintro.setWordWrap(True)
+        lay.addWidget(pintro)
+        if not vst.available():
+            warn = QLabel("⚠ O módulo de plugins (pedalboard) não está instalado: os plugins baixados não "
+                          "vão funcionar até instalar o AmpSim de novo.")
+            warn.setWordWrap(True)
+            warn.setObjectName("small")
+            warn.setStyleSheet(f"color: {C['yellow']};")
+            lay.addWidget(warn)
+        for p in packs.PLUGIN_PACKS:
+            info = f"{p.licenca} · download {p.download_mb} MB · ocupa {p.disco_mb} MB"
+            if p.site:
+                info += f" · <a href='{p.site}' style='color:{C['dim']}'>site do plugin</a>"
+            lay.addWidget(self._card(p, info))
         lay.addStretch(1)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)
         buttons.button(QDialogButtonBox.Close).clicked.connect(self.reject)
-        lay.addWidget(buttons)
+        outer.addWidget(buttons)
         self.refresh()
 
+    def _card(self, p, info_text):
+        card = QFrame()
+        card.setObjectName("card")
+        g = QGridLayout(card)
+        g.setContentsMargins(10, 8, 10, 8)
+        g.addWidget(QLabel(f"<b>{p.nome}</b>"), 0, 0)
+        desc = QLabel(p.descricao)
+        desc.setWordWrap(True)
+        desc.setObjectName("small")
+        g.addWidget(desc, 1, 0)
+        info = QLabel(info_text)
+        info.setObjectName("small")
+        info.setWordWrap(True)
+        info.setOpenExternalLinks(True)
+        info.setStyleSheet(f"color: {C['dim']};")
+        g.addWidget(info, 2, 0)
+        status = QLabel("")
+        status.setObjectName("small")
+        status.setWordWrap(True)
+        g.addWidget(status, 3, 0)
+        bar = QProgressBar()
+        bar.setVisible(False)
+        bar.setTextVisible(True)
+        g.addWidget(bar, 4, 0, 1, 2)
+        btn = QPushButton("")
+        btn.setFocusPolicy(Qt.NoFocus)
+        btn.setMinimumWidth(110)
+        btn.clicked.connect(lambda _, p=p: self.toggle(p))
+        g.addWidget(btn, 0, 1, 4, 1, Qt.AlignVCenter)
+        g.setColumnStretch(0, 1)
+        self.rows[p.id] = (status, bar, btn)
+        return card
+
+    @staticmethod
+    def _is_plugin(p):
+        return isinstance(p, packs.PluginPack)
+
+    def _pack(self, pid):
+        return packs.PACK_BY_ID.get(pid) or packs.PLUGIN_PACK_BY_ID[pid]
+
+    def _state(self, p):
+        """(instalado, dá para remover por aqui, texto do status)."""
+        if self._is_plugin(p):
+            ok = packs.plugin_installed(p)
+            removable = packs.plugin_removable(p)
+            if ok:
+                names = ", ".join(vst.display_name(b) for b in p.bundles)
+                where = "" if removable else " (instalado por outro programa)"
+                return True, removable, f"✓ Instalado{where}: escolha {names} no slot “Plugin”"
+            return False, removable, "Não instalado"
+        ok = packs.sf2_path(p) is not None
+        return ok, ok, ("✓ Instalado: escolha o timbre “" + p.sound + "” nas camadas" if ok else "Não instalado")
+
     def refresh(self):
-        for p in packs.PACKS:
+        for p in list(packs.PACKS) + list(packs.PLUGIN_PACKS):
             status, bar, btn = self.rows[p.id]
-            ok = packs.sf2_path(p) is not None
             if self.busy == p.id:
                 btn.setText("Cancelar")
                 btn.setEnabled(True)
                 continue
-            status.setText("✓ Instalado: escolha o timbre “" + p.sound + "” nas camadas" if ok else "Não instalado")
+            ok, removable, text = self._state(p)
+            status.setText(text)
             status.setStyleSheet(f"color: {C['green'] if ok else C['dim']};")
-            btn.setText("Remover" if ok else "Baixar")
-            btn.setObjectName("" if ok else "primary")
+            btn.setText("Remover" if removable else "Baixar")
+            btn.setObjectName("" if removable else "primary")
             btn.setStyle(btn.style())
-            btn.setEnabled(self.busy is None)
+            btn.setEnabled(self.busy is None and (removable or not ok))
             bar.setVisible(False)
 
     def toggle(self, p):
         if self.busy == p.id:
             self._cancel = True
             return
-        if packs.sf2_path(p) is not None:
+        ok, removable, _ = self._state(p)
+        if removable:
             if QMessageBox.question(self, "Remover", f"Remover “{p.nome}” do computador?") == QMessageBox.Yes:
-                packs.remove(p)
+                if self._is_plugin(p):
+                    try:
+                        packs.remove_plugin_pack(p)
+                    except packs.PackError as exc:
+                        QMessageBox.warning(self, "Remover", str(exc))
+                    self._plugins_changed()
+                else:
+                    packs.remove(p)
                 self.refresh()
             return
-        self.download(p)
+        if not ok:
+            self.download(p)
 
     def download(self, p, source=None, wait=False):
         """Baixa e instala em segundo plano (o áudio continua tocando)."""
@@ -115,11 +190,12 @@ class PacksDialog(QDialog):
         bar.setVisible(True)
         bar.setRange(0, 0)
         self.refresh()
+        install = packs.install_plugin_pack if self._is_plugin(p) else packs.install
 
         def work():
             try:
-                packs.install(p, progress=lambda d, t, ph: self.sig.progress.emit(p.id, d, t, ph),
-                              cancel=lambda: self._cancel, source=source)
+                install(p, progress=lambda d, t, ph: self.sig.progress.emit(p.id, d, t, ph),
+                        cancel=lambda: self._cancel, source=source)
                 self.sig.done.emit(p.id, "")
             except packs.PackError as exc:
                 self.sig.done.emit(p.id, str(exc))
@@ -150,10 +226,16 @@ class PacksDialog(QDialog):
             self._source = src
             self.download(p, source=src)
 
+    def _plugins_changed(self):
+        """Avisa a janela para recarregar as listas de plugins dos slots (se ela souber)."""
+        fn = getattr(self.win, "refresh_plugins", None)
+        if callable(fn):
+            fn()
+
     def _done(self, pid, error):
         self.busy = None
-        p = packs.PACK_BY_ID[pid]
-        src = getattr(self, "_source", None)
+        p = self._pack(pid)
+        src = self._source
         self._source = None
         if error:
             self.refresh()
@@ -167,9 +249,12 @@ class PacksDialog(QDialog):
                 src.unlink()                         # arquivo baixado pelo instalador: já foi usado
             except OSError:
                 pass
-        if self.inst.sf is not None:
-            self.inst.sf.load_font(pid, packs.sf2_path(p))
-            self.inst.apply_all()
+        if self._is_plugin(p):
+            self._plugins_changed()
+        else:
+            if self.inst.sf is not None:
+                self.inst.sf.load_font(pid, packs.sf2_path(p))
+                self.inst.apply_all()
+            self.win.refresh_sounds()
         self.refresh()
-        self.win.refresh_sounds()
         self._next()

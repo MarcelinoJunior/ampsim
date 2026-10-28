@@ -137,3 +137,23 @@ def test_rta_taps_only_selected_track(engine):
     assert (engine.rta_pos_in - p0) % RTA_N == 256
     assert np.abs(engine.rta_in).max() > 0.2
     engine.rta_track = None
+
+
+def test_vocal_preset_from_outside_is_cleaned():
+    """Preset/cena de Vocal vindo de fora: faixas conferidas, plugin de outro PC fora, e nunca liga nem
+    muta o microfone de quem abre."""
+    from ampsim.dsp.vocal import default_values as vocal_defaults
+    bad = {"values": {"comp": {"amount": 500, "on": True, "x": 1}, "reverb": {"type": "hall", "mix": float("nan")},
+                      "track": {"on": True, "mute": True, "volume": -6, "input_gain": 99},
+                      "amp": {"gain": 10}},
+           "fx_chain": [{"path": r"Z:\outro_pc\Plugin.vst3", "on": True, "mix": 100}]}
+    out = sharing.sanitize_kind("vocal", bad)
+    v = out["values"]
+    assert v["comp"]["amount"] == 100 and v["comp"]["on"] is True and "x" not in v["comp"]
+    assert v["reverb"] == vocal_defaults()["reverb"]
+    assert "on" not in v["track"] and "mute" not in v["track"]
+    assert v["track"]["volume"] == -6 and v["track"]["input_gain"] == 36
+    assert "amp" not in v and out["fx_chain"] == []
+    doc = sharing.make_doc("preset", out, "Voz", trilha="vocal")
+    assert sharing.from_text(sharing.to_text(doc))["trilha"] == "vocal"
+    assert sharing.KIND_TITLES["vocal"].startswith("Vocal")

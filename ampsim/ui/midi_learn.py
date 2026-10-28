@@ -5,7 +5,8 @@ import time
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QLabel, QMenu, QProgressBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QCheckBox, QDialog, QDialogButtonBox, QLabel, QMenu, QProgressBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QWidget,
 )
 
 from ..instruments import KNOB_FUNCS
@@ -18,19 +19,27 @@ KIND_NAMES = {"cc": "CC", "note": "Nota", "pc": "Programa"}
 def key_text(k):
     if not k:
         return "não mapeado"
-    kind, ch, num = k
-    return f"{KIND_NAMES.get(kind, kind)} {num} · canal {ch + 1}"
+    try:                                        # entrada estragada (arquivo antigo/mexido) não derruba a tela
+        kind, ch, num = k
+        return f"{KIND_NAMES.get(kind, kind)} {int(num)} · canal {int(ch) + 1}"
+    except (TypeError, ValueError):
+        return "não mapeado"
 
 
 class MidiLearnDialog(QDialog):
     """Medidor ao vivo do controlador: mostra o que você está girando/apertando e mapeia."""
 
-    def __init__(self, inst, bridge, func, parent=None, kinds=None, current=None, want=None):
-        """kinds: tipos aceitos ("cc", "note", "pc"); current: mapeamento atual [tipo, canal, nº]."""
+    def __init__(self, inst, bridge, func, parent=None, kinds=None, current=None, want=None, latch=None):
+        """kinds: tipos aceitos ("cc", "note", "pc"); current: mapeamento atual [tipo, canal, nº].
+        latch: None = sem a opção; False/True = mostra "Botão que trava" (marcado ou não) para um botão por CC.
+        Ao confirmar, self.latch diz o tipo: o medidor vê se o 0 chega ao soltar (momentâneo) ou não (trava)."""
         super().__init__(parent)
         self.inst = inst
         self.func = func
         self.choice = None
+        self.latch = bool(latch)
+        self._vals = {}                          # (tipo, canal, nº) -> valores vistos (CC)
+        self._latch_touched = False
         if kinds is None:
             kinds = ("cc",) if func in KNOB_FUNCS else ("cc", "note", "pc")
         self.kinds = tuple(kinds)
@@ -50,11 +59,21 @@ class MidiLearnDialog(QDialog):
         self.tree.setColumnWidth(0, 200)
         self.tree.setColumnWidth(1, 150)
         self.tree.setRootIsDecorated(False)
-        self.tree.itemClicked.connect(lambda *_: setattr(self, "_manual", True))
+        self.tree.itemClicked.connect(lambda *_: (setattr(self, "_manual", True), self._sync_latch()))
         lay.addWidget(self.tree, 1)
         self.current = QLabel(f"Atual: {key_text(current if current is not None else inst.free_map.get(func))}")
         self.current.setObjectName("small")
         lay.addWidget(self.current)
+        self.latch_box = None
+        if latch is not None:
+            self.latch_box = QCheckBox("Botão que trava (manda “ligado” num toque e “desligado” no outro)")
+            self.latch_box.setChecked(bool(latch))
+            self.latch_box.setToolTip("Desmarcado (o comum): o botão manda um valor ao apertar e 0 ao soltar; só "
+                                      "o apertar conta, segure o quanto quiser.\nMarcado: cada mensagem do botão "
+                                      "alterna. O AmpSim marca sozinho quando o 0 não chega ao soltar.")
+            self.latch_box.clicked.connect(lambda *_: setattr(self, "_latch_touched", True))
+            self.latch_box.setVisible(False)
+            lay.addWidget(self.latch_box)
         buttons = QDialogButtonBox()
         self.ok = buttons.addButton("Usar este controle", QDialogButtonBox.AcceptRole)
         rm = buttons.addButton("Remover mapeamento", QDialogButtonBox.ResetRole)
@@ -91,6 +110,8 @@ class MidiLearnDialog(QDialog):
         self.tree.itemWidget(it, 1).setValue(val if kind == "cc" else (127 if val > 0 or kind == "pc" else 0))
         it.setText(2, str(val))
         it.setData(0, Qt.UserRole + 1, time.monotonic())
+        if kind == "cc":
+            self._vals.setdefault(key, set()).add(int(val))
         usable = kind in self.kinds
         if not usable:                          # aparece (para você ver), mas não serve aqui
             it.setText(2, "não serve aqui")
@@ -99,6 +120,22 @@ class MidiLearnDialog(QDialog):
             self.tree.setCurrentItem(it)
         cur = self.tree.currentItem()
         self.ok.setEnabled(cur is not None and (cur.data(0, Qt.UserRole) or [None])[0] in self.kinds)
+        self._sync_latch()
+
+    def latch_guess(self, key):
+        """Botão por CC que trava? Só valor alto (sempre o mesmo) e nenhum 0 ao soltar -> True."""
+        vals = self._vals.get(tuple(key or ()))
+        return bool(vals) and 0 not in vals and len(vals) == 1
+
+    def _sync_latch(self):
+        if self.latch_box is None:
+            return
+        cur = self.tree.currentItem()
+        key = cur.data(0, Qt.UserRole) if cur is not None else None
+        is_cc = bool(key) and key[0] == "cc"
+        self.latch_box.setVisible(is_cc)
+        if is_cc and not self._latch_touched:
+            self.latch_box.setChecked(self.latch_guess(key))
 
     def _decay(self):
         now = time.monotonic()
@@ -112,6 +149,8 @@ class MidiLearnDialog(QDialog):
         it = self.tree.currentItem()
         if it is not None:
             self.choice = it.data(0, Qt.UserRole)
+            self.latch = bool(self.latch_box is not None and self.choice and self.choice[0] == "cc"
+                              and self.latch_box.isChecked())
             self.accept()
 
     def _remove(self):

@@ -420,3 +420,78 @@ def test_output_compressor_is_nan_safe_and_turns_off_cleanly():
     # desligar com o ganho ainda baixo: volta suave para 1 e depois passa direto
     out, lim = _run_output(np.full(5 * fs, 0.3), 0.0, lim=lim)
     assert lim[5] == 1.0 and np.allclose(out[-100:, 0], 0.3)
+
+
+def test_output_meter_reports_level_and_compressor_reduction():
+    """Medidores do Master e do Compressor: pico da saída (depois do limitador) e o menor ganho do
+    compressor desde a última leitura (lim[9] e lim[10], lidos e zerados pela interface)."""
+    fs = 48000
+    quiet, _ = _run_output(np.zeros(fs // 10), 1.0)
+    from ampsim.dsp.kernels import limiter_state
+    lim = limiter_state(fs)
+    assert lim[9] == 0.0 and lim[10] == 1.0
+    sig = 0.5 * np.sin(2 * np.pi * 220 * np.arange(fs // 2) / fs)
+    _, lim = _run_output(np.zeros(fs // 10), 1.0)
+    assert lim[9] == 0.0 and lim[10] == 1.0                      # silêncio: nada aceso
+    _, lim = _run_output(sig, 0.0)
+    assert 0.45 < lim[9] <= 0.9 and lim[10] == 1.0               # sem compressor: só o nível
+    _, lim = _run_output(sig, 1.0)
+    gr = -20 * np.log10(lim[10])
+    assert lim[9] > 0.1 and gr > 6.0, gr                         # compressor no máximo com sinal alto
+
+
+def test_compressor_meter_shows_applied_reduction_and_limiter():
+    """Medidor do Compressor: a redução de verdade (ganho aplicado, com ataque), não o alvo instantâneo; e
+    a redução total nos picos inclui o limitador (com o Compressor em 0 o limitador também aparece)."""
+    from ampsim.dsp.kernels import limiter_state
+    fs = 48000
+    t = np.arange(fs // 2) / fs
+    burst = np.where((t > 0.2) & (t < 0.21), 0.6, 0.01) * np.sin(2 * np.pi * 220 * t)   # estalo de 10 ms
+    _, lim = _run_output(burst, 1.0)
+    shown = -20 * np.log10(lim[10])
+    # alvo instantâneo para um seno de pico 0.6 (~-7.4 dBFS RMS) com limiar -24 e razão 4:1
+    target = 0.75 * (20 * np.log10(0.6 / np.sqrt(2)) + 24)
+    assert 0.5 < shown < target - 3.0, (shown, target)        # o ataque de 15 ms não deixa chegar no alvo
+    # Compressor em 0, sinal passando do teto: o limitador segura e o medidor mostra
+    loud = 2.0 * np.sin(2 * np.pi * 220 * t)
+    out, lim = _run_output(loud, 0.0)
+    assert -20 * np.log10(lim[10]) > 6.0 and lim[11] == 1.0
+    # e com o Compressor em 0 o áudio continua igual ao de antes (só o limitador mexe)
+    quiet = 0.3 * np.sin(2 * np.pi * 220 * t)
+    out, lim = _run_output(quiet, 0.0)
+    assert np.array_equal(out[:, 0], quiet.astype(np.float32)) and lim[10] == 1.0
+    assert limiter_state(fs)[11] == 1.0
+
+
+def test_limiter_recovery_never_passes_the_ceiling():
+    """Sinal 30–40 dB acima do teto: na volta do ganho a saída passava de LIM_CEIL (0,904)."""
+    from ampsim.dsp.kernels import LIM_CEIL, limiter_state, write_output_lim
+    n = 256
+    for db_over in (30.0, 40.0):
+        lim = limiter_state(FS)
+        amp = LIM_CEIL * 10 ** (db_over / 20)
+        t = np.arange(n * 40)
+        sig = amp * np.sin(2 * np.pi * 220 * t / FS)
+        peak = 0.0
+        for b in range(40):
+            mix = np.zeros((n, 2))
+            mix[:, 0] = sig[b * n:(b + 1) * n]
+            mix[:, 1] = sig[b * n:(b + 1) * n] * 0.7
+            out = np.zeros((n, 2), np.float32)
+            write_output_lim(mix, n, out, 0, 1.0, lim)
+            peak = max(peak, float(np.abs(out).max()))
+        assert peak <= LIM_CEIL + 1e-6, (db_over, peak)
+
+
+def test_limiter_does_not_touch_normal_signal():
+    """Compressor em 0 e sinal abaixo do teto: a saída é a entrada (bit a bit, em float32)."""
+    from ampsim.dsp.kernels import limiter_state, write_output_lim
+    n = 256
+    rng = np.random.default_rng(3)
+    lim = limiter_state(FS)
+    for _ in range(20):
+        x = rng.standard_normal((n, 2)) * 0.1
+        mix = x.copy()
+        out = np.zeros((n, 2), np.float32)
+        write_output_lim(mix, n, out, 0, 1.0, lim)
+        assert np.array_equal(out, x.astype(np.float32))

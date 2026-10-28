@@ -12,17 +12,38 @@ não tem certificado pago). Depois de instalado, o AmpSim se atualiza sozinho.
 
 > 🐧📱 **Em breve:** versão para **Linux** e para **smartphone**.
 
+### ✨ Novidades da versão 1.5 (estável)
+
+- 🎤 **Nova aba Vocal**: microfone com filtro de graves, noise gate, compressor vocal, EQ de voz,
+  de-esser (suaviza o "S"), dobra, delay (no BPM ou em ms) e reverb, com 7 presets prontos
+  (culto, adoração, ministração, pregação, backing vocal…). O microfone **nunca liga sozinho**.
+- 🔌 **Plugins VST3 em todo lugar**: botão **FX** em cada camada (L1–L4), na Guitarra, no Baixo,
+  na Vocal e no Master, com até **4 plugins em série** em cada um (liga/desliga, Mix, ordem).
+  O **Dragonfly Reverb** (gratuito) já está em **Downloads: timbres e plugins**.
+- 🎛️ **Controlador MIDI em todas as abas**: botão direito em qualquer knob ou chave da Guitarra,
+  do Baixo e da Vocal → **Mapear controle físico…**; também dá para mapear liga/desliga, Mix e os
+  **parâmetros internos dos plugins**. Funciona com qualquer aba aberta.
+- 🪟 **Tela do seu jeito (como no OBS)**: menu **Exibir** para mostrar/esconder as subjanelas
+  (Setlist, Banco de presets, Timbre, Pad contínuo, Instrumento / Layer, Faders…), arrastar,
+  redimensionar, soltar em outra janela ou no **segundo monitor**, e **Travar subjanelas**.
+  Cabe em notebook 1366×768.
+- 📊 **Faders de mesa com VU dentro do trilho** (no PC e no celular): o Master acende com o som
+  que sai, e o novo fader **Comp.** (de cima para baixo) mostra quanto está comprimindo nos picos.
+- 📱 **Tela remota** com o modo **Vocal** e o VU do Master/Compressor.
+- 🇧🇷 Todos os botões e mensagens em português.
+
 | Pad/Piano | Guitarra |
 |---|---|
 | ![Pad/Piano com o controlador na tela](docs/img/pad-piano.png) | ![Guitarra: amplificador e pedais](docs/img/guitarra.png) |
 
-**Tela remota no celular** (Pads, Faders, Timbre e Guitarra — veja [como usar](#tela-remota-no-celular-ou-tablet-webserver)):
+**Tela remota no celular** (Pads, Faders, Timbre, Guitarra e Vocal — veja [como usar](#tela-remota-no-celular-ou-tablet-webserver)):
 
 <p>
 <img src="docs/img/remoto-pads.png" width="200" alt="Pads no celular">
 <img src="docs/img/remoto-faders.png" width="200" alt="Faders no celular">
 <img src="docs/img/remoto-timbre.png" width="200" alt="Timbres no celular">
 <img src="docs/img/remoto-guitarra.png" width="200" alt="Guitarra no celular">
+<img src="docs/img/remoto-vocal.png" width="200" alt="Vocal no celular">
 </p>
 
 O AmpSim nasceu para ajudar **igrejas, ministérios de louvor, projetos sociais, escolas de
@@ -54,15 +75,16 @@ Todos os timbres usados são **gratuitos e de licença livre**, e o AmpSim é **
 1. [Instalação (passo a passo)](#instalação-passo-a-passo)
 2. [Primeiro uso: escolhendo a placa de som](#primeiro-uso-escolhendo-a-placa-de-som)
 3. [Guitarra e Baixo](#guitarra-e-baixo)
-4. [Pad/Piano](#padpiano)
-5. [Ao vivo: setlist, metrônomo e saúde do áudio](#ao-vivo-setlist-metrônomo-e-saúde-do-áudio)
-6. [Tela remota no celular ou tablet (Webserver)](#tela-remota-no-celular-ou-tablet-webserver)
-7. [Compartilhar cenas e presets (menu Arquivo)](#compartilhar-cenas-e-presets-menu-arquivo)
-8. [Mapeando o seu controlador MIDI](#mapeando-o-seu-controlador-midi)
-9. [Latência: dicas para tocar sem atraso](#latência-dicas-para-tocar-sem-atraso)
-10. [Problemas comuns](#problemas-comuns)
-11. [Para quem quer mexer no código](#para-quem-quer-mexer-no-código)
-12. [Licenças, créditos e marcas](#licenças-créditos-e-marcas)
+4. [Vocal](#vocal) e [Plugins VST3 (botão FX)](#plugins-vst3-botão-fx)
+5. [Pad/Piano](#padpiano)
+6. [Ao vivo: setlist, metrônomo e saúde do áudio](#ao-vivo-setlist-metrônomo-e-saúde-do-áudio)
+7. [Tela remota no celular ou tablet (Webserver)](#tela-remota-no-celular-ou-tablet-webserver)
+8. [Compartilhar cenas e presets (menu Arquivo)](#compartilhar-cenas-e-presets-menu-arquivo)
+9. [Mapeando o seu controlador MIDI](#mapeando-o-seu-controlador-midi)
+10. [Latência: dicas para tocar sem atraso](#latência-dicas-para-tocar-sem-atraso)
+11. [Problemas comuns](#problemas-comuns)
+12. [Para quem quer mexer no código](#para-quem-quer-mexer-no-código)
+13. [Licenças, créditos e marcas](#licenças-créditos-e-marcas)
 
 ---
 
@@ -179,12 +201,13 @@ Todas as abas seguem o mesmo desenho:
 
 | Onde | O que tem |
 |---|---|
-| **Barra de cima** | abas **Guitarra · Baixo · Pad/Piano**; o estado do áudio (clique para ligar/desligar); a placa e a latência (clique para configurar); o **Preset** da aba com **‹ ›** e o botão de salvar; **Arquivo** e o menu **☰** |
+| **Menu (Arquivo · Exibir)** | **Exibir** mostra/esconde cada subjanela, **Travar subjanelas** e **Restaurar layout padrão**. Cada subjanela pode ser arrastada, redimensionada pelos divisores ou solta como janela própria (até em outro monitor); o AmpSim lembra o seu layout |
+| **Barra de cima** | abas **Guitarra · Baixo · Pad/Piano · Vocal**; o estado do áudio (clique para ligar/desligar); a placa e a latência (clique para configurar); o **Preset** da aba com **‹ ›** e o botão de salvar; **Arquivo** e o menu **☰** |
 | **Banco de Presets** (esquerda) | busca e lista de tudo: timbres do Pad/Piano (prontos e os seus), presets de Guitarra e Baixo, amp/efeitos das teclas e os arquivos `.ampsim` de Documentos\AmpSim. Botão direito num item: exportar, copiar código, excluir |
 | **Centro** | a aba aberta |
 | **Painel da direita** | **Instrumento / Layer** no Pad/Piano; trilha e gabinete na Guitarra/Baixo |
 | **Barra de baixo** | **Pads** (pads contínuos e de bateria), **Faders / Pads** (volume das camadas L1–L4, pad contínuo e pads com mute de emergência; rotação, velocidade da rotação, reverb, drive, delay e master; os 8 pads e o gravador: REC/STOP grava o som do AmpSim ou uma entrada, e a gravação vai para um pad), **MIDI / Controlador** e **Configurações**. A seta à direita recolhe a barra; cada aba lembra se ela fica aberta ou fechada |
-| **Teclas de atalho** | Alt+Espaço: mute geral (faixa vermelha “SEM SOM”) · Alt+1 a Alt+4: mute das camadas · Alt+P / Alt+B: mute do pad contínuo / dos pads · Ctrl+→ / Ctrl+←: próximo / anterior preset · F1 F2 F3: abas · Esc: pânico · Ctrl+R: gravar · Ctrl+T: tap tempo · Ctrl+Espaço: parar o pad. Troque em Configurações → Teclas de atalho |
+| **Teclas de atalho** | Alt+Espaço: mute geral (faixa vermelha “SEM SOM”) · Alt+1 a Alt+4: mute das camadas · Alt+P / Alt+B: mute do pad contínuo / dos pads · Ctrl+→ / Ctrl+←: próximo / anterior preset · F1 F2 F3 F4: abas · Alt+V: mudo da voz · Esc: pânico · Ctrl+R: gravar · Ctrl+T: tap tempo · Ctrl+Espaço: parar o pad. Troque em Configurações → Teclas de atalho |
 
 ![Faders / Pads na barra de baixo](docs/img/mixer.png)
 
@@ -210,6 +233,36 @@ Todas as abas seguem o mesmo desenho:
     para a tela.
 - **Presets** de fábrica (★) e os seus: **‹ ›** na barra de cima para trocar e o disquete para
   salvar.
+- **FX**: botão ao lado de "Calibrar ruído" para pôr até 4 plugins VST3 no fim da cadeia da trilha.
+
+## Vocal
+
+![Aba Vocal](docs/img/vocal.png)
+
+1. Em **⚙ Áudio**, escolha o **Canal do vocal (microfone)** da sua placa.
+2. Ligue a **Trilha do Vocal** (à direita) — ela começa sempre desligada.
+3. Escolha um preset ★ (comece por **Voz limpa (culto)**) e ajuste a **Entrada** cantando forte,
+   até o medidor chegar perto do amarelo sem acender o **CLIP**.
+
+- **Limpeza**: Filtro de graves, Noise gate (some o chiado entre as frases) e De-esser.
+- **Voz**: Compressor vocal (um controle de "Quantidade") e EQ de voz (Graves, Corpo, Presença,
+  Brilho), com a curva desenhada embaixo.
+- **Ambiente**: Dobra (engrossa a voz), Delay (em ms ou no BPM) e Reverb (sala, hall, placa).
+- **FX**: até 4 plugins VST3, antes ou depois da dobra/delay/reverb.
+- Na mesa (barra de baixo) há o fader **Vocal** com mudo (**Alt+V**). A saída passa pelo
+  compressor/limitador do Master, que protege as caixas. Microfonia: abaixe o Volume ou o
+  retorno, não a Entrada.
+
+## Plugins VST3 (botão FX)
+
+Cada camada do teclado (**L1–L4**), a **Guitarra**, o **Baixo**, a **Vocal** e o **Master** têm um
+botão **FX** (verde = plugin ligado, vermelho = erro). Ele abre uma janela com até **4 plugins em
+série**: escolha o plugin, ligue/desligue, ajuste o **Mix**, mude a ordem (↑ ↓) e abra o painel
+do plugin (⚙). O AmpSim procura plugins nas pastas padrão de VST3 do Windows; em **☰ → Downloads:
+timbres e plugins** você instala o **Dragonfly Reverb** (gratuito, GPL-3.0) com um clique. Se um
+plugin der erro ou ficar pesado demais, só ele é desligado — o som continua. Os plugins das
+camadas e das trilhas vão junto nos presets e músicas; quem recebe um preset precisa ter o mesmo
+plugin instalado.
 
 ## Pad/Piano
 
@@ -306,18 +359,22 @@ direto no navegador (sem instalar nada no aparelho):
    `http://192.168.0.10:8080`). Na primeira vez o Windows pode perguntar sobre o Firewall:
    permita em **Redes privadas**.
 3. Pronto: no topo da página escolha a sessão: **Pad/Piano** (abas embaixo: **Pads, Faders, Setlist,
-   Timbre**), **Guitarra** ou **Baixo**. Com o celular deitado as abas ficam numa coluna à esquerda e
+   Timbre**), **Guitarra**, **Baixo** ou **Vocal**. Com o celular deitado as abas ficam numa coluna à esquerda e
    cada tela em duas colunas; no tablet deitado e no PC, as telas da sessão ficam lado a lado.
 
 O que dá para fazer pelo aparelho: pad contínuo (tom, timbre, parar) e pads de bateria, cada um com
 o seu fader de volume em pé e **M**; gravador com **PLAY** (um toque toca uma vez; dois toques seguidos
 repetem em loop até o **STOP**, que também aparece no gravador do PC); faders com **MUTE** de cada canal, o **Master** e o **Compressor** da
-saída (0 = desligado; mais para cima segura o volume que vai somando com muitas notas presas no pedal
-e suaviza a queda quando o pedal é solto; também dá para pôr num knob do teclado; como o Master, fica na
-sessão e trocar de preset não mexe nele); escolher a música da setlist
+saída (como na barra de baixo do PC, o trilho do Master acende com o nível que sai para as caixas e o do
+Compressor com o quanto ele está abaixando os picos; o Compressor é invertido: 0 = desligado com o
+cursor na ponta de cima (no celular, à direita), e quanto mais para baixo/esquerda, mais ele segura o
+volume que vai somando com muitas notas presas no pedal e suaviza a queda quando o pedal é solto; também
+dá para pôr num knob do teclado; como o Master, fica na sessão e trocar de preset não mexe nele); escolher a música da setlist
 (◀ ▶); trocar o preset do Pad/Piano e as camadas (desligar a L2, remover a L3/L4), e **💾 Salvar setup** (guarda o timbre atual em
 *Meus timbres*); na **Guitarra** e no **Baixo**: preset (◀ ▶ ou a lista), volume e liga/desliga da
-trilha, os pedais (toque liga/desliga, segure para ajustar os knobs dele) e **💾 Salvar preset**.
+trilha, os pedais (toque liga/desliga, segure para ajustar os knobs dele) e **💾 Salvar preset**;
+na **Vocal**, o mesmo, com os pedais **Mic** (liga/desliga o microfone), Filtro, Gate, Comp, EQ, Anti-S,
+Dobra, Delay e Reverb (o fader Vocal só aparece para quem tem a tela Vocal).
 Tudo vale na hora nos dois lados, sem trocar a aba do PC, e vários aparelhos podem ficar conectados
 ao mesmo tempo. O número no canto (ex. *4 ms*) é o atraso da rede.
 
@@ -356,6 +413,16 @@ Tudo o que vem de fora é conferido antes de entrar:
 3. **Controlador com pads e knobs** (ex.: SMK-25): **Mapear meu controlador (assistente)…** pede
    um controle de cada vez ("toque o PAD 1", "gire o KNOB 1"…). Na mesma aba você escolhe a
    função de cada knob e botão.
+4. **Guitarra, Baixo, Vocal e plugins**: o mesmo botão direito funciona em qualquer knob, LED de pedal
+   ou chave dessas abas (volume e liga/desliga da trilha, cada efeito e parâmetro do amp) e, na janela
+   **FX**, na chave e no Mix de cada plugin. O botão de **parâmetros** (ícone MIDI) de cada plugin lista
+   os parâmetros internos dele para mapear (ex.: o "Wet" de um reverb). Botão direito em ◀ ▶ do preset
+   mapeia preset anterior/próximo da aba. Os mapeamentos valem em qualquer aba (dá para tocar baixo
+   e mexer no reverb da voz pelo controlador), ficam na sessão e no perfil de cada controlador. Se o
+   controle já faz outra coisa, o AmpSim pergunta antes de trocar. Em **MIDI / Controlador →
+   Mapeamentos** aparecem todos, por aba, com remover. Plugin mapeado que saiu da cadeia: o
+   mapeamento fica inativo até ele voltar. O microfone só liga por um toque no controle mapeado,
+   nunca sozinho ao abrir sessão ou preset.
 
 ## Latência: dicas para tocar sem atraso
 

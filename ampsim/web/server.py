@@ -7,6 +7,7 @@ Protocolo (JSON pelo WebSocket em /ws):
               | {"t": "estado", "telas": {tela: dados}} (só as telas liberadas e só o que mudou;
                 "tela.parte" é um pedaço da tela que muda pouco, ex. "pads.sons" com o catálogo)
               | {"t": "pong", "id"} | {"t": "aviso", "texto"} (só para o aparelho que pediu)
+              | {"t": "vu", "m", "c"} (~15x/s, só com a tela Faders: nível da saída e redução do compressor, 0..1)
 
 Comandos chegam em on_command(cmd, telas) na thread do servidor; quem usa decide o que roda direto
 (ex.: tocar um pad) e o que vai para a thread da interface.
@@ -27,7 +28,7 @@ FILES = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index
          "/icone.svg": ("icone.svg", "image/svg+xml")}
 TOKEN_TTL = 12 * 3600
 # trilha do AmpSim -> tela da página que controla ela
-TRACK_PANEL = {"guitar": "guitarra", "bass": "baixo"}
+TRACK_PANEL = {"guitar": "guitarra", "bass": "baixo", "vocal": "vocal"}
 # comando -> tela que precisa estar liberada (um dict: depende da "trilha" do comando)
 COMMAND_PANEL = {
     "pad": "pads", "pad_cont": "pads", "pad_parar": "pads", "pad_timbre": "pads", "pad_som": "pads",
@@ -37,8 +38,12 @@ COMMAND_PANEL = {
     "preset_passo": "timbre", "timbre_camada": "timbre", "timbre_salvar": "timbre",
     "timbre_l2": "timbre", "timbre_remover": "timbre",
     "trilha_preset_passo": TRACK_PANEL, "trilha_preset": TRACK_PANEL, "trilha_volume": TRACK_PANEL,
-    "trilha_on": TRACK_PANEL, "efeito_on": TRACK_PANEL, "efeito_param": TRACK_PANEL, "trilha_salvar": TRACK_PANEL,
+    "trilha_on": TRACK_PANEL, "trilha_mute": TRACK_PANEL, "efeito_on": TRACK_PANEL, "efeito_param": TRACK_PANEL, "trilha_salvar": TRACK_PANEL,
 }
+
+
+# fader da tela Faders que é de uma trilha com tela própria: só quem vê essa tela também vê e mexe nele
+FADER_PANEL = {"vocal": "vocal"}
 
 
 def command_panel(msg):
@@ -49,6 +54,27 @@ def command_panel(msg):
         t = msg.get("trilha")
         return p.get(t) if isinstance(t, str) else None
     return p
+
+
+def command_allowed(msg, telas):
+    """O aparelho com estas telas pode mandar este comando? (fader/mudo da Vocal pedem Faders E Vocal)"""
+    tela = command_panel(msg)
+    if tela is None or tela not in telas:
+        return False
+    if msg.get("c") in ("fader", "mute"):
+        extra = FADER_PANEL.get(msg.get("id")) if isinstance(msg.get("id"), str) else None
+        if extra is not None and extra not in telas:
+            return False
+    return True
+
+
+def visible_state(tela, data, telas):
+    """O que o aparelho vê de uma tela: na Faders, sem os faders de trilhas que ele não pode ver."""
+    if tela == "faders" and isinstance(data, dict) and isinstance(data.get("canais"), list):
+        hide = {fid for fid, p in FADER_PANEL.items() if p not in telas}
+        if hide:
+            data = dict(data, canais=[x for x in data["canais"] if x.get("id") not in hide])
+    return data
 
 
 def local_ips():
@@ -192,6 +218,21 @@ class WebServer:
         self._state = state
         self.loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._push_all()))
 
+    def publish_vu(self, msg):
+        """Medidores (Master e Compressor) para quem vê a tela Faders: mensagem curta, fora do estado."""
+        if self.loop is None or not self.clients:
+            return
+        text = json.dumps(msg, separators=(",", ":"))
+        self.loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._send_vu(text)))
+
+    async def _send_vu(self, text):
+        for c in list(self.clients):
+            if c.telas is not None and "faders" in c.telas:
+                try:
+                    await c.ws.send(text)
+                except Exception:  # noqa: BLE001 - aparelho saiu no meio
+                    self.clients.discard(c)
+
     async def _push_all(self):
         for c in list(self.clients):
             await self._push(c)
@@ -203,6 +244,7 @@ class WebServer:
         for tela, data in list(self._state.items()):
             if tela.split(".", 1)[0] not in c.telas:
                 continue
+            data = visible_state(tela, data, c.telas)
             text = json.dumps(data, sort_keys=True, ensure_ascii=False)
             if full or c.sent.get(tela) != text:
                 c.sent[tela] = text
@@ -294,8 +336,7 @@ class WebServer:
                     else:
                         await self._send(c, {"t": "auth", "ok": False, "erro": ""})
                 elif t == "cmd" and c.telas is not None:
-                    tela = command_panel(msg)
-                    if tela is not None and tela in c.telas:
+                    if command_allowed(msg, c.telas):
                         msg["_c"] = c                    # quem pediu (para avisos)
                         try:
                             self.on_command(msg, c.telas)

@@ -31,6 +31,8 @@ def qc(name):
 STYLE = """
 QWidget {{ color: {text}; font-family: 'Segoe UI'; font-size: 9.5pt; }}
 QMainWindow, QDialog, QMessageBox, QInputDialog, QFileDialog {{ background: {bg}; }}
+/* subjanela solta (janela própria, ex. Faders): fundo escuro como a janela principal */
+QDockWidget, QDockWidget > QWidget {{ background: {bg}; }}
 QStackedWidget, QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QToolTip {{ background: {card2}; color: {text}; border: 1px solid {border2}; padding: 4px 6px; }}
 
@@ -80,7 +82,7 @@ QPushButton#tile:hover {{ background: {card2}; color: {text}; }}
 QPushButton#tile:checked {{ background: {accent_soft}; border: 2px solid {accent}; color: white; }}
 QPushButton#seg {{ background: {card}; border: 1px solid {border2}; border-radius: 7px; padding: 5px 14px; }}
 QPushButton#seg:checked {{ background: {accent}; border-color: {accent}; color: white; font-weight: 600; }}
-QPushButton#tab {{ background: transparent; border: none; border-radius: 8px; padding: 8px 18px;
+QPushButton#tab {{ background: transparent; border: none; border-radius: 8px; padding: 6px 18px;
     font-size: 10.5pt; color: {dim}; }}
 QPushButton#tab:hover {{ color: {text}; background: {card}; }}
 QPushButton#tab:checked {{ background: {accent_soft}; color: white; font-weight: 600; }}
@@ -136,11 +138,14 @@ QSlider::handle:vertical {{ background: white; border: 3px solid {accent}; width
 QProgressBar {{ background: {card}; border: 1px solid {border2}; border-radius: 3px; }}
 QProgressBar::chunk {{ background: {accent}; }}
 QScrollArea {{ border: none; }}
-QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: {border2}; border-radius: 3px; min-height: 30px; }}
+/* barras de rolagem visíveis (trilho marcado, puxador claro) */
+QScrollBar:vertical {{ background: {card}; width: 10px; margin: 1px; border-radius: 4px; }}
+QScrollBar::handle:vertical {{ background: {faint}; border-radius: 4px; min-height: 30px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
-QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 2px; }}
-QScrollBar::handle:horizontal {{ background: {border2}; border-radius: 3px; min-width: 30px; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+QScrollBar:horizontal {{ background: {card}; height: 10px; margin: 1px; border-radius: 4px; }}
+QScrollBar::handle:horizontal {{ background: {faint}; border-radius: 4px; min-width: 30px; }}
+QScrollBar::handle:hover {{ background: {dim}; }}
 QTabWidget::pane {{ border: 1px solid {border}; border-radius: 8px; background: {panel}; top: -1px; }}
 QTabBar::tab {{ background: {card}; color: {dim}; border: 1px solid {border2}; border-bottom: none;
     border-top-left-radius: 7px; border-top-right-radius: 7px; padding: 6px 16px; margin-right: 3px; }}
@@ -148,4 +153,13 @@ QTabBar::tab:hover {{ color: {text}; background: {card2}; }}
 QTabBar::tab:selected {{ background: {accent}; border-color: {accent}; color: white; font-weight: 600; }}
 QTextBrowser, QTextEdit, QPlainTextEdit {{ background: {card}; color: {text}; border: 1px solid {border2};
     border-radius: 7px; selection-background-color: {accent}; }}
+QMenuBar {{ background: {panel}; color: {text}; border-bottom: 1px solid {border}; padding: 0 6px; }}
+QMenuBar::item {{ background: transparent; padding: 2px 10px; border-radius: 5px; }}
+QMenuBar::item:selected, QMenuBar::item:pressed {{ background: {card2}; }}
+QWidget#docktitle {{ background: {panel}; border-bottom: 1px solid {border}; }}
+QWidget#docktitle QLabel {{ color: {dim}; font-size: 8.5pt; font-weight: 600; }}
+QWidget#docktitle QToolButton {{ background: transparent; border: none; border-radius: 4px; padding: 1px; }}
+QWidget#docktitle QToolButton:hover {{ background: {card2}; }}
+QMainWindow::separator {{ background: {bg}; width: 4px; height: 4px; }}
+QMainWindow::separator:hover {{ background: {accent_soft}; }}
 """.format(**C)

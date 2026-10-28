@@ -1,5 +1,6 @@
-"""Janela principal: barra superior, Banco de Presets à esquerda, a aba aberta no centro e a
-barra inferior (Pads, Faders / Pads, MIDI / Controlador, Configurações).
+"""Janela principal: menus (Arquivo, Exibir), barra superior, a aba aberta no centro e as subjanelas
+(Setlist, Banco de presets, partes da tela Pad/Piano e a barra Pads / Faders / MIDI) que dá para arrastar,
+destacar e esconder (ui/docks.py).
 """
 import math
 import os
@@ -7,9 +8,9 @@ import subprocess
 import threading
 import time
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QMainWindow, QMenu, QMessageBox, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QLabel, QMainWindow, QMenu, QMenuBar, QMessageBox, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from .. import sharing, storage, updater
@@ -27,6 +28,7 @@ from ..presets import DEFAULT_PRESET, FACTORY
 from ..sharing import sound_state
 from .audio_dialog import AudioDialog
 from .dock import BottomDock
+from .docks import DockManager
 from .file_menu import FileMenu
 from .icons import icon
 from .keyboard import PcKeyboard
@@ -35,17 +37,85 @@ from .panels import SynthPanel, TrackPage
 from .preset_bank import PresetBank
 from .theme import ACCENT, C
 from .topbar import TopBar
+from .vocal_page import VocalPage
 from .webserver_dialog import WebServerDialog
 from ..web.remote import Remote
 from .widgets import find_data
 
-TITLES = {"guitar": "Guitarra", "bass": "Baixo", "pads": "Pad/Piano"}
+TITLES = {"guitar": "Guitarra", "bass": "Baixo", "pads": "Pad/Piano", "vocal": "Vocal"}
 NO_MIDI = "(nenhum)"
-PAGE_ORDER = ("guitar", "bass", "pads")
+PAGE_ORDER = ("guitar", "bass", "pads", "vocal")
+
+
+class _PageStack(QStackedWidget):
+    """Abas do centro: o tamanho mínimo é o da aba aberta (a da guitarra não obriga a janela a crescer
+    quando a Pad/Piano está na tela, e vice-versa). aboutToChange avisa ANTES de trocar, para a janela
+    tirar as subjanelas que só cabem na aba que sai (senão, por um instante, a janela cresceria)."""
+    aboutToChange = Signal(int)
+
+    def __init__(self):
+        super().__init__()
+        self.floor_w = self.floor_h = 0   # mínimo extra fora da Pad/Piano (ver DockManager._apply_floor)
+        self.no_floor = None          # a página que não usa floor_w (a Pad/Piano)
+        self.currentChanged.connect(lambda *_: self.updateGeometry())
+
+    def setCurrentIndex(self, i):
+        if i != self.currentIndex():
+            self.aboutToChange.emit(i)
+        super().setCurrentIndex(i)
+
+    def setCurrentWidget(self, w):
+        self.setCurrentIndex(self.indexOf(w))
+
+    def minimumSizeHint(self):
+        w = self.currentWidget()
+        m = w.minimumSizeHint() if w is not None else super().minimumSizeHint()
+        if w is not None and w is not self.no_floor:
+            m = m.expandedTo(QSize(self.floor_w, self.floor_h))
+        return m
+
+    def sizeHint(self):
+        w = self.currentWidget()
+        return w.sizeHint() if w is not None else super().sizeHint()
 
 
 class _UpdateBridge(QObject):
     done = Signal(object, str, bool)       # UpdateInfo ou None, erro, foi pedido à mão
+
+
+class _CtlBridge(QObject):
+    wake = Signal()                        # controle mapeado das abas/plugins mexeu (thread do MIDI)
+
+
+class _Toast(QLabel):
+    """Aviso legível por cima da janela (texto inteiro, quebra linha); some sozinho ou com um clique."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWordWrap(True)
+        self.setObjectName("toast")
+        self.setStyleSheet(f"QLabel#toast {{ background: {C['card2']}; color: {C['text']}; border: 1px solid "
+                           f"{C['yellow']}; border-radius: 8px; padding: 10px 14px; font-size: 10pt; }}")
+        self.setCursor(Qt.PointingHandCursor)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.hide)
+        self.hide()
+
+    def show_text(self, text, ms):
+        self.setText(text)
+        p = self.parentWidget()
+        w = min(560, max(260, p.width() - 40))
+        self.setFixedWidth(w)
+        self.adjustSize()
+        top = p.menuWidget().height() + 8 if p.menuWidget() is not None else 60
+        self.move((p.width() - w) // 2, top)
+        self.show()
+        self.raise_()
+        self._timer.start(ms)
+
+    def mousePressEvent(self, e):
+        self.hide()
 
 
 class MainWindow(QMainWindow):
@@ -55,12 +125,16 @@ class MainWindow(QMainWindow):
         self.inst = engine.instruments
         self.setWindowTitle(f"AmpSim {version_text()} — Live Performance")
         self.resize(1536, 800)
-        self._dock_by_page = {"guitar": True, "bass": True, "pads": False}   # recolhida?
+        self._dock_by_page = {"guitar": True, "bass": True, "pads": False, "vocal": True}   # recolhida?
 
-        central = QWidget()
-        root = QVBoxLayout(central)
+        # topo: barra de menus (Arquivo, Exibir), a barra superior e a faixa do mute geral
+        head = QWidget()
+        root = QVBoxLayout(head)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+        self.menu_bar = QMenuBar()
+        self.menu_bar.setNativeMenuBar(False)
+        root.addWidget(self.menu_bar)
         self.topbar = TopBar()
         root.addWidget(self.topbar)
         # mute geral ligado: faixa vermelha bem visível (clique nela também volta o som)
@@ -72,20 +146,11 @@ class MainWindow(QMainWindow):
         self.mute_banner.clicked.connect(lambda: self.toggle_mute_all())
         self.mute_banner.setVisible(False)
         root.addWidget(self.mute_banner)
-        body = QVBoxLayout()
-        body.setContentsMargins(10, 10, 10, 10)
-        body.setSpacing(10)
-        row = QHBoxLayout()
-        row.setSpacing(10)
+        self.setMenuWidget(head)
         self.bank = PresetBank()
-        left = QVBoxLayout()
-        left.setSpacing(10)
         self.setlist = SetlistPanel(self)
-        left.addWidget(self.setlist)
-        left.addWidget(self.bank, 1)
-        row.addLayout(left)
 
-        self.tabs = QStackedWidget()
+        self.tabs = _PageStack()
         self.pages = {}
         self.track_pages = {}
         for name in ("guitar", "bass"):
@@ -97,25 +162,36 @@ class MainWindow(QMainWindow):
         self.synth_panel = SynthPanel(engine, ACCENT)
         self.pad_view = PadPianoView(self, amp_keys, self.synth_panel)
         self.pages["pads"] = self.pad_view
+        vocal = VocalPage(engine, ACCENT)            # microfone (dsp/vocal.py)
+        self.pages["vocal"] = vocal
+        self.track_pages["vocal"] = vocal
         for name in PAGE_ORDER:
             self.tabs.addWidget(self.pages[name])
         self.ready_combo = self._build_ready_combo()
         for name in PAGE_ORDER:
             combo = self.ready_combo if name == "pads" else self.pages[name].preset
             self.topbar.preset_stack.addWidget(combo)
-        row.addWidget(self.tabs, 1)
-        body.addLayout(row, 1)
-        self.dock = BottomDock(self)
-        body.addWidget(self.dock)
-        root.addLayout(body, 1)
+        central = QWidget()
+        cl = QVBoxLayout(central)
+        cl.setContentsMargins(2, 0, 2, 0)
+        cl.addWidget(self.tabs)
         self.setCentralWidget(central)
+        self.dock = BottomDock(self)
+        # subjanelas (arrastar, destacar, esconder, travar; menu Exibir)
+        self.panels = DockManager(self)
 
         self.file_menu = FileMenu(self)
-        self.topbar.set_menu(self.file_menu, self._build_main_menu())
+        self.main_menu = self._build_main_menu()
+        self.topbar.set_menu(self.file_menu, self.main_menu)
+        self._build_menu_bar()
         self.topbar.pageRequested.connect(self.tabs.setCurrentIndex)
         self.topbar.powerToggled.connect(self.toggle_power)
         self.topbar.audioSettings.connect(self.open_audio_dialog)
         self.topbar.presetStep.connect(self.preset_step)
+        for b, d in ((self.topbar.prev_btn, "prev"), (self.topbar.next_btn, "next")):
+            # botão direito: mapear preset anterior/próximo da aba num botão do controlador
+            b.setContextMenuPolicy(Qt.CustomContextMenu)
+            b.customContextMenuRequested.connect(lambda pos, b=b, d=d: self._preset_button_popup(b, d, pos))
         self.topbar.presetSave.connect(self.save_preset)
         self.bank.activated.connect(self.load_from_bank)
         self.bank.requestSave.connect(self.save_preset)
@@ -163,8 +239,16 @@ class MainWindow(QMainWindow):
         inst.on_control = br.control.emit
         inst.on_unmapped = br.unmapped.emit
         br.unmapped.connect(self._unmapped_control)
+        # controles mapeados das abas Guitarra/Baixo/Vocal e dos plugins (midi_map.py): a mensagem chega na
+        # thread do MIDI; o valor é aplicado aqui, na thread da interface, pelo mesmo caminho da tela
+        self._ctl_bridge = _CtlBridge(self)
+        self._ctl_bridge.wake.connect(self._ctl_flush, Qt.QueuedConnection)
+        inst.ctl.wake = self._ctl_bridge.wake.emit
+        inst.ctl.on_preset = lambda track, d: self.preset_step(d, kind=track)
+        self._toast = _Toast(self)
         br.monitor.connect(self._midi_activity)
         self._unmapped_at = 0.0
+        self.tabs.aboutToChange.connect(self._before_tab)
         self.tabs.currentChanged.connect(self._tab_changed)
         self.midi = winmm.MidiInput(inst.handle_midi) if winmm.available else None
         self._midi_lost = None              # teclado que sumiu e deve ser religado quando voltar
@@ -174,6 +258,8 @@ class MainWindow(QMainWindow):
         self._reconnect_at = None           # próximo instante de tentar religar (None = não caiu)
         self.topbar.health_btn.clicked.connect(lambda *_: HealthDialog(self.engine, self).exec())
         self._restore_state()
+        from . import ctl_map_ui
+        ctl_map_ui.refresh_tags(self)           # ponto verde/dica nos controles mapeados das abas
         self.bank.set_page(self.current_kind())
         self._update_kbd_label()
 
@@ -188,7 +274,7 @@ class MainWindow(QMainWindow):
         self.hotplug_timer.timeout.connect(self.check_new_devices)
         self.hotplug_timer.start(2000)
         # atualização pelo GitHub: confere ao abrir (em segundo plano)
-        self._update_bridge = _UpdateBridge()
+        self._update_bridge = _UpdateBridge(self)
         self._update_bridge.done.connect(self._update_done)
         self._update_thread = None
         self.topbar.update_btn.clicked.connect(lambda *_: self.restart())
@@ -249,6 +335,29 @@ class MainWindow(QMainWindow):
         self.topbar.set_page(self.tabs.currentIndex())
         self._sync_ready_combo()
 
+    def _build_menu_bar(self):
+        """Arquivo: o mesmo do botão Arquivo e do menu ☰. Exibir: subjanelas, travar e layout padrão."""
+        arq = self.menu_bar.addMenu("&Arquivo")
+        seen = set()
+        for group in (self.file_menu.actions(), [None], self.main_menu.actions()):
+            for a in group:
+                if a is None or a.isSeparator():
+                    acts = arq.actions()
+                    if acts and not acts[-1].isSeparator():
+                        arq.addSeparator()          # sem separador repetido nem no começo
+                    continue
+                if a.menu() is not None and a.menu().title() == "Arquivo":
+                    continue                            # o ☰ repete o Arquivo num submenu
+                key = a.text().replace("&", "").strip()
+                if key in seen:
+                    continue                            # o ☰ e o botão Arquivo têm itens iguais ("Sobre…")
+                seen.add(key)
+                arq.addAction(a)
+        while arq.actions() and arq.actions()[-1].isSeparator():
+            arq.removeAction(arq.actions()[-1])
+        self.view_menu = self.menu_bar.addMenu("&Exibir")
+        self.panels.build_menu(self.view_menu)
+
     def _build_main_menu(self):
         m = QMenu(self)
         m.addAction(icon("gear", C["text"], 14), "Placa de som e driver…", self.open_audio_dialog)
@@ -261,7 +370,8 @@ class MainWindow(QMainWindow):
         m.addAction(icon("midi", C["text"], 14), "MIDI / Controlador", lambda: self.dock.show_tab(2))
         m.addAction(icon("mixer", C["text"], 14), "Faders / Pads", lambda: self.dock.show_tab(1))
         m.addAction(icon("tap", C["text"], 14), "Teclas de atalho…", self.open_shortcuts)
-        m.addAction(icon("download", C["text"], 14), "Timbres adicionais (pianos)…", lambda: self.open_packs())
+        m.addAction(icon("download", C["text"], 14), "Downloads: timbres e plugins…", lambda: self.open_packs())
+        m.addAction(icon("eq", C["text"], 14), "Plugins no Master (FX)…", lambda: self.open_master_plugin())
         m.addAction(icon("stop", C["text"], 14), "Pânico (soltar todas as notas)", self.panic)
         m.addSeparator()
         m.addAction(icon("info", C["text"], 14), "Sobre o AmpSim…", lambda: self.show_about())
@@ -272,9 +382,21 @@ class MainWindow(QMainWindow):
     def current_kind(self):
         return PAGE_ORDER[self.tabs.currentIndex()]
 
+    def _before_tab(self, index):
+        """Antes de trocar de aba: o que só cabe na aba que sai some primeiro (subjanelas da Pad/Piano,
+        barra de baixo que recolhe); o que a aba nova mostra aparece depois, em _tab_changed."""
+        name = PAGE_ORDER[index]
+        if name != "pads":
+            self.panels.set_page(name)
+        if self._dock_by_page.get(name, False) and not self.dock.collapsed:
+            self.dock.blockSignals(True)              # sem gravar "recolhida" na aba que está saindo
+            self.dock.set_collapsed(True)
+            self.dock.blockSignals(False)
+
     def _tab_changed(self, index):
         name = PAGE_ORDER[index]
         self.topbar.set_page(index)
+        self.panels.set_page(name)
         self.dock.set_collapsed(self._dock_by_page.get(name, False))
         self._dock_collapsed(self.dock.collapsed)
         if name == "pads":
@@ -291,6 +413,28 @@ class MainWindow(QMainWindow):
             self.pages[kind].set_compact(not on)
 
     # ------------------------------------------------------------------ presets e banco
+    def preset_button_menu(self, d):
+        """Botão direito em ◀ / ▶ (preset da aba): mapear num botão do controlador. Na Pad/Piano são os
+        atalhos "Timbre anterior"/"Próximo timbre"; nas outras abas, "<aba>/preset/prev|next"."""
+        from . import ctl_map_ui
+        kind = self.current_kind()
+        if kind != "pads":
+            return ctl_map_ui.menu(self, f"{kind}/preset/{d}", self.topbar)
+        func = "Timbre anterior" if d == "prev" else "Próximo timbre"
+        cur = self.inst.free_map.get(func)
+        from .midi_learn import key_text
+        m = QMenu(self.topbar)
+        m.addSection(f"Pad/Piano › {func}")
+        m.addAction(f"Mapear controle físico…   (atual: {key_text(cur)})", lambda: self.pad_view.learn(func))
+        a = m.addAction("Remover mapeamento", lambda: self.pad_view.unmap(func))
+        a.setEnabled(bool(cur))
+        return m
+
+    def _preset_button_popup(self, b, d, pos):
+        m = self.preset_button_menu(d)
+        if m is not None:
+            m.exec(b.mapToGlobal(pos))
+
     def preset_step(self, d, kind=None):
         kind = kind or self.current_kind()
         if kind != "pads":
@@ -358,8 +502,82 @@ class MainWindow(QMainWindow):
         e.click_offset = -1
         return True
 
+    def open_master_plugin(self):
+        """Janela "Plugins — Master": cadeia FX antes do Compressor/limitador."""
+        return self.open_fx("master")
+
+    def open_fx(self, kind, arg=None):
+        """Janela (não modal, uma por cadeia) dos plugins VST3: kind "layer" (arg = camada 1-4), "master"
+        ou "track" (arg = "guitar"/"bass"/"vocal"). -> a FxChainWindow."""
+        from .plugin_slot import FxChainWindow
+        wins = self.__dict__.setdefault("_fx_windows", {})
+        key = (kind, arg)
+        dlg = wins.get(key)
+        if dlg is None:
+            e, inst = self.engine, self.inst
+            note_fn = None
+            if kind == "layer":
+                get = (lambda n=arg: inst.layer_chain(n))
+                title = f"Plugins — Layer {arg}"
+                intro = (f"Plugins só da camada {arg}, em série (de cima para baixo, até 4), depois de "
+                         "Rotação/Drive/Delay. O painel de cada plugin (⚙) abre numa janela própria.")
+
+                def note_fn(n=arg):
+                    if inst.synth_layer_index() == n - 1:
+                        return ("Timbre do synth AmpSim: os plugins recebem o synth em mono e o resultado "
+                                "volta em mono para a trilha das teclas.")
+                    pads = e.tracks["pads"].values["track"]
+                    if pads.get("use_amp", True) and pads.get("on", True):
+                        return ("Com “Amp e efeitos” ligado nas teclas, os plugins entram antes do "
+                                "amplificador, em mono (Rotação/Drive/Delay da camada ficam de fora).")
+                    return ""
+            elif kind == "master":
+                get = (lambda: e.master_chain)
+                title = "Plugins — Master"
+                intro = ("Entram em tudo o que sai do AmpSim (teclas, pads, bateria, guitarra e baixo), antes do "
+                         "Compressor e do limitador da saída, que continuam protegendo as caixas. Ficam na "
+                         "sessão (não mudam com presets nem músicas).")
+            elif arg == "vocal":
+                get = (lambda: e.tracks["vocal"].fx_chain)
+                title = "Plugins — Vocal"
+                intro = ("Plugins da voz, em série (até 4). Entram antes da dobra/delay/reverb ou no fim da "
+                         "cadeia, conforme “Os plugins entram” na aba Vocal, e sempre antes do volume da trilha. "
+                         "O compressor/limitador do Master continua protegendo as caixas.")
+
+                def vocal_note():
+                    if e.config.blocksize / max(e.fs, 1.0) > 0.0107:
+                        return ("Buffer da placa alto: plugins pesados somados ao buffer atrasam a voz no "
+                                "retorno de quem canta.")
+                    return ""
+                note_fn = vocal_note
+            else:
+                get = (lambda name=arg: e.tracks[name].fx_chain)
+                title = "Plugins — " + {"guitar": "Guitarra", "bass": "Baixo"}.get(arg, str(arg))
+                intro = ("Plugins no fim da trilha, depois do gabinete e dos efeitos e antes do volume da "
+                         "trilha (o plugin no lugar do amplificador continua no seletor do amp).")
+            chain_id = f"L{arg}" if kind == "layer" else "master" if kind == "master" else arg
+            dlg = FxChainWindow(get, title, on_downloads=lambda: self.open_packs(), parent=self,
+                                note_fn=note_fn, intro=intro, chain_id=chain_id)
+            wins[key] = dlg
+        dlg.bind()
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        return dlg
+
+    def refresh_plugins(self):
+        """Plugins instalados/removidos (tela de downloads): recarrega as listas das janelas FX e dos
+        seletores de amp de Guitarra/Baixo."""
+        for dlg in self.__dict__.get("_fx_windows", {}).values():
+            dlg.refresh_lists()
+        for page in self.track_pages.values():
+            amp = getattr(page, "rig", None)
+            if amp is not None and hasattr(amp, "_fill_selector"):
+                amp._fill_selector()
+                amp.refresh()
+
     def open_packs(self, start=None):
-        """Tela "Timbres adicionais"; start = pacote para já começar a baixar."""
+        """Tela "Downloads: timbres e plugins"; start = pacote para já começar a baixar."""
         dlg = PacksDialog(self)
         if start is not None:
             dlg.download(start)
@@ -398,6 +616,8 @@ class MainWindow(QMainWindow):
                  "mute_l4": "Volume camada 4", "mute_pad": "Volume pad contínuo", "mute_drums": "Volume bateria"}
         if action == "mute_all":
             self.toggle_mute_all()
+        elif action == "mute_vocal":
+            self.dock._mute("vocal", not self.engine.tracks["vocal"].values["track"]["mute"])
         elif action in mutes:
             f = mutes[action]
             self.dock._mute(f, f not in inst.mutes)
@@ -588,6 +808,15 @@ class MainWindow(QMainWindow):
     def _on_learn(self):
         self.dock.on_learn()
         self.pad_view.refresh()
+        from . import ctl_map_ui
+        ctl_map_ui.refresh_tags(self)
+
+    def _ctl_flush(self):
+        """Aplica os valores que chegaram dos controles mapeados (abas e plugins) e a tela acompanha."""
+        from . import ctl_map_ui
+        tids = self.inst.ctl.flush()
+        if tids:
+            ctl_map_ui.sync_widgets(self, tids)
 
     def _sync_knob_values(self):
         self.pad_view.refresh_values()
@@ -946,13 +1175,19 @@ class MainWindow(QMainWindow):
         self.topbar.info2.setToolTip(text)
         QTimer.singleShot(ms, self._update_status)
 
+    def notify(self, text, ms=9000):
+        """Aviso que precisa ser lido inteiro: balão por cima da janela (some sozinho ou com um clique) e a
+        mesma frase na linha de status."""
+        self._toast.show_text(text, ms)
+        self.flash_status(text, ms)
+
     def _update_status(self):
         e = self.engine
         cfg = e.config
         if not e.running:
             line1 = f"{cfg.hostapi or 'Sem driver'} · desligado"
             line2 = cfg.output_device or "clique para escolher a placa"
-            for name in ("guitar", "bass"):
+            for name in ("guitar", "bass", "vocal"):
                 self.pages[name].input_label.setText("")
             self.topbar.set_audio(False, line1, line2)
             self.dock.audio_label.setText("Áudio desligado. " + (f"{cfg.hostapi}: {cfg.output_device}"
@@ -966,7 +1201,7 @@ class MainWindow(QMainWindow):
             else f"{cfg.input_device} → {cfg.output_device}"
         self.dock.audio_label.setText(f"{cfg.hostapi} · {dev_txt}\n{int(e.fs)} Hz · buffer {cfg.blocksize} · "
                                       f"latência {li:.1f} + {lo:.1f} = {total:.1f} ms")
-        for name in ("guitar", "bass"):
+        for name in ("guitar", "bass", "vocal"):
             ch = e.input_channel[name]
             if not cfg.input_device:
                 txt = "Sem entrada de áudio escolhida"
@@ -981,8 +1216,10 @@ class MainWindow(QMainWindow):
         e = self.engine
         self.inst.tick(0.033)      # fades do pad contínuo, note-offs programados
         peaks = {name: self.track_pages[name].update_meters() for name in TRACKS}
-        peaks["master"] = max(peaks.values()) * e.master
+        # saída de verdade (depois do master, compressor e limitador) e redução do compressor
+        peaks["master"], peaks["comp_gr"] = e.read_output_meter()
         self.dock.update_meters(peaks)
+        self.remote.meter(peaks["master"], peaks["comp_gr"])
         self._cpu_tick = getattr(self, "_cpu_tick", 0) + 1
         if self._cpu_tick % 30 == 0:                        # 1x por segundo: o áudio caiu?
             self.watch_audio(time.monotonic())
@@ -1024,6 +1261,11 @@ class MainWindow(QMainWindow):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             for name, ts in st.get("tracks", {}).items():
+                if name == "vocal":             # a cena não liga nem desliga o microfone
+                    cur = e.tracks["vocal"].values["track"]
+                    tr = ts.setdefault("values", {}).setdefault("track", {})
+                    for k in ("on", "mute"):
+                        tr[k] = cur[k]
                 e.tracks[name].load_state(ts)
             if st.get("synth"):
                 e.synth.load_state(st["synth"])
@@ -1037,29 +1279,32 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ estado
     def _restore_state(self):
-        st = storage.load_state()
+        st = _as_dict(storage.load_state())     # state.json estragado (lista, número...): começa do padrão
         e = self.engine
-        cfg = dev.AudioConfig.from_dict(st.get("audio")) if st.get("audio") else dev.default_config()
+        audio = _as_dict(st.get("audio"))
+        cfg = dev.AudioConfig.from_dict(audio) if audio else dev.default_config()
         e.config = cfg
-        e.input_channel.update(st.get("input_channel", {}))
-        tracks = st.get("tracks", {})
+        e.input_channel.update({k: v for k, v in _as_dict(st.get("input_channel")).items()
+                                if k in e.input_channel and _int_in(v, 0, 63, None) is not None})
+        tracks = _as_dict(st.get("tracks"))
         for name in TRACKS:
-            if name in tracks:
+            if isinstance(tracks.get(name), dict):
                 e.tracks[name].load_state(tracks[name])
             else:
                 self.track_pages[name].apply_preset_data(FACTORY[name][DEFAULT_PRESET[name]])
         pads = e.tracks["pads"]
-        if "use_amp" not in tracks.get("pads", {}).get("values", {}).get("track", {}):
+        if "use_amp" not in _as_dict(_as_dict(_as_dict(tracks.get("pads")).get("values")).get("track")):
             pads.set_param("track", "use_amp", False)      # teclas limpas por padrão
-        e.instruments.load_state(st.get("instruments"))
-        if "synth" in st:
+        e.instruments.load_state(_clean_like(_as_dict(st.get("instruments")), e.instruments.get_state()))
+        if isinstance(st.get("synth"), dict):
             e.synth.load_state(st["synth"])
-        self.set_master_db(st.get("master_db", 0.0))
-        kb = st.get("keyboard", {})
-        self.kbd.octave = kb.get("octave", 4)
-        self.kbd.velocity = kb.get("velocity", 100)
-        self.dock.kbd_enable.setChecked(kb.get("enabled", True))
-        ui = st.get("ui", {})
+        master = st.get("master_db", 0.0)
+        self.set_master_db(master if isinstance(master, (int, float)) and not isinstance(master, bool) else 0.0)
+        kb = _as_dict(st.get("keyboard"))
+        self.kbd.octave = _int_in(kb.get("octave"), 0, 8, 4)
+        self.kbd.velocity = _int_in(kb.get("velocity"), 1, 127, 100)
+        self.dock.kbd_enable.setChecked(kb.get("enabled", True) is not False)
+        ui = _as_dict(st.get("ui"))
         self.shortcuts.set_keys(ui.get("shortcuts"))
         self.auto_update = ui.get("auto_update", True) is not False
         self.dock.auto_update.setChecked(self.auto_update)
@@ -1071,8 +1316,9 @@ class MainWindow(QMainWindow):
         if isinstance(ui.get("dock_tab"), int) and 0 <= ui["dock_tab"] < 4:
             self.dock.stack.setCurrentIndex(ui["dock_tab"])
         self.pad_view.user_preset = ui.get("keys_user", "") if isinstance(ui.get("keys_user"), str) else ""
+        self.panels.restore(ui.get("janela"))           # subjanelas: posição, tamanho, visíveis e travadas
         tab = st.get("tab", 2)
-        self.tabs.setCurrentIndex(tab if isinstance(tab, int) and 0 <= tab < 3 else 2)
+        self.tabs.setCurrentIndex(tab if _int_in(tab, 0, len(PAGE_ORDER) - 1, None) is not None else 2)
         self._tab_changed(self.tabs.currentIndex())
         self._reload_midi()
         midi_name = st.get("midi_input")
@@ -1099,7 +1345,8 @@ class MainWindow(QMainWindow):
             "running": e.running,
             "ui": {"layout": 2, "auto_update": self.auto_update,
                    "dock_collapsed": dict(self._dock_by_page), "dock_tab": self.dock.stack.currentIndex(),
-                   "keys_user": self.pad_view.user_preset, "shortcuts": dict(self.shortcuts.keys)},
+                   "keys_user": self.pad_view.user_preset, "shortcuts": dict(self.shortcuts.keys),
+                   "janela": self.panels.save()},
         })
 
     def autostart(self):
@@ -1114,4 +1361,29 @@ class MainWindow(QMainWindow):
         if self.midi:
             self.midi.close()
         self.engine.stop()
+        from ..audio import vst
+        vst.host().shutdown()               # fecha o painel de plugin aberto e destrói os plugins trocados
         super().closeEvent(ev)
+
+
+def _as_dict(x):
+    """Pedaço do state.json que deveria ser um dicionário (estragado: vazio, e vale o padrão)."""
+    return x if isinstance(x, dict) else {}
+
+
+def _int_in(x, lo, hi, default):
+    return x if isinstance(x, int) and not isinstance(x, bool) and lo <= x <= hi else default
+
+
+def _clean_like(d, ref):
+    """Tira de `d` os campos que deveriam ser dicionário/lista (como em `ref`) e não são (state.json
+    estragado, ex. instruments.keys = 3): esses ficam no padrão."""
+    out = {}
+    for k, v in d.items():
+        r = ref.get(k)
+        if isinstance(r, dict) and not isinstance(v, dict):
+            continue
+        if isinstance(r, list) and not isinstance(v, list):
+            continue
+        out[k] = v
+    return out

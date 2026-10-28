@@ -180,3 +180,11 @@ class SoundFontEngine:
             self.lib.delete_fluid_synth(self.synth)
             self.lib.delete_fluid_settings(self.settings)
             self.synth = None
+
+    def __del__(self):
+        # motor descartado sem close() (ex.: janela fechada nos testes): libera o sintetizador e os timbres
+        # carregados (dezenas de MB) em vez de deixá-los presos até o programa fechar
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001 - fechando o programa
+            pass

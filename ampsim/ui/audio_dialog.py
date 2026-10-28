@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 
 from ..audio import devices as dev
 
-NO_INPUT = "(nenhuma — só pads)"
+NO_INPUT = "(nenhuma — só pads e teclas)"
 
 API_HINTS = {
     "ASIO": "Menor latência. Use o driver da sua interface ou o ASIO4ALL / FlexASIO.",
@@ -54,6 +54,10 @@ class AudioDialog(QDialog):
         form.addRow("Canal da guitarra:", self.g_ch)
         self.b_ch = QComboBox()
         form.addRow("Canal do baixo:", self.b_ch)
+        self.v_ch = QComboBox()
+        self.v_ch.setToolTip("Entrada da placa onde o microfone está ligado (aba Vocal).\n"
+                             "A trilha Vocal só toca quando ligada na aba Vocal.")
+        form.addRow("Canal do vocal (microfone):", self.v_ch)
 
         self.sr = QComboBox()
         for r in dev.SAMPLE_RATES:
@@ -114,6 +118,7 @@ class AudioDialog(QDialog):
         self._click_choices(cfg.click_offset)
         self._select(self.g_ch, engine.input_channel["guitar"], data=True)
         self._select(self.b_ch, engine.input_channel["bass"], data=True)
+        self._select(self.v_ch, engine.input_channel.get("vocal", 2), data=True)
         self._update_rates()
         self._update_latency()
         if suggest_output:
@@ -236,7 +241,8 @@ class AudioDialog(QDialog):
         if dev.is_asio(self.api.currentText()) and d is not None and d.name != self.out.currentText():
             self._select(self.out, d.name)
         n = d.max_in if d else 0
-        for combo, default in ((self.g_ch, 0), (self.b_ch, min(1, max(n - 1, 0)))):
+        for combo, default in ((self.g_ch, 0), (self.b_ch, min(1, max(n - 1, 0))),
+                               (self.v_ch, min(2, max(n - 1, 0)))):
             cur = combo.currentData()
             combo.clear()
             for c in range(n):
@@ -269,7 +275,12 @@ class AudioDialog(QDialog):
         sr = self.sr.currentData() or 48000
         bs = self.bs.currentData() or 128
         ms = bs / sr * 1000
-        self.lat.setText(f"{ms:.1f} ms por buffer · ida e volta ≈ {2 * ms:.1f} ms + latência do conversor")
+        txt = f"{ms:.1f} ms por buffer · ida e volta ≈ {2 * ms:.1f} ms + latência do conversor"
+        from ..dsp.vocal import latency_note
+        vocal = getattr(self.engine, "tracks", {}).get("vocal")
+        if vocal is not None and vocal.on and latency_note(bs, sr):
+            txt += "\nVocal ligado: buffer alto atrasa a voz no retorno de quem canta (use 128 ou 256)."
+        self.lat.setText(txt)
 
     def _refresh(self):
         self.engine.stop()
@@ -299,5 +310,6 @@ class AudioDialog(QDialog):
             output_offset=self.out_pair.currentData() or 0,
             click_offset=self.click_pair.currentData() if self.click_pair.currentData() is not None else -2,
         )
-        channels = {"guitar": self.g_ch.currentData() or 0, "bass": self.b_ch.currentData() or 0}
+        channels = {"guitar": self.g_ch.currentData() or 0, "bass": self.b_ch.currentData() or 0,
+                    "vocal": self.v_ch.currentData() or 0}
         return cfg, channels

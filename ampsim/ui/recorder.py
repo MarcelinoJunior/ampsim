@@ -24,6 +24,9 @@ def pad_label(name):
     return name.split(" — ")[0]
 
 
+QWIDGETSIZE_MAX_W = 16777215
+
+
 class RecorderPanel(QWidget):
     def __init__(self, win, parent=None):
         super().__init__(parent)
@@ -39,10 +42,12 @@ class RecorderPanel(QWidget):
         self.source = QComboBox()
         self.source.setFocusPolicy(Qt.NoFocus)
         self.source.setToolTip("O que o REC grava: o som do AmpSim (o que você toca) ou uma entrada da placa")
+        self.source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.source.setMinimumContentsLength(6)        # nome longo da entrada não alarga a barra
         row.addWidget(self.source, 1)
         self.rec_btn = QPushButton("● REC")
         self.rec_btn.setFocusPolicy(Qt.NoFocus)
-        self.rec_btn.setFixedSize(84, 26)
+        self.rec_btn.setFixedSize(70, 26)
         self.rec_btn.setStyleSheet(REC_IDLE)
         self.rec_btn.setToolTip(f"Começa a gravar (até {MAX_SECONDS} s). O silêncio do começo e do fim é cortado.")
         self.rec_btn.clicked.connect(self.start)
@@ -56,7 +61,7 @@ class RecorderPanel(QWidget):
         row.addWidget(self.stop_btn)
         self.time = QLabel("")
         self.time.setObjectName("small")
-        self.time.setFixedWidth(64)
+        self.time.setFixedWidth(50)
         row.addWidget(self.time)
         lay.addLayout(row)
 
@@ -65,6 +70,8 @@ class RecorderPanel(QWidget):
         self.bank = QListWidget()
         self.bank.setFocusPolicy(Qt.NoFocus)
         self.bank.setToolTip("Banco de gravações (duplo-clique: ouvir)")
+        self.bank.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)   # nome longo: "…" no fim
+        self.bank.setTextElideMode(Qt.ElideRight)
         self.bank.setStyleSheet("QListWidget { font-size: 9pt; } QListWidget::item { padding: 1px 4px; }")
         self.bank.itemDoubleClicked.connect(lambda *_: self.preview())
         self.bank.currentRowChanged.connect(lambda *_: self._enable())
@@ -75,8 +82,16 @@ class RecorderPanel(QWidget):
         self.assign_btn = self._small_button(" Pôr no pad", "pads", self.assign_menu)
         self.rename_btn = self._small_button(" Renomear", "file", self.rename)
         self.delete_btn = self._small_button(" Apagar", "delete", self.delete)
-        for k, b in enumerate((self.play_btn, self.assign_btn, self.rename_btn, self.delete_btn)):
+        self.tool_buttons = (self.play_btn, self.assign_btn, self.rename_btn, self.delete_btn)
+        for k, b in enumerate(self.tool_buttons):
             col.addWidget(b, k // 2, k % 2)
+        self._compact = False
+        self._wide_w = self.layout().minimumSize().width()      # largura mínima com os textos dos botões
+        self.set_compact(True)
+        self.layout().invalidate()
+        self._narrow_w = self.layout().minimumSize().width()    # só com os ícones
+        self.set_compact(False)
+        self.layout().invalidate()
         col.setRowStretch(2, 1)
         row.addLayout(col)
         lay.addLayout(row, 1)
@@ -94,8 +109,45 @@ class RecorderPanel(QWidget):
         self.loop_timer.start()
         self.load_bank()
 
+    def minimumSizeHint(self):
+        """A barra pode estreitar até o Gravador só com os ícones (ver resizeEvent)."""
+        h = super().minimumSizeHint()
+        return type(h)(min(h.width(), getattr(self, "_narrow_w", h.width())), h.height())
+
+    def resizeEvent(self, e):
+        """Barra estreita (1366 px): os botões Ouvir/Pôr no pad/Renomear/Apagar ficam só com o ícone (o nome
+        vai na dica) para o Gravador caber sem rolar de lado."""
+        super().resizeEvent(e)
+        if not self._compact:
+            lay = self.layout()
+            lay.invalidate()
+            need = lay.minimumSize().width()             # com os textos, já com a fonte e o estilo de verdade
+            if self.width() < need:
+                self._wide_w = need
+                self.set_compact(True)
+                lay.invalidate()
+                narrow = lay.minimumSize().width()
+                if narrow != self._narrow_w:
+                    self._narrow_w = narrow              # só com os ícones, com o estilo de verdade
+                    self.updateGeometry()
+        elif self.width() >= self._wide_w + 8:
+            self.set_compact(False)
+
+    def set_compact(self, on):
+        if on == self._compact:
+            return
+        self._compact = on
+        for b in self.tool_buttons:
+            name = b.property("full_text")
+            b.setText("" if on else name)
+            b.setToolTip(name.strip() if on else "")
+            b.setFixedWidth(34 if on else QWIDGETSIZE_MAX_W)
+            if not on:
+                b.setMinimumWidth(0)
+
     def _small_button(self, text, ic, slot):
         b = QPushButton(text)
+        b.setProperty("full_text", text)
         b.setIcon(icon(ic, C["text"], 13))
         b.setFocusPolicy(Qt.NoFocus)
         b.setFixedHeight(26)

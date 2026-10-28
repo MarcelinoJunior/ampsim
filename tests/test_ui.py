@@ -66,7 +66,7 @@ def _name(monkeypatch, fm, name="Teste", author="Ministério X"):
 # ------------------------------------------------------------------ cabe na tela
 def test_everything_fits_1536x800(win, app):
     """Todas as abas e todas as abas da barra inferior, sem barra de rolagem e sem crescer a janela."""
-    for page in range(3):
+    for page in range(win.tabs.count()):            # Guitarra, Baixo, Pad/Piano e Vocal
         win.tabs.setCurrentIndex(page)
         for tab in range(4):
             win.dock.show_tab(tab)
@@ -85,7 +85,8 @@ def test_top_nav_switches_pages_and_preset_box(win, app):
         app.processEvents()
         assert win.tabs.currentIndex() == i
         assert win.topbar.preset_stack.currentIndex() == i
-        assert [x.isChecked() for x in win.topbar.nav] == [j == i for j in range(3)]
+        assert [x.isChecked() for x in win.topbar.nav] == [j == i for j in range(len(win.topbar.nav))]
+    assert [b.text() for b in win.topbar.nav] == ["Guitarra", "Baixo", "Pad/Piano", "Vocal"]
 
 
 class FakeStream:
@@ -179,7 +180,7 @@ def test_scene_save_and_open_roundtrip(win, monkeypatch, dirs):
     assert win.engine.tracks["guitar"].values["amp"]["gain"] == 8.5
 
 
-@pytest.mark.parametrize("kind", ["guitar", "bass", "pads", "teclas"])
+@pytest.mark.parametrize("kind", ["guitar", "bass", "pads", "vocal", "teclas"])
 def test_export_and_import_each_preset_kind(win, monkeypatch, dirs, kind):
     fm = win.file_menu
     _name(monkeypatch, fm, f"Meu {kind}")
@@ -446,7 +447,7 @@ def test_mixer_moves_volumes_and_effects(win):
     win.dock.show_tab(1)
     strips = {arg: s for (kind, arg), s, *_ in win.dock.strips}
     assert "guitar" not in strips and "Volume teclas" not in strips
-    assert "Volume do metrônomo" not in strips and list(strips)[-1] == "Master"      # Master no lugar do Click
+    assert "Volume do metrônomo" not in strips and list(strips)[-2:] == ["Master", "Compressor"]   # Master no lugar do Click; Compressor depois
     strips["Master"].setValue(50)
     assert abs(win.engine.master - 0.5) < 0.02                  # mesma curva do knob MIDI "Master"
     strips["Volume bateria"].setValue(40)
@@ -801,7 +802,7 @@ def test_volume_faders_in_faders_pads_tab(win):
     win.load_from_bank("ready", "Piano + Pad (culto)")
     f = {func: (s, val, layer) for func, layer, s, val, _n in d.vol_faders}
     assert set(f) == {"Volume camada 1", "Volume camada 2", "Volume camada 3", "Volume camada 4",
-                      "Volume pad contínuo", "Volume bateria"}
+                      "Volume pad contínuo", "Volume bateria", "vocal"}      # + o fader Vocal (com mudo)
     assert not f["Volume camada 3"][0].isEnabled()          # só 2 camadas: L3/L4 esperando o "+"
     pv.select_layer(1)
     f["Volume camada 1"][0].setValue(50)
@@ -1028,6 +1029,15 @@ def test_shortcuts_mute_all_and_actions(win, monkeypatch):
     assert win.current_kind() == "bass"
     win.shortcut_action("tab_pads")
     assert win.current_kind() == "pads"
+    win.shortcut_action("tab_vocal")
+    assert win.current_kind() == "vocal"
+    win.shortcut_action("mute_vocal")
+    v = win.engine.tracks["vocal"].values["track"]
+    assert v["mute"] and win.dock.mute_buttons["vocal"].text() == "MUDO"
+    win.shortcut_action("mute_vocal")
+    assert not v["mute"]
+    assert clean_keys({"rec": "F4"})["tab_vocal"] == ""        # F4 já era de outra ação: a aba fica sem tecla
+    assert clean_keys({})["tab_vocal"] == "F4" and clean_keys(None)["mute_vocal"] == "Alt+V"
     assert conflicts({"a": "Ctrl+R", "b": "Ctrl+R", "c": ""}) == {"Ctrl+R": ["a", "b"]}
     assert clean_keys({"rec": "Ctrl+Shift+R", "inventada": "X"})["rec"] == "Ctrl+Shift+R"
     dlg = ShortcutsDialog(win.shortcuts, win)
@@ -1276,5 +1286,435 @@ def test_pianos_downloaded_by_installer_install_on_first_open(win, monkeypatch, 
     assert packs.sf2_path(fake) is not None and not src.exists()        # instalado e o arquivo apagado
     assert not win.install_pending_packs()                                # nada mais pendente
     for w in QApplication.topLevelWidgets():
-        if w.windowTitle() == "Timbres adicionais":
+        if w.windowTitle() in ("Timbres adicionais", "Downloads: timbres e plugins"):
             w.close()
+
+
+def test_desk_faders_compressor_inverted_and_meters(win, app):
+    """Faders de mesa na barra de baixo: Compressor depois do Master, invertido (0 em cima, 100 embaixo);
+    o trilho do Master acende com o nível da saída e o do Compressor com a redução (de cima para baixo)."""
+    from PySide6.QtCore import QPoint
+    from ampsim.ui.deskfader import DeskFader
+    win.dock.show_tab(1)
+    app.processEvents()
+    strips = {arg: s for (kind, arg), s, *_ in win.dock.strips}
+    assert list(strips)[-2:] == ["Master", "Compressor"]
+    assert all(isinstance(s, DeskFader) for s in strips.values())
+    comp, master = strips["Compressor"], strips["Master"]
+    assert comp.inverted and not master.inverted and comp.meter == "gr" and master.meter == "level"
+    comp.setValue(0)
+    top0 = comp._cap_top()
+    comp.setValue(100)
+    assert top0 < 3 and comp._cap_top() > comp.height() - 30          # 0 em cima, 100 embaixo
+    assert win.inst.levels["comp"] == 100
+    # clicar perto do topo do trilho: volta para 0 (sem compressão)
+    QTest.mousePress(comp, Qt.LeftButton, Qt.NoModifier, QPoint(comp.width() // 2, 2))
+    QTest.mouseRelease(comp, Qt.LeftButton, Qt.NoModifier, QPoint(comp.width() // 2, 2))
+    assert comp.value() == 0 and win.inst.levels["comp"] == 0
+    # o Master continua normal: clicar embaixo = 0
+    master.setValue(50)
+    QTest.mousePress(master, Qt.LeftButton, Qt.NoModifier, QPoint(master.width() // 2, master.height() - 2))
+    QTest.mouseRelease(master, Qt.LeftButton, Qt.NoModifier, QPoint(master.width() // 2, master.height() - 2))
+    assert master.value() == 0
+    # medidores: sobem na hora, descem aos poucos
+    win.dock.update_meters({"master": 1.0, "comp_gr": 10.0})
+    assert master.level == 1.0 and abs(comp.level - 0.5) < 1e-6
+    win.dock.update_meters({"master": 0.0, "comp_gr": 0.0})
+    assert 0.9 < master.level < 1.0 and 0.4 < comp.level < 0.5
+    # o tick lê o medidor de verdade do motor (silêncio: nada aceso)
+    assert win.engine.read_output_meter() == (0.0, 0.0)
+    # mute deixa o cursor vermelho
+    win.dock._mute("Volume camada 1", True)
+    assert strips["Volume camada 1"].muted
+    win.dock._mute("Volume camada 1", False)
+    assert not strips["Volume camada 1"].muted
+
+
+def test_desk_fader_meter_is_never_hidden_by_the_cap():
+    """O cursor é baixo e vazado: com o Master em 100% e pico 0.9 o vermelho do medidor aparece; com o
+    Compressor perto de 0 (cursor em cima) e 2 dB de redução o laranja aparece."""
+    from PySide6.QtGui import QColor
+    from ampsim.ui.deskfader import DeskFader, level_from_gr, level_from_peak
+
+    def center_colors(f):
+        img = f.grab().toImage()
+        x = img.width() // 2
+        out = set()
+        for y in range(img.height()):
+            c = QColor(img.pixel(x, y))
+            if c.red() > 200 and c.green() < 120 and c.blue() < 120:
+                out.add("vermelho")
+            if c.red() > 200 and 120 < c.green() < 200 and c.blue() < 110:
+                out.add("laranja")
+        return out
+
+    m = DeskFader(meter="level")
+    m.resize(36, 75)
+    m.setValue(100)
+    m.set_meter(level_from_peak(0.9))
+    assert "vermelho" in center_colors(m)
+    for v in (0, 5, 10):
+        c = DeskFader(inverted=True, meter="gr")
+        c.resize(36, 75)
+        c.setValue(v)
+        c.set_meter(level_from_gr(2.0))
+        assert "laranja" in center_colors(c), v
+
+
+def test_compressor_strip_reads_off_at_zero(win, app):
+    win.dock.show_tab(1)
+    strips = {arg: (s, val) for (kind, arg), s, val, *_ in win.dock.strips}
+    s, val = strips["Compressor"]
+    s.setValue(0)
+    app.processEvents()
+    assert val.text() == "desl."
+    s.setValue(30)
+    assert val.text() == "30%"
+
+
+# ------------------------------------------------------------------ plugins VST3 (camadas e Master)
+@pytest.fixture()
+def fake_plugins(monkeypatch, tmp_path):
+    """Plugins falsos numa pasta de VST3 do usuário de mentira: fake(nome) -> caminho do pacote .vst3."""
+    import json
+    import numpy as np
+    from ampsim.audio import vst
+
+    class Fake:
+        is_effect, is_instrument = True, False
+
+        def __init__(self, path):
+            self.name = os.path.splitext(os.path.basename(path))[0]
+            self.gain = 0.5
+
+        @property
+        def raw_state(self):
+            return json.dumps({"g": self.gain}).encode()
+
+        @raw_state.setter
+        def raw_state(self, b):
+            self.gain = json.loads(b.decode())["g"]
+
+        def process(self, x, fs, buffer_size=8192, reset=True):
+            return np.array(x, dtype=np.float32) * self.gain
+
+        def reset(self):
+            pass
+
+        def show_editor(self, ev=None):
+            ev.wait(5.0)
+
+    user = tmp_path / "VST3"
+    monkeypatch.setenv("AMPSIM_USER_VST3_DIR", str(user))
+    monkeypatch.setattr(vst, "SYSTEM_VST3_DIR", str(tmp_path / "sys"))
+    monkeypatch.setattr(vst, "_load_plugin", Fake)
+    vst.reset_caches()
+
+    def add(name):
+        d = user / f"{name}.vst3" / "Contents" / "x86_64-win"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{name}.vst3").write_bytes(b"x")
+        return str(user / f"{name}.vst3")
+    return add
+
+
+def _pick(win_fx, row, path, chain):
+    r = win_fx.rows[row]
+    r.combo.setCurrentIndex(r.combo.findData(path))
+    r.combo.activated.emit(r.combo.currentIndex())
+    chain.wait()
+
+
+def test_layer_fx_buttons_and_window(win, app, fake_plugins):
+    from ampsim.ui.plugin_slot import FxButton, FxChainWindow
+    room, hall = fake_plugins("Sala"), fake_plugins("Salao")
+    pv, inst = win.pad_view, win.inst
+    win.tabs.setCurrentWidget(pv)
+    app.processEvents()
+    # botão FX em cada camada do cabeçalho (dentro do botão LAYER) e a linha do painel Instrumento / Layer
+    fx1 = pv.layer_buttons[0].fx_button
+    assert isinstance(fx1, FxButton) and fx1.isVisible() and fx1.parent() is pv.layer_buttons[0]
+    assert fx1.geometry().right() < pv.layer_buttons[0].width() and fx1.y() < 10
+    fx1.click()
+    w1 = win._fx_windows[("layer", 1)]
+    assert isinstance(w1, FxChainWindow) and w1.isVisible() and not w1.isModal()
+    assert w1.windowTitle() == "Plugins — Layer 1"
+    w1.add_btn.click()
+    _pick(w1, 0, room, inst.layer_chain(1))
+    w1.add_btn.click()
+    _pick(w1, 1, hall, inst.layer_chain(1))
+    app.processEvents()
+    assert [s.name for s in inst.layer_chain(1).slots] == ["Sala", "Salao"]
+    fx1.sync()
+    assert fx1.state == "on"
+    pv.select_layer(1)
+    pv.refresh()
+    pv.fx_line.sync()
+    assert "Sala" in pv.fx_line.summary.toolTip() and "Salao" in pv.fx_line.summary.toolTip()
+    pv.select_layer(2)
+    pv.refresh()
+    pv.fx_line.sync()
+    assert "Nenhum plugin" in pv.fx_line.summary.toolTip()
+    pv.fx_line.button.click()
+    assert win._fx_windows[("layer", 2)].windowTitle() == "Plugins — Layer 2"
+    # vai no preset "Meus timbres"
+    st = sharing.sound_state(inst.get_state())
+    assert [len(c) for c in st["layer_chains"]] == [2, 0, 0, 0]
+    # o painel da direita continua cabendo (≈260 px), sem rolar
+    sc = pv.side_panel.findChild(QScrollArea)
+    assert pv.side_panel.minimumSizeHint().width() <= 262
+    assert sc.widget().minimumSizeHint().width() <= sc.viewport().width()
+    for w in win._fx_windows.values():
+        w.close()
+
+
+def test_master_fx_button_in_tab_and_floating_faders(win, app, fake_plugins):
+    from ampsim.ui.plugin_slot import FxChainWindow
+    plate = fake_plugins("Placa")
+    d = win.dock
+    d.show_tab(1)
+    app.processEvents()
+    size = win.size().toTuple()
+    d.master_fx.click()
+    dlg = win._fx_windows[("master", None)]
+    assert isinstance(dlg, FxChainWindow) and dlg.isVisible() and dlg.windowTitle() == "Plugins — Master"
+    dlg.add_btn.click()
+    _pick(dlg, 0, plate, win.engine.master_chain)
+    app.processEvents()
+    d.sync_master_fx()
+    assert win.engine.master_chain.slots[0].ok and C_GREEN in d.master_fx.styleSheet()
+    assert "Placa" in d.master_fx.toolTip()
+    dlg.hide()
+    win.panels.set_visible("faders", True)                       # faders numa subjanela própria
+    app.processEvents()
+    assert d.faders_detached and d.master_fx.isVisible()
+    d.master_fx.click()
+    assert win._fx_windows[("master", None)] is dlg and dlg.isVisible()
+    win.panels.set_visible("faders", False)
+    app.processEvents()
+    assert not d.faders_detached and win.size().toTuple() == size
+    dlg.hide()
+    st = win.engine.instruments.get_state()
+    assert st["master_chain"][0]["path"] == "vst3:Placa.vst3" and "master_chain" not in sharing.sound_state(st)
+
+
+def test_guitar_and_bass_fx_buttons(win, app, fake_plugins):
+    amp = fake_plugins("Ambiente")
+    for name, title in (("guitar", "Plugins — Guitarra"), ("bass", "Plugins — Baixo")):
+        page = win.track_pages[name]
+        win.tabs.setCurrentWidget(page) if page.parent() is not None else None
+        page.fx_btn.click()
+        w = win._fx_windows[("track", name)]
+        assert w.windowTitle() == title
+        w.add_btn.click()
+        _pick(w, 0, amp, win.engine.tracks[name].fx_chain)
+        assert win.engine.tracks[name].fx_chain.slots[0].ok
+        st = win.engine.tracks[name].get_state()
+        assert st["fx_chain"][0]["path"].endswith("Ambiente.vst3")
+        w.close()
+
+
+def test_menu_downloads_and_master_plugin(win, app):
+    texts = [a.text() for a in win.main_menu.actions()]
+    assert "Downloads: timbres e plugins…" in texts and "Plugins no Master (FX)…" in texts
+    assert not any("Timbres adicionais" in t for t in texts)
+
+
+def test_qt_buttons_in_portuguese(app):
+    from PySide6.QtWidgets import QDialogButtonBox
+    from ampsim.ui.i18n import install_translator
+    tr = install_translator(app)
+    try:
+        assert tr is not None
+        box = QDialogButtonBox(QDialogButtonBox.Close | QDialogButtonBox.Cancel | QDialogButtonBox.Yes)
+        texts = {box.button(b).text().replace("&", "") for b in (QDialogButtonBox.Close, QDialogButtonBox.Cancel,
+                                                                    QDialogButtonBox.Yes)}
+        assert texts == {"Fechar", "Cancelar", "Sim"}
+    finally:
+        app.removeTranslator(tr)
+
+
+@pytest.mark.parametrize("size", [(1366, 728), (1536, 864)])
+def test_docking_floating_faders_goes_to_tabs_or_tells_why(app, dirs, size):
+    """QA: "Encaixar" nos Faders soltos parecia não fazer nada (voltava a flutuar sem aviso)."""
+    from ampsim.audio.engine import AudioEngine
+    from ampsim.ui.main_window import MainWindow
+    w = MainWindow(AudioEngine())
+    w.resize(*size)
+    w.show()
+    app.processEvents()
+    try:
+        p, fd = w.panels, w.panels.docks["faders"]
+        w.tabs.setCurrentWidget(w.pad_view)
+        for _ in range(5):
+            app.processEvents()
+        p.actions["faders"].trigger()
+        for _ in range(5):
+            app.processEvents()
+        assert fd.isFloating()
+        w.topbar.info2.setText("")
+        p.titles["faders"].float_btn.click()                      # encaixar
+        for _ in range(8):
+            app.processEvents()
+        assert w.size().toTuple() == size
+        if fd.isFloating():
+            assert "Sem espaço para encaixar" in w.topbar.info2.text()
+        else:
+            assert w.tabifiedDockWidgets(fd)                       # em abas com outra subjanela
+    finally:
+        w.timer.stop()
+        w.close()
+        w.deleteLater()
+        app.processEvents()
+
+
+C_GREEN = "#2fd67b"
+
+
+# ------------------------------------------------------------------ aba Vocal
+def test_vocal_tab_controls_presets_and_fader(win, app, monkeypatch):
+    from ampsim.ui.widgets import Knob
+    from ampsim.vocal_presets import VOCAL_FACTORY
+    v = win.engine.tracks["vocal"]
+    page = win.pages["vocal"]
+    win.topbar.nav[3].click()
+    app.processEvents()
+    assert win.current_kind() == "vocal" and win.tabs.currentWidget() is page
+    assert not v.on and not page.enabled.isChecked()            # microfone começa desligado
+    page.enabled.click()
+    assert v.on and v.running
+    # pedais: LED e knobs mexem na cadeia de voz; cada controle tem um id estável (mapeamento MIDI depois)
+    ids = page.control_ids()
+    for cid in ("vocal/track/on", "vocal/track/mute", "vocal/track/phase", "vocal/track/input_gain",
+                "vocal/comp/amount", "vocal/deess/on", "vocal/reverb/type", "vocal/delay/sync"):
+        assert cid in ids and page.controls_by_id[cid].property("ctrl_id") == cid
+    assert v.values["comp"]["on"] and v.values["deess"]["on"]       # sessão nova: preset ★ Voz limpa (culto)
+    page.controls_by_id["vocal/comp/on"].click()
+    assert not v.values["comp"]["on"]
+    page.controls_by_id["vocal/comp/on"].click()
+    assert v.values["comp"]["on"]
+    knob = page.controls_by_id["vocal/comp/amount"]
+    assert isinstance(knob, Knob)
+    knob.setValue(80, emit=True)
+    assert v.values["comp"]["amount"] == 80
+    page.controls_by_id["vocal/delay/sync"].setCurrentIndex(1)       # no BPM: o Tempo apaga
+    assert v.values["delay"]["sync"] == 1.0 and not page.controls_by_id["vocal/delay/time"].isEnabled()
+    page.controls_by_id["vocal/track/phase"].click()
+    assert v.values["track"]["phase"] and v.VP[0] < 0
+    # preset de fábrica: troca os efeitos, não liga/desliga nem muda o volume
+    v.set_param("track", "volume", -7)
+    page.load_preset("factory", "Ministração (reverb longo)")
+    assert v.values["reverb"]["on"] and v.values["reverb"]["size"] == 90
+    assert v.on and v.values["track"]["volume"] == -7
+    assert [page.preset.itemText(i) for i in range(len(VOCAL_FACTORY))] == ["★ " + n for n in VOCAL_FACTORY]
+    win._sync_bank()
+    # salvar preset meu (sem a trilha) e o banco mostra só os da Vocal nesta aba
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("Minha voz", True)))
+    win.save_preset()
+    assert "Minha voz" in storage.list_user_presets("vocal")
+    assert "track" not in storage.load_user_preset("vocal", "Minha voz")["values"]
+    assert win.bank.page == "vocal"
+    # fader Vocal na mesa e o mudo dele
+    strips = {arg: s for (kind, arg), s, *_ in win.dock.strips}
+    assert list(strips)[-3:] == ["vocal", "Master", "Compressor"]
+    strips["vocal"].setValue(50)                            # 0..100 = -60..+12 dB, como nas outras trilhas
+    assert abs(v.values["track"]["volume"] - (-24.0)) < 1e-6
+    win.dock.mute_buttons["vocal"].click()
+    assert v.values["track"]["mute"]
+    assert page.mute_btn.isChecked() and page.mute_btn.text() == "MUDO"     # a aba acompanha a mesa
+    win.dock.mute_buttons["vocal"].click()
+    assert not v.values["track"]["mute"]
+
+
+def test_vocal_meters_and_warnings(win, app):
+    import numpy as np
+    v = win.engine.tracks["vocal"]
+    page = win.pages["vocal"]
+    win.tabs.setCurrentWidget(page)
+    v.set_switch("on", True)
+    v._snap_gains()
+    v.set_on("comp", True)
+    v.set_param("comp", "amount", 90)
+    v.render(np.full(4800, 1.0))                         # entrada cortada e compressor trabalhando
+    page.update_meters()
+    assert page._clip_lit and page.comp_gr.shown > 3
+    win._tick()                                          # o timer da janela passa a trilha Vocal para a mesa
+    assert "vocal" in [a for (k, a), *_ in win.dock.strips]
+    assert page.warn_label.text() == ""                   # áudio desligado: nada para avisar
+    win.engine.config.blocksize = 1024
+    win.engine.stream = FakeStream()
+    win.engine.n_in = 2
+    win.engine.config.input_device = "Placa"
+    win.engine.input_channel["vocal"] = 2
+    try:
+        page._update_warning()
+        txt = page.warn_label.text()
+        assert "1024" in txt and "canal 3" in txt
+    finally:
+        win.engine.stream = None
+
+
+def test_vocal_fx_window_and_audio_dialog_channel(win, app):
+    from ampsim.ui.audio_dialog import AudioDialog
+    page = win.pages["vocal"]
+    page.fx_btn.click()                                     # o mesmo botão FX das outras trilhas
+    dlg = win._fx_windows[("track", "vocal")]
+    assert dlg.isVisible() and dlg.windowTitle() == "Plugins — Vocal"
+    assert dlg.get_chain() is win.engine.tracks["vocal"].fx_chain
+    dlg.close()
+    d = AudioDialog(win.engine, win)
+    _, channels = d.result_config()
+    assert set(channels) == {"guitar", "bass", "vocal"}
+    d.close()
+
+
+def test_vocal_session_saved_and_old_session_opens_off(app, dirs):
+    import json
+    from ampsim.audio.engine import AudioEngine
+    from ampsim.ui.main_window import MainWindow
+    # sessão antiga (antes da Vocal): sem "vocal" em tracks/input_channel, aba 2
+    storage.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    storage.STATE_FILE.write_text(json.dumps({"tab": 2, "input_channel": {"guitar": 0, "bass": 1},
+                                              "tracks": {}, "ui": {"shortcuts": {"rec": "F4"}}}), encoding="utf-8")
+    w = MainWindow(AudioEngine())
+    try:
+        v = w.engine.tracks["vocal"]
+        assert not v.on and not v.running
+        assert w.engine.input_channel["vocal"] == 2
+        assert w.shortcuts.keys["tab_vocal"] == ""             # F4 era do usuário
+        v.set_switch("on", True)
+        v.set_param("reverb", "mix", 33)
+        w.engine.input_channel["vocal"] = 1
+        w.tabs.setCurrentIndex(3)
+        w.save_state()
+    finally:
+        w.timer.stop()
+        w.close()
+        w.deleteLater()
+        app.processEvents()
+    st = json.loads(storage.STATE_FILE.read_text(encoding="utf-8"))
+    assert st["tab"] == 3 and st["input_channel"]["vocal"] == 1
+    assert st["tracks"]["vocal"]["values"]["reverb"]["mix"] == 33 and "fx_chain" in st["tracks"]["vocal"]
+    w = MainWindow(AudioEngine())
+    try:
+        assert w.current_kind() == "vocal" and w.engine.tracks["vocal"].values["reverb"]["mix"] == 33
+        assert w.engine.tracks["vocal"].on and w.engine.input_channel["vocal"] == 1
+    finally:
+        w.timer.stop()
+        w.close()
+        w.deleteLater()
+        app.processEvents()
+
+
+def test_vocal_scene_does_not_switch_the_microphone(win):
+    v = win.engine.tracks["vocal"]
+    v.set_param("reverb", "mix", 44)
+    st = sharing.sanitize_scene(win.scene_state(), win.inst.get_state())
+    assert "on" not in st["tracks"]["vocal"]["values"]["track"]
+    v.set_param("reverb", "mix", 5)
+    v.set_switch("on", True)
+    win.apply_scene(st)
+    assert v.on and v.values["reverb"]["mix"] == 44           # a cena não desligou o microfone
+    v.set_switch("on", False)
+    win.apply_scene(st)
+    assert not v.on

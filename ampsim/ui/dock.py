@@ -3,10 +3,10 @@
 Pode ser recolhida (fica só a fileira de abas) para sobrar tela nas abas de guitarra/baixo.
 """
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget, QMenu, QPushButton, QSlider,
-    QStackedWidget, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget, QMenu, QPushButton, QScrollArea,
+    QSizePolicy, QStackedWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..instruments import (
@@ -19,20 +19,19 @@ from .icons import icon
 from .midi_learn import key_text
 from .recorder import pad_label
 from .theme import C
+from .deskfader import DeskFader, level_from_gr, level_from_peak
 from .widgets import Meter, ToggleSwitch
 
 TABS = (("Pads", "pads"), ("Faders / Pads", "mixer"), ("MIDI / Controlador", "midi"), ("Configurações", "gear"))
-DOCK_H = 196
+DOCK_H = 192                     # altura padrão da barra aberta
+DOCK_MIN = 150                   # mínima (tela baixa, 1366x768): abaixo de DOCK_H a aba rola por dentro
+MAX_H = 16777215
 VOL_RANGE = next((p.lo, p.hi) for p in TRACK_PARAMS if p.key == "volume")
 MUTE_ON = (f"QPushButton {{ background: {C['red']}; border: 1px solid #ff8a96; color: white; "
            "font-weight: 800; font-size: 8pt; border-radius: 5px; padding: 0; }")
 MUTE_OFF = (f"QPushButton {{ background: {C['card']}; border: 1px solid {C['border2']}; color: {C['dim']}; "
             f"font-weight: 700; font-size: 8pt; border-radius: 5px; padding: 0; }}"
             f"QPushButton:hover {{ border-color: {C['red']}; color: #ff9aa5; }}")
-SLIDER_MUTED = (f"QSlider::groove:vertical {{ background: #5a1e2a; width: 4px; border-radius: 2px; }}"
-                f"QSlider::handle:vertical {{ background: {C['red']}; border: 2px solid #ff8a96; height: 14px;"
-                " width: 14px; margin: 0 -6px; border-radius: 8px; }"
-                "QSlider::add-page:vertical, QSlider::sub-page:vertical { background: #5a1e2a; }")
 # faders da aba Faders / Pads: (rótulo, tipo, função ou trilha, camada, tem mute de emergência)
 STRIPS = (("L1", "func", "Volume camada 1", 1, True), ("L2", "func", "Volume camada 2", 2, True),
           ("L3", "func", "Volume camada 3", 3, True), ("L4", "func", "Volume camada 4", 4, True),
@@ -41,7 +40,19 @@ STRIPS = (("L1", "func", "Volume camada 1", 1, True), ("L2", "func", "Volume cam
           ("Rotação", "func", "Rotação (intensidade)", None, False),
           ("Veloc.\nrotação", "func", "Rotação (velocidade)", None, False),
           ("Reverb", "func", "Reverb", None, False), ("Drive", "func", "Drive", None, False),
-          ("Delay", "func", "Delay (mix)", None, False), ("Master", "func", "Master", None, False))
+          ("Delay", "func", "Delay (mix)", None, False),
+          ("Vocal", "track", "vocal", None, True),           # volume e mute da trilha Vocal (microfone)
+          ("Master", "func", "Master", None, False), ("Comp.", "func", "Compressor", None, False))
+STRIP_W = 42                     # largura de cada fader (14 faders + pads + gravador cabem em 1536 px)
+# Compressor: 0 com o cursor em cima, 100 embaixo (a compressão "corta" os picos de cima para baixo)
+INVERTED = ("Compressor",)
+
+
+def _grow_tile(b, w, h):
+    """Botão de pad com largura fixa e altura que cresce com a barra (mínimo h)."""
+    b.setFixedWidth(w)
+    b.setMinimumHeight(h)
+    b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
 
 
 def _title(text):
@@ -69,6 +80,31 @@ def _short(text, n):
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
+class _FreeLabel(QLabel):
+    """Texto que quebra linha sem pedir altura ao layout (some o que não couber; a dica tem o texto todo)."""
+
+    def hasHeightForWidth(self):
+        return False
+
+    def minimumSizeHint(self):
+        return QSize(40, 0)
+
+    def resizeEvent(self, e):
+        """Mostra só as frases (linhas) que cabem inteiras: nada de linha cortada no meio."""
+        super().resizeEvent(e)
+        full = self.toolTip() or self.text()
+        lines = full.split("\n")
+        shown = ""
+        for k in range(len(lines), 0, -1):
+            cand = "\n".join(lines[:k])
+            self.setText(cand)
+            if QLabel.heightForWidth(self, self.width()) <= self.height():
+                shown = cand
+                break
+        if self.text() != shown:
+            self.setText(shown)
+
+
 class BottomDock(QFrame):
     collapsedChanged = Signal(bool)
 
@@ -80,8 +116,8 @@ class BottomDock(QFrame):
         self.setObjectName("dock")
         self._updating = False
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 6, 10, 8)
-        lay.setSpacing(6)
+        lay.setContentsMargins(10, 2, 10, 2)
+        lay.setSpacing(4)
         bar = QHBoxLayout()
         bar.setSpacing(4)
         self.tab_buttons = []
@@ -104,11 +140,21 @@ class BottomDock(QFrame):
         bar.addWidget(self.collapse_btn)
         lay.addLayout(bar)
         self.stack = QStackedWidget()
-        self.stack.addWidget(self._build_pads())
-        self.stack.addWidget(self._build_mixer())
-        self.stack.addWidget(self._build_midi())
-        self.stack.addWidget(self._build_settings())
+        self.pages = []
+        for page in (self._build_pads(), self._build_mixer(), self._build_midi(), self._build_settings()):
+            sc = QScrollArea()
+            sc.setFrameShape(QFrame.NoFrame)
+            sc.setWidgetResizable(True)
+            sc.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)     # só se a barra ficar apertada
+            sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            sc.setWidget(page)
+            self.pages.append(page)
+            self.stack.addWidget(sc)
+        self.stack.currentChanged.connect(lambda *_: self._fit_height())
         lay.addWidget(self.stack)
+        self.faders_detached = False
+        self.last_height = DOCK_H
+        self.hold_height = 0                   # mínimo provisório ao expandir (já abre na altura escolhida)
         self.collapsed = False
         self.set_collapsed(False)
         self.show_tab(0)
@@ -123,6 +169,7 @@ class BottomDock(QFrame):
         self.refresh()
 
     def set_collapsed(self, on):
+        keep = self.last_height                 # a altura escolhida antes de recolher
         self.collapsed = on
         self.stack.setVisible(not on)
         self.collapse_btn.setIcon(icon("up" if on else "down", C["dim"], 16))
@@ -133,8 +180,51 @@ class BottomDock(QFrame):
         else:
             for j, b in enumerate(self.tab_buttons):
                 b.setChecked(j == self.stack.currentIndex())
-        self.setFixedHeight(48 if on else DOCK_H)
+        panels = getattr(self.win, "panels", None)
+        if panels is not None:
+            panels.release_floor()              # o mínimo extra do centro é refeito depois (collapsedChanged)
+        self._fit_height()
+        self.last_height = keep                 # (o _fit_height pode ter redimensionado já)
         self.collapsedChanged.emit(on)
+
+    def _fit_height(self):
+        """Recolhida: 48 px fixos. Aberta: no mínimo DOCK_MIN (mais a rolagem de lado na janela estreita)
+        e sem máximo: o divisor da janela aumenta a barra (faders mais altos, pads maiores)."""
+        if self.collapsed:
+            self.setFixedHeight(48)
+            return
+        sc = self.stack.currentWidget()
+        extra = 0
+        if sc is not None and sc.isVisible() and sc.widget().minimumSizeHint().width() > sc.viewport().width() + 1:
+            extra = sc.horizontalScrollBar().sizeHint().height()
+        self.setMinimumHeight(max(DOCK_MIN + extra, self.hold_height))
+        self.setMaximumHeight(MAX_H)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if not self.collapsed:
+            self._fit_height()
+            if self.isVisible():
+                self.last_height = self.height()      # para voltar a esta altura ao expandir
+
+    # ------------------------------------------------------------------ Faders em subjanela própria
+    def detach_faders(self):
+        """Tira os faders da aba Faders / Pads (para a subjanela "Faders"). -> o widget dos faders."""
+        if not self.faders_detached:
+            self.mixer_lay.removeWidget(self.faders_box)
+            self.mixer_lay.removeWidget(self.faders_sep)
+            self.faders_sep.hide()
+            self.faders_detached = True
+        return self.faders_box
+
+    def attach_faders(self):
+        """Devolve os faders para a aba Faders / Pads."""
+        if self.faders_detached:
+            self.mixer_lay.insertWidget(0, self.faders_box)
+            self.mixer_lay.insertWidget(1, self.faders_sep)
+            self.faders_sep.show()
+            self.faders_box.show()
+            self.faders_detached = False
 
     # ------------------------------------------------------------------ Pads
     def _build_pads(self):
@@ -144,7 +234,7 @@ class BottomDock(QFrame):
         lay.setSpacing(14)
 
         col = QVBoxLayout()
-        col.setSpacing(6)
+        col.setSpacing(4)
         head = QHBoxLayout()
         head.addWidget(_title("Pads Contínuos"))
         head.addStretch(1)
@@ -162,14 +252,14 @@ class BottomDock(QFrame):
         head.addWidget(eq)
         col.addLayout(head)
         grid = QGridLayout()
-        grid.setSpacing(6)
+        grid.setSpacing(4)
         self.cont_tiles = []
         for i, name in enumerate(CONT_PAD_SOUNDS):
             b = QPushButton(f"Pad {i + 1}\n{name.replace('Pad ', '')}")
             b.setObjectName("tile")
             b.setCheckable(True)
             b.setFocusPolicy(Qt.NoFocus)
-            b.setFixedSize(84, 54)
+            _grow_tile(b, 84, 34)
             b.setToolTip(f"Timbre do pad contínuo: {name}")
             b.clicked.connect(lambda _, n=name: self._cont_sound(n))
             self.cont_tiles.append(b)
@@ -179,7 +269,7 @@ class BottomDock(QFrame):
         lay.addWidget(_vsep())
 
         col = QVBoxLayout()
-        col.setSpacing(6)
+        col.setSpacing(4)
         head = QHBoxLayout()
         head.addWidget(_title("Pads de Bateria"))
         head.addStretch(1)
@@ -189,13 +279,13 @@ class BottomDock(QFrame):
         head.addWidget(self.pad_preset)
         col.addLayout(head)
         grid = QGridLayout()
-        grid.setSpacing(6)
+        grid.setSpacing(4)
         self.drum_tiles = []
         for i in range(PAD_COUNT):
             b = QPushButton("")
             b.setObjectName("tile")
             b.setFocusPolicy(Qt.NoFocus)
-            b.setFixedSize(98, 54)
+            _grow_tile(b, 98, 34)
             b.pressed.connect(lambda i=i: self.inst.pad_hit(i, 110))
             b.setContextMenuPolicy(Qt.CustomContextMenu)
             b.customContextMenuRequested.connect(lambda _, i=i: self.win.choose_pad_sound(i))
@@ -206,11 +296,11 @@ class BottomDock(QFrame):
         lay.addWidget(_vsep())
 
         col = QVBoxLayout()
-        col.setSpacing(6)
+        col.setSpacing(4)
         col.addWidget(_title("Mapeamento de Controlador"))
         card = QPushButton()
         card.setFocusPolicy(Qt.NoFocus)
-        card.setMinimumHeight(54)
+        card.setMinimumHeight(46)
         cl = QHBoxLayout(card)
         ci = QLabel()
         ci.setPixmap(icon("midi", C["text"], 22).pixmap(22, 22))
@@ -221,11 +311,14 @@ class BottomDock(QFrame):
         cl.addWidget(ar)
         card.clicked.connect(lambda: self.show_tab(2))
         col.addWidget(card)
-        self.map_hint = QLabel("Atribua pads, knobs e botões do seu teclado às funções do AmpSim.\n"
+        self.map_hint = _FreeLabel("Atribua pads, knobs e botões do seu teclado às funções do AmpSim.\n"
                                "Botão direito em qualquer knob ou botão da tela: mapear controle físico.")
         self.map_hint.setObjectName("small")
         self.map_hint.setWordWrap(True)
-        col.addWidget(self.map_hint)
+        # a dica não pede altura (barra baixa em 1344x702: sem rolagem); com espaço ela aparece inteira
+        self.map_hint.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
+        self.map_hint.setToolTip(self.map_hint.text())
+        col.addWidget(self.map_hint, 1)
         col.addStretch(1)
         lay.addLayout(col, 1)
         return w
@@ -253,10 +346,13 @@ class BottomDock(QFrame):
         lay = QHBoxLayout(w)
         lay.setContentsMargins(4, 0, 4, 0)
         lay.setSpacing(10)
-
-        col = QVBoxLayout()
+        self.mixer_lay = lay
+        # os faders ficam num widget próprio: dá para levá-los para a subjanela "Faders" (outro monitor)
+        self.faders_box = QWidget()
+        col = QVBoxLayout(self.faders_box)
+        col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(2)
-        col.addWidget(_title("Faders"))
+        # (sem o título "Faders": a aba já se chama Faders / Pads e o trilho ganha altura para o cursor andar)
         row = QHBoxLayout()
         row.setSpacing(2)
         self.strips = []
@@ -268,18 +364,17 @@ class BottomDock(QFrame):
             name = QLabel(label)
             name.setObjectName("small")
             name.setAlignment(Qt.AlignCenter)
-            name.setFixedSize(46, 26)
+            name.setFixedSize(STRIP_W, 26)
             sl = QHBoxLayout()
             sl.setSpacing(2)
             sl.addStretch(1)
-            s = QSlider(Qt.Vertical)
-            s.setRange(0, 100)
-            s.setFocusPolicy(Qt.NoFocus)
-            s.setMinimumHeight(48)
+            # fader de mesa; o Master acende com o nível da saída e o Compressor com a redução (dentro do trilho)
+            s = DeskFader(inverted=arg in INVERTED,
+                          meter="level" if arg in ("Master", "vocal") else "gr" if arg == "Compressor" else None)
             s.valueChanged.connect(lambda v, tg=(kind, arg): self._mix(tg, v))
             sl.addWidget(s)
             m = None
-            if kind == "track" or arg == "Master":
+            if kind == "track" and arg != "vocal":
                 m = Meter()
                 m.setMinimumHeight(48)
                 sl.addWidget(m)
@@ -287,7 +382,7 @@ class BottomDock(QFrame):
             val = QLabel("")
             val.setObjectName("small")
             val.setAlignment(Qt.AlignCenter)
-            val.setFixedWidth(46)
+            val.setFixedWidth(STRIP_W)
             box.addWidget(name)
             box.addLayout(sl, 1)
             box.addWidget(val)
@@ -295,13 +390,23 @@ class BottomDock(QFrame):
                 mute = QPushButton("M")
                 mute.setCheckable(True)
                 mute.setFocusPolicy(Qt.NoFocus)
-                mute.setFixedSize(44, 20)
+                mute.setFixedSize(STRIP_W - 2, 20)
                 mute.setStyleSheet(MUTE_OFF)
-                mute.setToolTip("Mute de emergência: silencia sem mexer no fader (clique de novo para voltar)")
+                mute.setToolTip("Mute de emergência: silencia sem mexer no fader (clique de novo para voltar)"
+                                + ("\nAtalho: Alt+V" if arg == "vocal" else ""))
                 mute.clicked.connect(lambda on, f=arg: self._mute(f, on))
                 box.addWidget(mute, 0, Qt.AlignHCenter)
                 self.mute_buttons[arg] = mute
                 self.vol_faders.append((arg, layer, s, val, name))
+            elif arg == "Master":
+                # plugins VST3 no Master (cadeia FX): no lugar do espaço vazio (a altura não muda); vai
+                # junto com os faders para a subjanela "Faders"
+                from .plugin_slot import FxButton
+                fx = FxButton(lambda: getattr(self.engine, "master_chain", None),
+                              lambda: self.win.open_master_plugin())
+                fx.setFixedSize(STRIP_W - 2, 20)
+                box.addWidget(fx, 0, Qt.AlignHCenter)
+                self.master_fx = fx
             else:
                 spacer = QLabel("")
                 spacer.setFixedHeight(20)
@@ -309,8 +414,9 @@ class BottomDock(QFrame):
             row.addLayout(box)
             self.strips.append(((kind, arg), s, val, m, name, layer))
         col.addLayout(row, 1)
-        lay.addLayout(col)
-        lay.addWidget(_vsep())
+        lay.addWidget(self.faders_box)
+        self.faders_sep = _vsep()
+        lay.addWidget(self.faders_sep)
 
         col = QVBoxLayout()
         col.setSpacing(4)
@@ -322,14 +428,13 @@ class BottomDock(QFrame):
             b = QPushButton("")
             b.setObjectName("tile")
             b.setFocusPolicy(Qt.NoFocus)
-            b.setFixedSize(94, 50)
+            _grow_tile(b, 94, 46)
             b.pressed.connect(lambda i=i: self.inst.pad_hit(i, 110))
             b.setContextMenuPolicy(Qt.CustomContextMenu)
             b.customContextMenuRequested.connect(lambda _, i=i: self.win.choose_pad_sound(i))
             self.mix_pad_tiles.append(b)
             grid.addWidget(b, i // 4, i % 4)
-        col.addLayout(grid)
-        col.addStretch(1)
+        col.addLayout(grid, 1)
         lay.addLayout(col)
         lay.addWidget(_vsep())
 
@@ -357,6 +462,11 @@ class BottomDock(QFrame):
         self.refresh_levels()
 
     def _mute(self, func, on):
+        if func == "vocal":                         # mute da trilha Vocal (com rampa, sem estalo)
+            self.engine.tracks["vocal"].set_switch("mute", on)
+            self.win.refresh_track("vocal")
+            self.refresh_levels()
+            return
         self.inst.set_mute(func, on)
         self.refresh_levels()
         self.win.pad_view.refresh_values()          # o painel da direita também avisa "MUDO"
@@ -370,9 +480,27 @@ class BottomDock(QFrame):
             name.setEnabled(ok)
             if kind == "track":
                 lo, hi = VOL_RANGE
-                db = self.engine.tracks[arg].values["track"]["volume"]
+                tv = self.engine.tracks[arg].values["track"]
+                db = tv["volume"]
                 s.setValue(round((db - lo) / (hi - lo) * 100))
-                val.setText(f"{db:+.0f} dB")
+                mute = self.mute_buttons.get(arg)
+                muted = bool(tv.get("mute", False))
+                off = not tv.get("on", True)
+                if mute is not None:
+                    mute.setChecked(muted)
+                    mute.setText("MUDO" if muted else "M")
+                    mute.setStyleSheet(MUTE_ON if muted else MUTE_OFF)
+                s.set_muted(muted or off)
+                if muted or off:
+                    val.setText("SEM SOM" if muted else "deslig.")
+                    val.setStyleSheet(f"color: {C['red']}; font-weight: 800; font-size: 7pt;" if muted else "")
+                    name.setStyleSheet(f"color: {C['red']}; font-weight: 700;" if muted else "")
+                else:
+                    val.setText(f"{db:+.0f} dB")
+                    val.setStyleSheet("")
+                    name.setStyleSheet("")
+                s.setToolTip("Vocal (microfone)" + (" — MUDO" if muted else " — trilha desligada (liga na aba Vocal)"
+                                                    if off else ""))
                 continue
             _, lo, hi, _ = FUNC_RANGES[arg]
             v = round((func_value(self.engine, arg) - lo) / (hi - lo) * 100) if ok else 0
@@ -383,13 +511,14 @@ class BottomDock(QFrame):
                 mute.setChecked(muted)
                 mute.setText("MUDO" if muted else "M")
                 mute.setStyleSheet(MUTE_ON if muted else MUTE_OFF)
-            s.setStyleSheet(SLIDER_MUTED if muted else "")
+            s.set_muted(muted)
             if muted:                                   # fader lá em cima e sem som: deixa bem claro
                 val.setText("SEM SOM")
-                val.setStyleSheet(f"color: {C['red']}; font-weight: 800;")
+                val.setStyleSheet(f"color: {C['red']}; font-weight: 800; font-size: 7pt;")
                 name.setStyleSheet(f"color: {C['red']}; font-weight: 700;")
             else:
-                val.setText(f"{v}%" if ok else "—")
+                # Compressor em 0: desligado (como "desligado" na tela remota)
+                val.setText(("desl." if arg == "Compressor" and v == 0 else f"{v}%") if ok else "—")
                 val.setStyleSheet("")
                 name.setStyleSheet("")
             s.setToolTip(arg + (" — MUDO (mute de emergência ligado)" if muted else "") if ok
@@ -403,14 +532,25 @@ class BottomDock(QFrame):
         finally:
             self._updating = False
 
+    def sync_master_fx(self):
+        """Botão FX do Master: verde com plugin ligado, vermelho com erro (o botão também se atualiza
+        sozinho a cada 0,4 s)."""
+        if hasattr(self, "master_fx"):
+            self.master_fx.sync()
+
     def update_meters(self, peaks):
         """peaks: {"guitar": p, "bass": p, "pads": p, "master": p}"""
-        if self.collapsed or self.stack.currentIndex() != 1:
+        if (self.collapsed or self.stack.currentIndex() != 1) and not self.faders_detached:
             return
-        for (kind, arg), _s, _v, m, _n, _l in self.strips:
-            if m is None:
-                continue
-            m.push(peaks.get(arg if kind == "track" else "master", 0.0))
+        for (kind, arg), s, _v, m, _n, _l in self.strips:
+            if arg == "Master":
+                s.set_meter(level_from_peak(peaks.get("master", 0.0)))
+            elif arg == "vocal":
+                s.set_meter(level_from_peak(peaks.get("vocal", 0.0)))
+            elif arg == "Compressor":
+                s.set_meter(level_from_gr(peaks.get("comp_gr", 0.0)))
+            elif m is not None:
+                m.push(peaks.get(arg if kind == "track" else "master", 0.0))
 
     # ------------------------------------------------------------------ MIDI / Controlador
     def _build_midi(self):
@@ -423,7 +563,7 @@ class BottomDock(QFrame):
         row = QHBoxLayout()
         row.addWidget(_title("Entrada MIDI"))
         self.midi_combo = _combo()
-        self.midi_combo.setMinimumWidth(180)
+        self.midi_combo.setMinimumWidth(140)
         row.addWidget(self.midi_combo, 1)
         self.rescan = QPushButton()
         self.rescan.setIcon(icon("refresh", C["text"], 15))
@@ -488,7 +628,7 @@ class BottomDock(QFrame):
             g.addWidget(lab, r, 0)
             for i in range(n):
                 c = _combo(choices)
-                c.setMinimumWidth(84)
+                c.setMinimumWidth(78)
                 c.setMaximumWidth(150)
                 c.setStyleSheet("QComboBox { font-size: 8.5pt; padding: 2px 3px; }")   # cabe mais do nome
                 if label.startswith("Pads"):
@@ -509,10 +649,24 @@ class BottomDock(QFrame):
         lay.addLayout(g, 1)
         lay.addWidget(_vsep())
 
+        # última coluna: o monitor MIDI ou a lista de mapeamentos das abas e plugins (mesmo lugar, duas vistas)
         col = QVBoxLayout()
         col.setSpacing(4)
         head = QHBoxLayout()
-        head.addWidget(_title("Monitor MIDI"), 1)
+        head.setSpacing(4)
+        self.view_monitor = QPushButton("Monitor")
+        self.view_maps = QPushButton("Mapeamentos")
+        for i, b in enumerate((self.view_monitor, self.view_maps)):
+            b.setCheckable(True)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setStyleSheet(f"QPushButton {{ padding: 2px 6px; font-size: 8.5pt; border-radius: 5px; }}"
+                            f"QPushButton:checked {{ background: {C['accent2']}; border-color: {C['accent']}; "
+                            "color: white; }")
+            b.clicked.connect(lambda _, i=i: self.show_midi_view(i))
+            head.addWidget(b)
+        self.view_maps.setToolTip("Controles do teclado ligados a Guitarra, Baixo, Vocal, plugins e atalhos do "
+                                  "Pad/Piano (botão direito num knob ou botão dessas telas: mapear)")
+        head.addStretch(1)
         copy = QPushButton()
         copy.setIcon(icon("copy", C["text"], 14))
         copy.setFixedSize(28, 24)
@@ -520,20 +674,153 @@ class BottomDock(QFrame):
         copy.setToolTip("Copiar o registro (para pedir ajuda)")
         copy.clicked.connect(lambda *_: QGuiApplication.clipboard().setText("\n".join(self.midi_log)))
         head.addWidget(copy)
+        self.copy_btn = copy
+        self.rm_map_btn = QPushButton()
+        self.rm_map_btn.setIcon(icon("close", C["text"], 13))
+        self.rm_map_btn.setFixedSize(28, 24)
+        self.rm_map_btn.setFocusPolicy(Qt.NoFocus)
+        self.rm_map_btn.setToolTip("Remover o mapeamento escolhido")
+        self.rm_map_btn.clicked.connect(lambda *_: self.remove_selected_map())
+        head.addWidget(self.rm_map_btn)
         col.addLayout(head)
+        self.midi_views = QStackedWidget()
         self.monitor = QListWidget()
         self.monitor.setFocusPolicy(Qt.NoFocus)
-        self.monitor.setFixedWidth(240)
         self.monitor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.monitor.setTextElideMode(Qt.ElideMiddle)
         self.monitor.setStyleSheet("QListWidget { font-size: 8.5pt; } QListWidget::item { padding: 1px 4px; }")
         self.monitor.setToolTip("O que chega do teclado MIDI e o que o AmpSim faz com cada mensagem.\n"
                                 "Se apertar um botão e nada aparecer, ele não manda MIDI comum.")
         self.monitor.addItem("Mexa no teclado: aparece aqui")
-        col.addWidget(self.monitor, 1)
+        self.midi_views.addWidget(self.monitor)
+        self.map_tree = QTreeWidget()
+        self.map_tree.setHeaderHidden(True)
+        self.map_tree.setColumnCount(2)
+        self.map_tree.setIndentation(10)
+        self.map_tree.setFocusPolicy(Qt.NoFocus)
+        self.map_tree.setStyleSheet("QTreeWidget { font-size: 8.5pt; } QTreeWidget::item { padding: 0px 2px; }")
+        self.map_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.map_tree.customContextMenuRequested.connect(self._map_menu)
+        self.map_tree.itemDoubleClicked.connect(lambda it, _c: self._map_item_learn(it))
+        self.map_tree.currentItemChanged.connect(lambda *_: self._map_buttons())
+        self.midi_views.addWidget(self.map_tree)
+        self.midi_views.setFixedWidth(240)
+        col.addWidget(self.midi_views, 1)
         lay.addLayout(col)
         self.midi_log = []
+        self.show_midi_view(0)
         return w
+
+    # ------------------------------------------------------------------ lista de mapeamentos (abas e plugins)
+    def show_midi_view(self, i):
+        """0 = monitor MIDI, 1 = mapeamentos agrupados por aba."""
+        self.midi_views.setCurrentIndex(i)
+        self.view_monitor.setChecked(i == 0)
+        self.view_maps.setChecked(i == 1)
+        self.copy_btn.setVisible(i == 0)
+        self.rm_map_btn.setVisible(i == 1)
+        if i == 1:
+            self.refresh_map_list()
+
+    def map_rows(self):
+        """[(grupo, id, texto, controle físico, ativo)] de todos os mapeamentos livres: atalhos do Pad/Piano
+        (free_map) e controles das abas Guitarra/Baixo/Vocal e dos plugins (ctl_map), por aba."""
+        from .. import midi_map as MM
+        inst = self.inst
+        rows = [("Pad/Piano", "free:" + f, f, k, True) for f, k in inst.free_map.items()]
+        for tid, e in inst.ctl_map.items():
+            info = MM.target_info(tid)
+            if info is None:
+                continue
+            label = e.get("label") or info["label"]
+            head = info["group"] + " › "
+            text = label[len(head):] if label.startswith(head) else label
+            rows.append((info["group"], tid, text, e["key"], inst.ctl.active(tid, e)))
+        order = {g: i for i, g in enumerate(MM.GROUPS)}
+        rows.sort(key=lambda r: (order.get(r[0], 99), r[2]))
+        return rows
+
+    def refresh_map_list(self):
+        t = self.map_tree
+        cur = t.currentItem()
+        keep = cur.data(0, Qt.UserRole) if cur is not None else None
+        t.clear()
+        rows = self.map_rows()
+        groups = {}
+        for group, tid, text, key, ok in rows:
+            g = groups.get(group)
+            if g is None:
+                g = QTreeWidgetItem([group, ""])
+                f = g.font(0)
+                f.setBold(True)
+                g.setFont(0, f)
+                g.setFlags(g.flags() & ~Qt.ItemIsSelectable)
+                t.addTopLevelItem(g)
+                groups[group] = g
+            it = QTreeWidgetItem([text + ("" if ok else "  (plugin ausente)"), key_text(key).replace(" · canal ", " c")])
+            it.setData(0, Qt.UserRole, tid)
+            it.setToolTip(0, f"{group} › {text}\n{key_text(key)}" + ("" if ok else
+                          "\nO plugin mapeado não está na cadeia: o mapeamento fica inativo")
+                          + "\nBotão direito: mapear de novo ou remover")
+            if not ok:
+                it.setForeground(0, QColor(C["faint"]))
+            g.addChild(it)
+            if tid == keep:
+                t.setCurrentItem(it)
+        if not rows:
+            it = QTreeWidgetItem(["Nenhum ainda: botão direito num knob, LED ou chave", ""])
+            it.setFlags(Qt.NoItemFlags)
+            t.addTopLevelItem(it)
+            it2 = QTreeWidgetItem(["de Guitarra, Baixo, Vocal ou plugins.", ""])
+            it2.setFlags(Qt.NoItemFlags)
+            t.addTopLevelItem(it2)
+        t.expandAll()
+        t.resizeColumnToContents(1)
+        t.setColumnWidth(0, max(120, t.viewport().width() - t.columnWidth(1) - 4))
+        n = len(rows)
+        self.view_maps.setText(f"Mapeamentos ({n})" if n else "Mapeamentos")
+        self._map_buttons()
+
+    def _map_buttons(self):
+        it = self.map_tree.currentItem()
+        self.rm_map_btn.setEnabled(bool(it is not None and it.data(0, Qt.UserRole)))
+
+    def remove_map(self, tid):
+        if tid.startswith("free:"):
+            self.inst.free_map.pop(tid[5:], None)
+            self.win.pad_view.refresh()
+        else:
+            self.inst.ctl_map.pop(tid, None)
+        self.inst.on_learn()
+        self.refresh_map_list()
+
+    def remove_selected_map(self):
+        it = self.map_tree.currentItem()
+        tid = it.data(0, Qt.UserRole) if it is not None else None
+        if tid:
+            self.remove_map(tid)
+
+    def _map_item_learn(self, it):
+        tid = it.data(0, Qt.UserRole) if it is not None else None
+        if not tid:
+            return
+        if tid.startswith("free:"):
+            self.win.pad_view.learn(tid[5:])
+        else:
+            from . import ctl_map_ui
+            ctl_map_ui.learn(self.win, tid, self)
+        self.refresh_map_list()
+
+    def _map_menu(self, pos):
+        it = self.map_tree.itemAt(pos)
+        tid = it.data(0, Qt.UserRole) if it is not None else None
+        if not tid:
+            return
+        m = QMenu(self)
+        m.addSection(it.text(0))
+        m.addAction("Mapear de novo…", lambda: self._map_item_learn(it))
+        m.addAction("Remover mapeamento", lambda: self.remove_map(tid))
+        m.exec(self.map_tree.viewport().mapToGlobal(pos))
 
     def log_midi(self, text):
         """Uma linha no monitor (mais nova em cima); guarda as últimas 200 para copiar."""
@@ -566,10 +853,17 @@ class BottomDock(QFrame):
         m.addAction("Mapear controle físico…", lambda: pv.map_physical(target, i))
         a = m.addAction("Remover mapeamento", lambda: pv.assign_physical(target, i, []))
         a.setEnabled(bool(cur))
+        if target == "button":
+            pv.latch_action(m, i)
         m.exec(widget.mapToGlobal(widget.rect().bottomLeft()))
         self.refresh()
 
     def on_learn(self):
+        if self.midi_views.currentIndex() == 1:
+            self.refresh_map_list()
+        else:                                   # só o número no botão da vista
+            n = len(self.inst.free_map) + len(self.inst.ctl_map)
+            self.view_maps.setText(f"Mapeamentos ({n})" if n else "Mapeamentos")
         steps = self.inst.learn_steps
         learning = bool(steps)
         for w in (self.skip_btn, self.stop_btn, self.learn_label):
@@ -666,10 +960,11 @@ class BottomDock(QFrame):
         panic.setFocusPolicy(Qt.NoFocus)
         panic.clicked.connect(self.win.panic)
         row.addWidget(panic)
-        packs_btn = QPushButton(" Timbres adicionais…")
+        packs_btn = QPushButton(" Timbres e plugins…")
         packs_btn.setIcon(icon("download", C["text"], 15))
         packs_btn.setFocusPolicy(Qt.NoFocus)
-        packs_btn.setToolTip("Pianos gravados de instrumentos reais (Upright, YDP, Salamander): baixar ou remover")
+        packs_btn.setToolTip("Downloads: pianos gravados de instrumentos reais (Upright, YDP, Salamander) e "
+                             "plugins de efeito grátis (Dragonfly Reverb): baixar ou remover")
         packs_btn.clicked.connect(lambda *_: self.win.open_packs())
         about = QPushButton(" Sobre e licenças")
         about.setIcon(icon("info", C["text"], 15))

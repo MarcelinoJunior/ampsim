@@ -57,7 +57,7 @@ class FileMenu(QMenu):
     def _fill_export(self):
         m = self.export_menu
         m.clear()
-        for kind in ("guitar", "bass", "pads", "teclas"):
+        for kind in ("guitar", "bass", "pads", "vocal", "teclas"):
             m.addAction(KIND_TITLES[kind] + "…", lambda k=kind: self.export_preset(k))
 
     def _track_data(self, kind):
@@ -195,7 +195,7 @@ class FileMenu(QMenu):
             self.win.load_from_bank("keys_user", storage._safe(name))
             self.win._rebuild_ready_combo()
         else:
-            data = sharing.sanitize_track(d)
+            data = sharing.sanitize_kind(kind, d)
             if kind == "pads":
                 data["synth"] = sharing.sanitize_synth(d.get("synth"))
             storage.save_user_preset(kind, name, data)
@@ -212,7 +212,7 @@ class FileMenu(QMenu):
         self.win.flash_status(f"Preset “{doc['nome']}” importado." + missing)
 
     def _missing_capture(self, kind, d):
-        if kind not in TRACKS:
+        if kind not in TRACKS or kind == "vocal":      # a Vocal não usa captura NAM
             return ""
         from ..dsp.nam import list_captures
 

@@ -17,9 +17,14 @@ PANELS = (
     ("timbre", "Timbre atual e presets"),
     ("guitarra", "Guitarra (presets, pedais e volume)"),
     ("baixo", "Baixo (presets, pedais e volume)"),
+    ("vocal", "Vocal (microfone: presets, efeitos e volume)"),
 )
 PANEL_IDS = tuple(p for p, _ in PANELS)
 DEFAULT_PORT = 8080
+# versão do webserver.json: 2 = já migrado para as telas da 1.3 (Vocal). As migrações de telas (quem via
+# tudo passa a ver as telas novas) rodam UMA vez, em arquivo sem versão ou mais antigo; depois disso as
+# listas são respeitadas como estão (dá para ter um perfil com tudo menos a Vocal).
+VERSION = 2
 ITER = 120_000
 
 
@@ -28,22 +33,25 @@ def path():
 
 
 def default():
-    return {"ligado": False, "porta": DEFAULT_PORT, "login": False,
+    return {"versao": VERSION, "ligado": False, "porta": DEFAULT_PORT, "login": False,
             "aberto": list(PANEL_IDS),            # o que vê quem entra sem login (login desligado)
             "usuarios": []}                        # [{"nome", "sal", "hash", "telas": [...]}]
 
 
 # todas as telas da 1.1 (antes de Guitarra/Baixo; Tempo e Mute saíram): quem via tudo continua vendo tudo
 OLD_ALL = {"pads", "faders", "setlist", "tempo", "emergencia", "timbre"}
+# todas as telas da 1.2 (antes da Vocal): quem via tudo passa a ver a Vocal também
+V12_ALL = {"pads", "faders", "setlist", "timbre", "guitarra", "baixo"}
 
 
-def clean_panels(v):
-    """Telas válidas, na ordem da página. Quem via todas as telas antigas continua vendo tudo; um perfil
-    restrito continua restrito (só Tempo/Mute, que saíram, vira nenhuma tela: o PC mostra "nenhuma tela")."""
+def clean_panels(v, migrate=False):
+    """Telas válidas, na ordem da página. migrate=True (só ao abrir um arquivo de versão antiga): quem via
+    todas as telas da 1.1 ou da 1.2 passa a ver tudo; um perfil restrito continua restrito (só Tempo/Mute,
+    que saíram, vira nenhuma tela: o PC mostra "nenhuma tela")."""
     if not isinstance(v, list):
         return []
     old = set(x for x in v if isinstance(x, str))
-    if OLD_ALL <= old:
+    if migrate and (OLD_ALL <= old or V12_ALL <= old):
         return list(PANEL_IDS)
     return [p for p in PANEL_IDS if p in old]
 
@@ -56,19 +64,26 @@ def load():
     out = default()
     if not isinstance(d, dict):
         return out
+    ver = d.get("versao")
+    migrate = not (isinstance(ver, int) and not isinstance(ver, bool) and ver >= VERSION)
     out["ligado"] = bool(d.get("ligado", False))
     port = d.get("porta")
     out["porta"] = port if isinstance(port, int) and 1024 <= port <= 65535 else DEFAULT_PORT
     out["login"] = bool(d.get("login", False))
     if isinstance(d.get("aberto"), list):
-        out["aberto"] = clean_panels(d["aberto"])
+        out["aberto"] = clean_panels(d["aberto"], migrate)
     users = []
     for u in d.get("usuarios", []) if isinstance(d.get("usuarios"), list) else []:
         if isinstance(u, dict) and isinstance(u.get("nome"), str) and isinstance(u.get("hash"), str) \
                 and isinstance(u.get("sal"), str) and u["nome"].strip():
             users.append({"nome": u["nome"].strip()[:40], "sal": u["sal"], "hash": u["hash"],
-                          "telas": clean_panels(u.get("telas", []))})
+                          "telas": clean_panels(u.get("telas", []), migrate)})
     out["usuarios"] = users
+    if migrate:
+        try:
+            save(out)                 # migrado: grava a versão (a próxima abertura respeita as listas)
+        except OSError:
+            pass
     return out
 
 
@@ -76,7 +91,7 @@ def save(cfg):
     p = path()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(cfg, indent=1, ensure_ascii=False), encoding="utf-8")
+    tmp.write_text(json.dumps(dict(cfg, versao=VERSION), indent=1, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)
 
 

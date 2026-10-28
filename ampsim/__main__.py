@@ -95,9 +95,37 @@ def selftest(out_path):
             e._render(None, out, 256)
             peak = max(peak, float(np.abs(out).max()))
         lines.append(f"pico do som: {peak:.3f}")
+        # trilha Vocal: microfone simulado (canal do vocal) passando pela cadeia de voz (dsp/vocal.py)
+        from .vocal_presets import DEFAULT_VOCAL_PRESET, VOCAL_FACTORY
+        voc = e.tracks["vocal"]
+        voc.apply_preset(VOCAL_FACTORY[DEFAULT_VOCAL_PRESET])
+        voc.set_switch("on", True)
+        ch = e.input_channel["vocal"]
+        mic = np.zeros((256, ch + 1), np.float32)
+        voc.meters()
+        vpk = 0.0
+        for b in range(40):
+            mic[:, ch] = 0.2 * np.sin(2 * np.pi * 220.0 * (np.arange(256) + b * 256) / e.fs)
+            e._render(mic, out, 256)
+            vpk = max(vpk, voc.meters()[1])
+        voc.set_switch("on", False)
+        vocal_ok = 0.05 < vpk < 2.0 and bool(np.isfinite(out).all())
+        lines.append(f"trilha Vocal (microfone simulado): {'ok' if vocal_ok else 'NÃO'} · pico {vpk:.3f}")
         from .ui.widgets import PHOTO_DIR
         lines.append(f"fotos dos timbres: {len(os.listdir(PHOTO_DIR))}")
-        ok = peak > 0.01 and np.isfinite(out).all() and inst.sf is not None
+        ok = peak > 0.01 and np.isfinite(out).all() and inst.sf is not None and vocal_ok
+        # plugins VST3: o pedalboard entrou no pacote e a thread dos plugins responde
+        from .audio import vst
+        vst_ok = vst.available() and vst.host().call(lambda: True, timeout=10.0) is True
+        lines.append(f"plugins VST3 (pedalboard): {'ok' if vst_ok else 'NÃO'} · "
+                     f"{len(vst.find_plugins())} plugin(s) nas pastas de VST3")
+        ok = ok and vst_ok
+        # textos do Qt em português (o qtbase_pt_BR.qm entrou no pacote)
+        from .ui.i18n import load_translator
+        tr = load_translator()
+        tr_ok = tr is not None and tr.translate("QPlatformTheme", "Close") == "Fechar"
+        lines.append(f"tradução do Qt (pt_BR): {'ok' if tr_ok else 'NÃO'}")
+        ok = ok and tr_ok
         # tela remota: servidor só em 127.0.0.1, a página e o QR code (websockets e segno no pacote)
         import urllib.request
 
@@ -142,6 +170,9 @@ def main():
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AmpSim.App")
     app = QApplication(sys.argv)
     app.setApplicationName("AmpSim")
+    from .ui.i18n import install_translator
+
+    install_translator(app)            # Fechar/Cancelar/Sim/Não… dos diálogos do Qt em português
     icon = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "ampsim.ico")
     if os.path.exists(icon):
         app.setWindowIcon(QIcon(icon))
